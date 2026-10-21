@@ -1,0 +1,55 @@
+From 467b892ff3fc2a611b3700701cb6af477ab3f14f Mon Sep 17 00:00:00 2001
+From: Nick Kennedy <nick@nick-kennedy.com>
+Date: Wed, 21 Oct 2026 17:53:57 +0100
+Subject: [PATCH 1/5] kosmickrisp: keep fixed resolves alongside custom resolve
+
+Codex's fixed-depth candidate (codex/custom-resolve-fixed-depth), committed
+here unchanged as the base for custom resolve debugging.
+
+Generated-by: LLM
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ src/kosmickrisp/vulkan/kk_cmd_draw.c | 6 ++++--
+ 1 file changed, 4 insertions(+), 2 deletions(-)
+
+diff --git a/src/kosmickrisp/vulkan/kk_cmd_draw.c b/src/kosmickrisp/vulkan/kk_cmd_draw.c
+index 8f627aa..16a4b73 100644
+--- a/src/kosmickrisp/vulkan/kk_cmd_draw.c
++++ b/src/kosmickrisp/vulkan/kk_cmd_draw.c
+@@ -540,6 +540,7 @@ kk_CmdEndRendering2KHR(VkCommandBuffer commandBuffer,
+    for (uint32_t i = 0; i < render->color_att_count; i++) {
+       bool attachment_meta_resolve =
+          render->color_att[i].resolve_mode != VK_RESOLVE_MODE_NONE &&
++         render->color_att[i].resolve_mode != VK_RESOLVE_MODE_CUSTOM_BIT_EXT &&
+          !kk_attachment_do_renderpass_resolve(
+             &render->color_att[i], render->rendering_to_whole_framebuffer,
+             VK_IMAGE_ASPECT_COLOR_BIT);
+@@ -567,6 +568,7 @@ kk_CmdEndRendering2KHR(VkCommandBuffer commandBuffer,
+ 
+    bool depth_meta_resolve =
+       render->depth_att.resolve_mode != VK_RESOLVE_MODE_NONE &&
++      render->depth_att.resolve_mode != VK_RESOLVE_MODE_CUSTOM_BIT_EXT &&
+       !kk_attachment_do_renderpass_resolve(
+          &render->depth_att, render->rendering_to_whole_framebuffer,
+          VK_IMAGE_ASPECT_DEPTH_BIT);
+@@ -592,6 +594,7 @@ kk_CmdEndRendering2KHR(VkCommandBuffer commandBuffer,
+ 
+    bool stencil_meta_resolve =
+       render->stencil_att.resolve_mode != VK_RESOLVE_MODE_NONE &&
++      render->stencil_att.resolve_mode != VK_RESOLVE_MODE_CUSTOM_BIT_EXT &&
+       !kk_attachment_do_renderpass_resolve(
+          &render->stencil_att, render->rendering_to_whole_framebuffer,
+          VK_IMAGE_ASPECT_STENCIL_BIT);
+@@ -633,8 +636,7 @@ kk_CmdEndRendering2KHR(VkCommandBuffer commandBuffer,
+    mtl_release(cmd->state.gfx.render_pass_descriptor);
+    cmd->state.gfx.render_pass_descriptor = NULL;
+ 
+-   if (render->flags &
+-       (VK_RENDERING_SUSPENDING_BIT | VK_RENDERING_CUSTOM_RESOLVE_BIT_EXT))
++   if (render->flags & VK_RENDERING_SUSPENDING_BIT)
+       need_meta_resolve = false;
+ 
+    memset(render, 0, sizeof(*render));
+-- 
+2.54.0 (Apple Git-157)
+

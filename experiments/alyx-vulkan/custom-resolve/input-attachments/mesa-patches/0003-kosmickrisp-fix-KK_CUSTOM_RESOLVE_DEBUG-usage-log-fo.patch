@@ -1,0 +1,32 @@
+From f09f2fef0c2b453f031972171534ed1422c93827 Mon Sep 17 00:00:00 2001
+From: Nick Kennedy <nick@nick-kennedy.com>
+Date: Wed, 21 Oct 2026 17:57:33 +0100
+Subject: [PATCH 3/5] kosmickrisp: fix KK_CUSTOM_RESOLVE_DEBUG usage log format
+
+AI-written commit text (biblioklept).
+
+Generated-by: LLM
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ src/kosmickrisp/vulkan/kk_cmd_draw.c | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/src/kosmickrisp/vulkan/kk_cmd_draw.c b/src/kosmickrisp/vulkan/kk_cmd_draw.c
+index 3ffb9ea..dcb4541 100644
+--- a/src/kosmickrisp/vulkan/kk_cmd_draw.c
++++ b/src/kosmickrisp/vulkan/kk_cmd_draw.c
+@@ -572,9 +572,9 @@ kk_custom_resolve_debug_log(const struct kk_rendering_state *render)
+                 "samples=%u usage=0x%x -> resolve fmt=%d %ux%u layers=%u usage=0x%x",
+                 i, a->resolve_mode, a->load_op, a->store_op, a->vk_format,
+                 im->extent.width, im->extent.height, im->array_layers,
+-                im->samples, im->usage, rim ? rim->format : 0,
++                im->samples, (unsigned)im->usage, rim ? rim->format : 0,
+                 rim ? rim->extent.width : 0, rim ? rim->extent.height : 0,
+-                rim ? rim->array_layers : 0, rim ? rim->usage : 0);
++                rim ? rim->array_layers : 0, rim ? (unsigned)rim->usage : 0);
+    }
+    mesa_logi("kk-cr: depth mode=0x%x stencil mode=0x%x whole=%d force_store=%d",
+              render->depth_att.resolve_mode, render->stencil_att.resolve_mode,
+-- 
+2.54.0 (Apple Git-157)
+

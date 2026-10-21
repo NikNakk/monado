@@ -1,0 +1,49 @@
+From c8e17c9784475a745e7be26fb5d4cd2313b9197c Mon Sep 17 00:00:00 2001
+From: Nick Kennedy <nick@nick-kennedy.com>
+Date: Wed, 21 Oct 2026 00:29:13 +0100
+Subject: [PATCH 2/2] kosmickrisp: accept imported textures without ShaderWrite
+ when not storage
+
+KosmicKrisp asks for MTLTextureUsageShaderWrite on any TRANSFER_DST
+image, but its image copies use MTL4 encoder copy commands and blits
+render, so neither needs it. Monado's service creates swapchain textures
+with RenderTarget|ShaderRead only, which made every import fail.
+
+Tolerate a missing ShaderWrite when the image has no STORAGE usage, and
+log the missing bits.
+
+Generated-by: LLM
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ src/kosmickrisp/vulkan/kk_metal_objects.c | 8 ++++++--
+ 1 file changed, 6 insertions(+), 2 deletions(-)
+
+diff --git a/src/kosmickrisp/vulkan/kk_metal_objects.c b/src/kosmickrisp/vulkan/kk_metal_objects.c
+index 5d093d4..58d5891 100644
+--- a/src/kosmickrisp/vulkan/kk_metal_objects.c
++++ b/src/kosmickrisp/vulkan/kk_metal_objects.c
+@@ -45,7 +45,10 @@ kk_image_adopt_texture(struct kk_device *dev, struct kk_image *image,
+    struct kk_image_plane *plane = &image->planes[0];
+    struct mtl_texture_mismatch mm;
+    mtl_texture_check_layout(texture, dev->mtl_handle, &plane->layout, &mm);
+-   uint32_t missing = mm.missing_usage & ~MTL_TEXTURE_USAGE_PIXEL_FORMAT_VIEW;
++   uint32_t tolerated = MTL_TEXTURE_USAGE_PIXEL_FORMAT_VIEW;
++   if (!(image->vk.usage & VK_IMAGE_USAGE_STORAGE_BIT))
++      tolerated |= MTL_TEXTURE_USAGE_SHADER_WRITE;
++   uint32_t missing = mm.missing_usage & ~tolerated;
+    if (mm.device || mm.type || mm.format || mm.extent || mm.levels ||
+        mm.samples || mm.layers || missing) {
+       mesa_loge("kk: VkImportMetalTextureInfoEXT rejected: device=%d type=%d "
+@@ -56,7 +59,8 @@ kk_image_adopt_texture(struct kk_device *dev, struct kk_image *image,
+       return vk_error(dev, VK_ERROR_INVALID_EXTERNAL_HANDLE);
+    }
+    if (mm.missing_usage)
+-      mesa_logw("kk: imported texture lacks MTLTextureUsagePixelFormatView");
++      mesa_logw("kk: imported texture lacks MTLTextureUsage 0x%x",
++                mm.missing_usage);
+ 
+    plane->mtl_handle = mtl_retain(texture);
+    return VK_SUCCESS;
+-- 
+2.54.0 (Apple Git-157)
+

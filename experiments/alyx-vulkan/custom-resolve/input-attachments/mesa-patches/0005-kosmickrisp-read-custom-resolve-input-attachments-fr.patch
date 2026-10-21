@@ -1,0 +1,266 @@
+From 1574cded6f3180d4a95522f529f70bbdc9029afe Mon Sep 17 00:00:00 2001
+From: Nick Kennedy <nick@nick-kennedy.com>
+Date: Wed, 21 Oct 2026 18:15:21 +0100
+Subject: [PATCH 5/5] kosmickrisp: read custom resolve input attachments from
+ the attachments
+
+VK_EXT_custom_resolve says reads from a resolving fragment shader's input
+attachments read the multisampled colour or depth attachment. KosmicKrisp
+lowered them to descriptor reads, so the result depended on whatever
+image the application had bound. Native Half-Life: Alyx binds a
+single-sample placeholder there, so its resolved scene was black.
+
+For pipelines created with customResolve, rewrite input attachment
+texel fetches to take their texture from a new root table array, picked
+through the input attachment index map. vkCmdBeginCustomResolveEXT fills
+that array with the multisampled colour, depth and stencil attachments.
+The custom resolve flag and colour input map join the fragment shader
+key. Also adds the KK_CUSTOM_RESOLVE_DEBUG=log view and descriptor
+logging used to find this.
+
+AI-written commit text (biblioklept).
+
+Generated-by: LLM
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ src/kosmickrisp/vulkan/kk_cmd_buffer.h     |  2 +
+ src/kosmickrisp/vulkan/kk_cmd_draw.c       | 18 +++++
+ src/kosmickrisp/vulkan/kk_descriptor_set.c | 12 ++++
+ src/kosmickrisp/vulkan/kk_image_view.c     | 20 ++++++
+ src/kosmickrisp/vulkan/kk_shader.c         | 82 ++++++++++++++++++++++
+ 5 files changed, 134 insertions(+)
+
+diff --git a/src/kosmickrisp/vulkan/kk_cmd_buffer.h b/src/kosmickrisp/vulkan/kk_cmd_buffer.h
+index dcafb2f..ff746ef 100644
+--- a/src/kosmickrisp/vulkan/kk_cmd_buffer.h
++++ b/src/kosmickrisp/vulkan/kk_cmd_buffer.h
+@@ -60,6 +60,8 @@ struct kk_root_descriptor_table {
+ 
+    /* Start index in dynamic_buffers where each set starts */
+    uint8_t set_dynamic_buffer_start[KK_MAX_SETS];
++
++   uint64_t custom_resolve_inputs[KK_MAX_RTS + 2];
+ };
+ 
+ struct kk_descriptor_state {
+diff --git a/src/kosmickrisp/vulkan/kk_cmd_draw.c b/src/kosmickrisp/vulkan/kk_cmd_draw.c
+index dcb4541..cf1f27d 100644
+--- a/src/kosmickrisp/vulkan/kk_cmd_draw.c
++++ b/src/kosmickrisp/vulkan/kk_cmd_draw.c
+@@ -786,6 +786,19 @@ kk_CmdBeginCustomResolveEXT(
+       .sType = VK_STRUCTURE_TYPE_RENDERING_END_INFO_KHR,
+    };
+ 
++   uint64_t resolve_inputs[KK_MAX_RTS + 2] = {0};
++   for (uint32_t i = 0; i < render->color_att_count && i < KK_MAX_RTS; i++) {
++      if (render->color_att[i].iview)
++         resolve_inputs[i] =
++            render->color_att[i].iview->planes[0].input_gpu_resource_id;
++   }
++   if (render->depth_att.iview)
++      resolve_inputs[KK_MAX_RTS] =
++         render->depth_att.iview->planes[0].input_gpu_resource_id;
++   if (render->stencil_att.iview)
++      resolve_inputs[KK_MAX_RTS + 1] =
++         render->stencil_att.iview->planes[0].input_gpu_resource_id;
++
+    enum kk_custom_resolve_debug_mode debug = kk_custom_resolve_debug_mode();
+    if (debug != KK_CR_DEBUG_NONE)
+       kk_custom_resolve_debug_log(render);
+@@ -801,6 +814,11 @@ kk_CmdBeginCustomResolveEXT(
+    kk_CmdEndRendering2KHR(commandBuffer, &end_info);
+    kk_CmdBeginRendering(commandBuffer, &rendering_info);
+ 
++   struct kk_descriptor_state *desc = &cmd->state.gfx.descriptors;
++   memcpy(desc->root.custom_resolve_inputs, resolve_inputs,
++          sizeof(resolve_inputs));
++   desc->root_dirty = true;
++
+    if (debug == KK_CR_DEBUG_MAGENTA && debug_resolve) {
+       const VkClearAttachment clear = {
+          .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+diff --git a/src/kosmickrisp/vulkan/kk_descriptor_set.c b/src/kosmickrisp/vulkan/kk_descriptor_set.c
+index 5f56abc..c5c74cb 100644
+--- a/src/kosmickrisp/vulkan/kk_descriptor_set.c
++++ b/src/kosmickrisp/vulkan/kk_descriptor_set.c
+@@ -18,6 +18,8 @@
+ #include "kk_sampler.h"
+ 
+ #include "util/format/u_format.h"
++#include "util/log.h"
++#include "util/u_debug.h"
+ #include "util/half_float.h"
+ 
+ static inline uint32_t
+@@ -71,6 +73,16 @@ get_sampled_image_view_desc(VkDescriptorType descriptor_type,
+             assert(view->planes[plane].sampled_gpu_resource_id);
+             desc[plane].image_gpu_resource_id =
+                view->planes[plane].input_gpu_resource_id;
++            if (!strcmp(debug_get_option("KK_CUSTOM_RESOLVE_DEBUG", ""), "log")) {
++               static uint32_t logged;
++               if (logged++ < 64)
++                  mesa_logi("kk-cr-desc: input view=%p samples=%u type=%d "
++                            "input=%llx sampled=%llx",
++                            (void *)view, view->vk.image->samples,
++                            view->vk.view_type,
++                            (unsigned long long)view->planes[plane].input_gpu_resource_id,
++                            (unsigned long long)view->planes[plane].sampled_gpu_resource_id);
++            }
+          } else {
+             assert(view->planes[plane].sampled_gpu_resource_id);
+             desc[plane].image_gpu_resource_id =
+diff --git a/src/kosmickrisp/vulkan/kk_image_view.c b/src/kosmickrisp/vulkan/kk_image_view.c
+index 63975df..fe23656 100644
+--- a/src/kosmickrisp/vulkan/kk_image_view.c
++++ b/src/kosmickrisp/vulkan/kk_image_view.c
+@@ -18,6 +18,9 @@
+ 
+ #include "vk_format.h"
+ 
++#include "util/log.h"
++#include "util/u_debug.h"
++
+ static enum pipe_swizzle
+ vk_swizzle_to_pipe(VkComponentSwizzle swizzle)
+ {
+@@ -240,6 +243,23 @@ kk_image_view_init(struct kk_device *dev, struct kk_image_view *view,
+       }
+    }
+ 
++   if (image->vk.samples > 1 &&
++       !strcmp(debug_get_option("KK_CUSTOM_RESOLVE_DEBUG", ""), "log")) {
++      static uint32_t logged;
++      if (logged++ < 64)
++         mesa_logi("kk-cr-view: view=%p image=%p type=%d fmt=%d image_fmt=%d "
++                   "layers=%u+%u/%u aspects=0x%x usage=0x%x samples=%u "
++                   "sampled=%llx input=%llx render=%p",
++                   (void *)view, (void *)image, view->vk.view_type,
++                   view->vk.format, image->vk.format,
++                   view->vk.base_array_layer, view->vk.layer_count,
++                   image->vk.array_layers, view->vk.aspects,
++                   (unsigned)view->vk.usage, image->vk.samples,
++                   (unsigned long long)view->planes[0].sampled_gpu_resource_id,
++                   (unsigned long long)view->planes[0].input_gpu_resource_id,
++                   view->planes[0].mtl_handle_render);
++   }
++
+    return VK_SUCCESS;
+ }
+ 
+diff --git a/src/kosmickrisp/vulkan/kk_shader.c b/src/kosmickrisp/vulkan/kk_shader.c
+index f5dd748..7a63632 100644
+--- a/src/kosmickrisp/vulkan/kk_shader.c
++++ b/src/kosmickrisp/vulkan/kk_shader.c
+@@ -128,6 +128,9 @@ struct kk_fs_key {
+    bool dynamic_input_attachment_map;
+    uint8_t depth_input_att;
+    uint8_t stencil_input_att;
++   bool custom_resolve;
++   uint8_t input_color_count;
++   uint8_t input_color_map[MESA_VK_MAX_COLOR_ATTACHMENTS];
+ };
+ 
+ static void
+@@ -166,6 +169,13 @@ kk_populate_fs_key(struct kk_fs_key *key,
+       state->ial ? state->ial->stencil_att : MESA_VK_ATTACHMENT_NO_INDEX;
+    key->dynamic_input_attachment_map =
+       BITSET_TEST(state->dynamic, MESA_VK_DYNAMIC_INPUT_ATTACHMENT_MAP);
++
++   key->custom_resolve = state->rp->custom_resolve;
++   if (key->custom_resolve && state->ial) {
++      key->input_color_count = state->ial->color_attachment_count;
++      memcpy(key->input_color_map, state->ial->color_map,
++             sizeof(key->input_color_map));
++   }
+ }
+ 
+ enum kk_feature_key {
+@@ -678,6 +688,73 @@ kk_fs_needs_forced_depth_write(const nir_shader *nir,
+                                           indices_known);
+ }
+ 
++static int
++kk_custom_resolve_input_slot(
++   const struct vk_input_attachment_location_state *ial, uint32_t ia_index)
++{
++   if (ial == NULL)
++      return ia_index < KK_MAX_RTS ? (int)ia_index : -1;
++
++   if (ial->depth_att == ia_index)
++      return KK_MAX_RTS;
++   if (ial->stencil_att == ia_index)
++      return KK_MAX_RTS + 1;
++
++   if (ial->color_attachment_count == MESA_VK_COLOR_ATTACHMENT_COUNT_UNKNOWN)
++      return ia_index < KK_MAX_RTS ? (int)ia_index : -1;
++
++   for (uint32_t i = 0; i < ial->color_attachment_count && i < KK_MAX_RTS; i++) {
++      if (ial->color_map[i] == ia_index)
++         return i;
++   }
++   return -1;
++}
++
++static bool
++kk_lower_custom_resolve_input(nir_builder *b, nir_tex_instr *tex, void *data)
++{
++   const struct vk_input_attachment_location_state *ial = data;
++
++   int src = nir_tex_instr_src_index(tex, nir_tex_src_texture_deref);
++   if (src < 0)
++      return false;
++
++   nir_deref_instr *deref = nir_src_as_deref(tex->src[src].src);
++   nir_variable *var = nir_deref_instr_get_variable(deref);
++   if (var == NULL)
++      return false;
++
++   enum glsl_sampler_dim dim =
++      glsl_get_sampler_dim(glsl_without_array(var->type));
++   if (dim != GLSL_SAMPLER_DIM_SUBPASS && dim != GLSL_SAMPLER_DIM_SUBPASS_MS)
++      return false;
++
++   uint32_t ia_index = var->data.index;
++   if (deref->deref_type == nir_deref_type_array) {
++      if (!nir_src_is_const(deref->arr.index))
++         return false;
++      ia_index += nir_src_as_uint(deref->arr.index);
++   }
++
++   int slot = kk_custom_resolve_input_slot(ial, ia_index);
++   if (slot < 0)
++      return false;
++
++   b->cursor = nir_before_instr(&tex->instr);
++   nir_def *root = nir_load_buffer_ptr_kk(b, 1, 64, .binding = 0);
++   nir_def *addr = nir_iadd_imm(
++      b, root,
++      offsetof(struct kk_root_descriptor_table, custom_resolve_inputs) +
++         slot * sizeof(uint64_t));
++   nir_def *handle = nir_load_texture_handle_kk(
++      b, 1, 64, addr, .dest_type = tex->dest_type,
++      .image_dim = tex->sampler_dim, .image_array = tex->is_array);
++
++   nir_tex_instr_remove_src(tex, src);
++   nir_tex_instr_add_src(tex, nir_tex_src_texture_handle, handle);
++   return true;
++}
++
+ static void
+ kk_lower_nir(struct kk_device *dev, nir_shader *nir, bool emulated_stage,
+              const struct vk_pipeline_robustness_state *rs,
+@@ -800,6 +877,11 @@ kk_lower_nir(struct kk_device *dev, nir_shader *nir, bool emulated_stage,
+     * generate a nir_intrinsic_load_blend_const_color_rgba which gets lowered by
+     * the lower descriptor pass
+     */
++   if (nir->info.stage == MESA_SHADER_FRAGMENT && state && state->rp &&
++       state->rp->custom_resolve)
++      NIR_PASS(_, nir, nir_shader_tex_pass, kk_lower_custom_resolve_input,
++               nir_metadata_control_flow, (void *)state->ial);
++
+    NIR_PASS(_, nir, kk_nir_lower_descriptors, rs, set_layout_count,
+             set_layouts);
+ 
+-- 
+2.54.0 (Apple Git-157)
+

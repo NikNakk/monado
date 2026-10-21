@@ -7,6 +7,12 @@ SPDX-License-Identifier: BSL-1.0
 
 # macOS Port Tracker
 
+Custom resolve now renders on KosmicKrisp in native Alyx: see the
+[input attachment fix](macos-alyx-kosmickrisp-custom-resolve-fix.md). Resolving
+shaders now read the multisampled attachments rather than the placeholder
+descriptor Alyx binds. Use `kk-tests/run-alyx-kk-cr-debug`; the shared KK
+launchers still disable custom resolve (21 October 2026).
+
 The [native Alyx launch correction](macos-alyx-open-file-limit.md) raises the
 client's inherited file budget and restores desktop Qwerty controllers. The
 user reaches the usual level with the clean KK driver and custom resolve off.

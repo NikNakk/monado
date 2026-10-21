@@ -1,6 +1,13 @@
 <!-- Copyright 2026, Nick Kennedy; SPDX-License-Identifier: BSL-1.0 -->
 # Alyx custom resolve diagnosis — 21 October 2026
 
+**Resolved:** [the input attachment fix](macos-alyx-kosmickrisp-custom-resolve-fix.md)
+restores the scene with custom resolve enabled; the user confirmed it in the
+menu, intro and in game. Alyx binds a single-sample placeholder as the resolve
+shader's input attachment, and KosmicKrisp read that descriptor instead of the
+multisampled attachment the extension specifies. The notes below are kept as
+the history of the diagnosis.
+
 **Latest user result:** custom resolve still gives hands/menu without the main
 background. The fixed-depth patch is necessary for the owned mixed-depth cases
 but is not a complete Alyx rendering fix. With the same clean driver and custom

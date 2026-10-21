@@ -1,0 +1,14 @@
+#!/bin/sh
+# Custom resolve enabled, debug KK build (claude/kk-custom-resolve-debug).
+# Set KK_CUSTOM_RESOLVE_DEBUG=log|magenta|average, or leave unset for normal.
+set -eu
+base=${ALYX_NATIVE_ROOT:-"$HOME/Code/alyx-native"}
+icd=${KK_ICD:-"$base/build/kk-cr-debug/src/kosmickrisp/vulkan/kosmickrisp_mesa_devenv_icd.aarch64.json"}
+exec python3 "$base/with-matching-monado.py" \
+ --build "$base/build/monado-kk-fd-guard" -- \
+ "$base/run-alyx-gpu-timing" \
+ --driver kosmickrisp \
+ --icd "$icd" \
+ --runtime-json "$base/build/monado-kk-fd-guard/openxr_monado-dev.json" \
+ --extended-dynamic-state3 disabled --sample-locations-compat enabled \
+ --api-trace "$@"

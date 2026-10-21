@@ -1,0 +1,565 @@
+From 0c9a1f072e07d33e2ec44b2d363f33e153f01972 Mon Sep 17 00:00:00 2001
+From: Nick Kennedy <nick@nick-kennedy.com>
+Date: Wed, 21 Oct 2026 00:22:06 +0100
+Subject: [PATCH 1/2] kosmickrisp: add minimal VK_EXT_metal_objects
+
+Advertise VK_EXT_metal_objects and implement the parts Monado's macOS
+Vulkan client uses inside an app process:
+
+- VkImportMetalTextureInfoEXT on vkCreateImage: adopt an existing
+  MTLTexture (single plane, layout must match), add it to the device
+  residency set, and treat vkBindImageMemory as a no-op for it.
+- VkImportMetalIOSurfaceInfoEXT on vkCreateImage: create a 2D texture
+  over a caller-supplied IOSurface (NULL IOSurface is not supported).
+- VkImportMetalSharedEventInfoEXT on vkCreateSemaphore: back a timeline
+  semaphore with the supplied MTLSharedEvent.
+- vkExportMetalObjectsEXT: MTLDevice, MTLTexture (image or view),
+  IOSurface and MTLSharedEvent. Command queue and buffer exports return
+  NULL; KosmicKrisp uses an MTL4 queue.
+
+Local experiment for the native Alyx path, not an upstream submission.
+
+Generated-by: LLM
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ src/kosmickrisp/bridge/meson.build            |   2 +
+ src/kosmickrisp/bridge/mtl_metal_objects.h    |  33 +++
+ src/kosmickrisp/bridge/mtl_metal_objects.m    |  75 ++++++
+ .../bridge/stubs/mtl_metal_objects.c          |  37 +++
+ src/kosmickrisp/vulkan/kk_image.c             |  15 ++
+ src/kosmickrisp/vulkan/kk_image.h             |   9 +
+ src/kosmickrisp/vulkan/kk_metal_objects.c     | 243 ++++++++++++++++++
+ src/kosmickrisp/vulkan/kk_physical_device.c   |   3 +
+ src/kosmickrisp/vulkan/meson.build            |   1 +
+ 9 files changed, 418 insertions(+)
+ create mode 100644 src/kosmickrisp/bridge/mtl_metal_objects.h
+ create mode 100644 src/kosmickrisp/bridge/mtl_metal_objects.m
+ create mode 100644 src/kosmickrisp/bridge/stubs/mtl_metal_objects.c
+ create mode 100644 src/kosmickrisp/vulkan/kk_metal_objects.c
+
+diff --git a/src/kosmickrisp/bridge/meson.build b/src/kosmickrisp/bridge/meson.build
+index 03ba43b..8a57f71 100644
+--- a/src/kosmickrisp/bridge/meson.build
++++ b/src/kosmickrisp/bridge/meson.build
+@@ -19,6 +19,7 @@ if host_machine.system() == 'darwin'
+     'mtl_device.m',
+     'mtl_encoder.m',
+     'mtl_heap.m',
++    'mtl_metal_objects.m',
+     'mtl_render_state.m',
+     'mtl_residency_set.m',
+     'mtl_sampler.m',
+@@ -37,6 +38,7 @@ else
+     'stubs/mtl_device.c',
+     'stubs/mtl_encoder.c',
+     'stubs/mtl_heap.c',
++    'stubs/mtl_metal_objects.c',
+     'stubs/mtl_render_state.c',
+     'stubs/mtl_residency_set.c',
+     'stubs/mtl_sampler.c',
+diff --git a/src/kosmickrisp/bridge/mtl_metal_objects.h b/src/kosmickrisp/bridge/mtl_metal_objects.h
+new file mode 100644
+index 0000000..8786685
+--- /dev/null
++++ b/src/kosmickrisp/bridge/mtl_metal_objects.h
+@@ -0,0 +1,33 @@
++/*
++ * Copyright 2026 Nick Kennedy
++ * SPDX-License-Identifier: MIT
++ */
++
++#ifndef MTL_METAL_OBJECTS_H
++#define MTL_METAL_OBJECTS_H 1
++
++#include "mtl_types.h"
++
++#include <stdbool.h>
++#include <stdint.h>
++
++struct kk_image_layout;
++
++struct mtl_texture_mismatch {
++   bool device, type, format, extent, levels, samples, layers;
++   uint32_t missing_usage;
++};
++
++void mtl_texture_check_layout(mtl_texture *texture, mtl_device *device,
++                              const struct kk_image_layout *layout,
++                              struct mtl_texture_mismatch *out);
++
++mtl_texture *mtl_new_texture_with_iosurface(mtl_device *device,
++                                            const struct kk_image_layout *layout,
++                                            void *iosurface);
++
++void *mtl_texture_get_iosurface(mtl_texture *texture);
++
++uint64_t mtl_shared_event_device_registry_id(mtl_shared_event *event);
++
++#endif /* MTL_METAL_OBJECTS_H */
+diff --git a/src/kosmickrisp/bridge/mtl_metal_objects.m b/src/kosmickrisp/bridge/mtl_metal_objects.m
+new file mode 100644
+index 0000000..8412831
+--- /dev/null
++++ b/src/kosmickrisp/bridge/mtl_metal_objects.m
+@@ -0,0 +1,75 @@
++/*
++ * Copyright 2026 Nick Kennedy
++ * SPDX-License-Identifier: MIT
++ */
++
++#include "mtl_metal_objects.h"
++
++#include "kk_image_layout.h"
++
++#include <IOSurface/IOSurfaceRef.h>
++#include <Metal/MTLDevice.h>
++#include <Metal/MTLEvent.h>
++#include <Metal/MTLTexture.h>
++
++void
++mtl_texture_check_layout(mtl_texture *texture, mtl_device *device,
++                         const struct kk_image_layout *layout,
++                         struct mtl_texture_mismatch *out)
++{
++   @autoreleasepool {
++      id<MTLTexture> tex = (id<MTLTexture>)texture;
++      id<MTLDevice> dev = (id<MTLDevice>)device;
++      *out = (struct mtl_texture_mismatch){0};
++      out->device = tex.device.registryID != dev.registryID;
++      out->type = tex.textureType != (MTLTextureType)layout->type;
++      out->format = tex.pixelFormat != (MTLPixelFormat)layout->format.mtl;
++      out->extent = tex.width != layout->width_px ||
++                    tex.height != layout->height_px ||
++                    tex.depth != layout->depth_px;
++      out->levels = tex.mipmapLevelCount != layout->levels;
++      out->samples = tex.sampleCount != layout->sample_count_sa;
++      out->layers = tex.arrayLength != layout->layers;
++      out->missing_usage = (uint32_t)(layout->usage & ~tex.usage);
++   }
++}
++
++mtl_texture *
++mtl_new_texture_with_iosurface(mtl_device *device,
++                               const struct kk_image_layout *layout,
++                               void *iosurface)
++{
++   @autoreleasepool {
++      id<MTLDevice> dev = (id<MTLDevice>)device;
++      MTLTextureDescriptor *descriptor = [[MTLTextureDescriptor new] autorelease];
++      descriptor.textureType = (MTLTextureType)layout->type;
++      descriptor.pixelFormat = layout->format.mtl;
++      descriptor.width = layout->width_px;
++      descriptor.height = layout->height_px;
++      descriptor.depth = 1;
++      descriptor.mipmapLevelCount = 1;
++      descriptor.sampleCount = 1;
++      descriptor.arrayLength = 1;
++      descriptor.usage = (MTLTextureUsage)layout->usage;
++      descriptor.storageMode = MTLStorageModeShared;
++      return [dev newTextureWithDescriptor:descriptor
++                                 iosurface:(IOSurfaceRef)iosurface
++                                     plane:0];
++   }
++}
++
++void *
++mtl_texture_get_iosurface(mtl_texture *texture)
++{
++   @autoreleasepool {
++      return (void *)((id<MTLTexture>)texture).iosurface;
++   }
++}
++
++uint64_t
++mtl_shared_event_device_registry_id(mtl_shared_event *event)
++{
++   @autoreleasepool {
++      return ((id<MTLSharedEvent>)event).device.registryID;
++   }
++}
+diff --git a/src/kosmickrisp/bridge/stubs/mtl_metal_objects.c b/src/kosmickrisp/bridge/stubs/mtl_metal_objects.c
+new file mode 100644
+index 0000000..047524b
+--- /dev/null
++++ b/src/kosmickrisp/bridge/stubs/mtl_metal_objects.c
+@@ -0,0 +1,37 @@
++/*
++ * Copyright 2026 Nick Kennedy
++ * SPDX-License-Identifier: MIT
++ */
++
++#include "mtl_metal_objects.h"
++
++#include <string.h>
++
++void
++mtl_texture_check_layout(mtl_texture *texture, mtl_device *device,
++                         const struct kk_image_layout *layout,
++                         struct mtl_texture_mismatch *out)
++{
++   memset(out, 0, sizeof(*out));
++   out->device = true;
++}
++
++mtl_texture *
++mtl_new_texture_with_iosurface(mtl_device *device,
++                               const struct kk_image_layout *layout,
++                               void *iosurface)
++{
++   return NULL;
++}
++
++void *
++mtl_texture_get_iosurface(mtl_texture *texture)
++{
++   return NULL;
++}
++
++uint64_t
++mtl_shared_event_device_registry_id(mtl_shared_event *event)
++{
++   return 0;
++}
+diff --git a/src/kosmickrisp/vulkan/kk_image.c b/src/kosmickrisp/vulkan/kk_image.c
+index de27a6d..d89285e 100644
+--- a/src/kosmickrisp/vulkan/kk_image.c
++++ b/src/kosmickrisp/vulkan/kk_image.c
+@@ -592,6 +592,9 @@ static void
+ kk_image_finish(struct kk_device *dev, struct kk_image *image,
+                 const VkAllocationCallbacks *pAllocator)
+ {
++#ifdef VK_USE_PLATFORM_METAL_EXT
++   kk_image_release_metal_import(dev, image);
++#endif
+    for (uint8_t plane = 0; plane < image->plane_count; plane++) {
+       kk_image_plane_finish(dev, &image->planes[plane], image->vk.create_flags,
+                             pAllocator);
+@@ -624,6 +627,15 @@ kk_CreateImage(VkDevice _device, const VkImageCreateInfo *pCreateInfo,
+       return result;
+    }
+ 
++#ifdef VK_USE_PLATFORM_METAL_EXT
++   result = kk_image_import_metal(dev, image, pCreateInfo);
++   if (result != VK_SUCCESS) {
++      kk_image_finish(dev, image, pAllocator);
++      vk_free2(&dev->vk.alloc, pAllocator, image);
++      return result;
++   }
++#endif
++
+    *pImage = kk_image_to_handle(image);
+ 
+    return VK_SUCCESS;
+@@ -892,6 +904,9 @@ kk_bind_image_memory(struct kk_device *dev, const VkBindImageMemoryInfo *info)
+    VK_FROM_HANDLE(kk_image, image, info->image);
+    VkResult result;
+ 
++   if (image->metal_imported)
++      return VK_SUCCESS;
++
+    /* Ignore this struct on Android, we cannot access swapchain structures
+     * there. */
+ #ifdef KK_USE_WSI_PLATFORM
+diff --git a/src/kosmickrisp/vulkan/kk_image.h b/src/kosmickrisp/vulkan/kk_image.h
+index 40e75a2..dce687d 100644
+--- a/src/kosmickrisp/vulkan/kk_image.h
++++ b/src/kosmickrisp/vulkan/kk_image.h
+@@ -53,6 +53,8 @@ struct kk_image {
+    /* Forces alpha value to be one when creating views. Needed for WSI */
+    bool wsi_opaque_alpha;
+ 
++   bool metal_imported;
++
+    uint8_t plane_count;
+    struct kk_image_plane planes[3];
+ };
+@@ -140,4 +142,11 @@ mtl_texture *kk_image_plane_create_texture(struct kk_image_plane *plane,
+ 
+ void kk_image_set_label(struct kk_image *image, const char *label);
+ 
++#ifdef VK_USE_PLATFORM_METAL_EXT
++VkResult kk_image_import_metal(struct kk_device *dev, struct kk_image *image,
++                               const VkImageCreateInfo *info);
++void kk_image_release_metal_import(struct kk_device *dev,
++                                   struct kk_image *image);
++#endif
++
+ #endif
+diff --git a/src/kosmickrisp/vulkan/kk_metal_objects.c b/src/kosmickrisp/vulkan/kk_metal_objects.c
+new file mode 100644
+index 0000000..5d093d4
+--- /dev/null
++++ b/src/kosmickrisp/vulkan/kk_metal_objects.c
+@@ -0,0 +1,243 @@
++/*
++ * Copyright 2026 Nick Kennedy
++ * SPDX-License-Identifier: MIT
++ */
++
++#include "kk_device.h"
++#include "kk_entrypoints.h"
++#include "kk_image.h"
++#include "kk_image_view.h"
++#include "kk_sync.h"
++
++#include "kosmickrisp/bridge/mtl_bridge.h"
++#include "kosmickrisp/bridge/mtl_metal_objects.h"
++
++#include "util/log.h"
++#include "vk_common_entrypoints.h"
++#include "vk_semaphore.h"
++#include "vk_util.h"
++
++#ifdef VK_USE_PLATFORM_METAL_EXT
++
++static void
++kk_residency_add(struct kk_device *dev, mtl_texture *texture)
++{
++   simple_mtx_lock(&dev->residency_set.mutex);
++   mtl_residency_set_add_allocation(dev->residency_set.handle, texture);
++   simple_mtx_unlock(&dev->residency_set.mutex);
++}
++
++void
++kk_image_release_metal_import(struct kk_device *dev, struct kk_image *image)
++{
++   if (!image->metal_imported || !image->planes[0].mtl_handle)
++      return;
++   simple_mtx_lock(&dev->residency_set.mutex);
++   mtl_residency_set_remove_allocation(dev->residency_set.handle,
++                                       image->planes[0].mtl_handle);
++   simple_mtx_unlock(&dev->residency_set.mutex);
++}
++
++static VkResult
++kk_image_adopt_texture(struct kk_device *dev, struct kk_image *image,
++                       mtl_texture *texture)
++{
++   struct kk_image_plane *plane = &image->planes[0];
++   struct mtl_texture_mismatch mm;
++   mtl_texture_check_layout(texture, dev->mtl_handle, &plane->layout, &mm);
++   uint32_t missing = mm.missing_usage & ~MTL_TEXTURE_USAGE_PIXEL_FORMAT_VIEW;
++   if (mm.device || mm.type || mm.format || mm.extent || mm.levels ||
++       mm.samples || mm.layers || missing) {
++      mesa_loge("kk: VkImportMetalTextureInfoEXT rejected: device=%d type=%d "
++                "format=%d extent=%d levels=%d samples=%d layers=%d "
++                "missing_usage=0x%x",
++                mm.device, mm.type, mm.format, mm.extent, mm.levels,
++                mm.samples, mm.layers, mm.missing_usage);
++      return vk_error(dev, VK_ERROR_INVALID_EXTERNAL_HANDLE);
++   }
++   if (mm.missing_usage)
++      mesa_logw("kk: imported texture lacks MTLTextureUsagePixelFormatView");
++
++   plane->mtl_handle = mtl_retain(texture);
++   return VK_SUCCESS;
++}
++
++VkResult
++kk_image_import_metal(struct kk_device *dev, struct kk_image *image,
++                      const VkImageCreateInfo *info)
++{
++   const VkImportMetalTextureInfoEXT *tex_info =
++      vk_find_struct_const(info->pNext, IMPORT_METAL_TEXTURE_INFO_EXT);
++   const VkImportMetalIOSurfaceInfoEXT *ios_info =
++      vk_find_struct_const(info->pNext, IMPORT_METAL_IO_SURFACE_INFO_EXT);
++
++   if (!tex_info && !ios_info)
++      return VK_SUCCESS;
++
++   if (tex_info && ios_info)
++      return vk_error(dev, VK_ERROR_INVALID_EXTERNAL_HANDLE);
++
++   if (image->plane_count != 1 || image->planes[0].layout.linear)
++      return vk_error(dev, VK_ERROR_FEATURE_NOT_PRESENT);
++
++   struct kk_image_plane *plane = &image->planes[0];
++   VkResult result;
++
++   if (tex_info) {
++      if (!tex_info->mtlTexture ||
++          (tex_info->plane != 0 &&
++           tex_info->plane != VK_IMAGE_ASPECT_PLANE_0_BIT))
++         return vk_error(dev, VK_ERROR_INVALID_EXTERNAL_HANDLE);
++      result = kk_image_adopt_texture(dev, image, tex_info->mtlTexture);
++      if (result != VK_SUCCESS)
++         return result;
++   } else {
++      if (!ios_info->ioSurface) {
++         mesa_loge("kk: VkImportMetalIOSurfaceInfoEXT with a NULL IOSurface "
++                   "is not supported");
++         return vk_error(dev, VK_ERROR_FEATURE_NOT_PRESENT);
++      }
++      if (info->imageType != VK_IMAGE_TYPE_2D || info->arrayLayers != 1 ||
++          info->mipLevels != 1 || info->samples != VK_SAMPLE_COUNT_1_BIT ||
++          plane->layout.type != MTL_TEXTURE_TYPE_2D)
++         return vk_error(dev, VK_ERROR_FEATURE_NOT_PRESENT);
++      plane->mtl_handle = mtl_new_texture_with_iosurface(
++         dev->mtl_handle, &plane->layout, ios_info->ioSurface);
++      if (!plane->mtl_handle) {
++         mesa_loge("kk: newTextureWithDescriptor:iosurface:plane: failed");
++         return vk_error(dev, VK_ERROR_INVALID_EXTERNAL_HANDLE);
++      }
++   }
++
++   plane->mtl_handle_array = NULL;
++   plane->addr = mtl_texture_get_gpu_resource_id(plane->mtl_handle);
++   if (image->vk.base.object_name)
++      mtl_resource_set_label(plane->mtl_handle, image->vk.base.object_name);
++   kk_residency_add(dev, plane->mtl_handle);
++   image->metal_imported = true;
++   return VK_SUCCESS;
++}
++
++static uint8_t
++kk_metal_plane_index(VkImageAspectFlagBits plane)
++{
++   switch (plane) {
++   case VK_IMAGE_ASPECT_PLANE_1_BIT:
++      return 1;
++   case VK_IMAGE_ASPECT_PLANE_2_BIT:
++      return 2;
++   default:
++      return 0;
++   }
++}
++
++static mtl_texture *
++kk_export_texture(const VkExportMetalTextureInfoEXT *info)
++{
++   if (info->image != VK_NULL_HANDLE) {
++      VK_FROM_HANDLE(kk_image, image, info->image);
++      uint8_t p = kk_metal_plane_index(info->plane);
++      return p < image->plane_count ? image->planes[p].mtl_handle : NULL;
++   }
++   if (info->imageView != VK_NULL_HANDLE) {
++      VK_FROM_HANDLE(kk_image_view, view, info->imageView);
++      uint8_t p = kk_metal_plane_index(info->plane);
++      return p < view->plane_count ? view->planes[p].mtl_handle_sampled : NULL;
++   }
++   return NULL;
++}
++
++static mtl_shared_event *
++kk_export_shared_event(const VkExportMetalSharedEventInfoEXT *info)
++{
++   if (info->semaphore == VK_NULL_HANDLE)
++      return NULL;
++   VK_FROM_HANDLE(vk_semaphore, sem, info->semaphore);
++   struct vk_sync *sync = vk_semaphore_get_active_sync(sem);
++   if (sync->type != &kk_sync_type)
++      return NULL;
++   return container_of(sync, struct kk_sync_timeline, base)->mtl_handle;
++}
++
++VKAPI_ATTR void VKAPI_CALL
++kk_ExportMetalObjectsEXT(VkDevice _device,
++                         VkExportMetalObjectsInfoEXT *pMetalObjectsInfo)
++{
++   VK_FROM_HANDLE(kk_device, dev, _device);
++
++   vk_foreach_struct(stype, s, pMetalObjectsInfo) {
++      switch (stype) {
++      case VK_STRUCTURE_TYPE_EXPORT_METAL_DEVICE_INFO_EXT:
++         ((VkExportMetalDeviceInfoEXT *)s)->mtlDevice = dev->mtl_handle;
++         break;
++      case VK_STRUCTURE_TYPE_EXPORT_METAL_COMMAND_QUEUE_INFO_EXT:
++         ((VkExportMetalCommandQueueInfoEXT *)s)->mtlCommandQueue = NULL;
++         break;
++      case VK_STRUCTURE_TYPE_EXPORT_METAL_BUFFER_INFO_EXT:
++         ((VkExportMetalBufferInfoEXT *)s)->mtlBuffer = NULL;
++         break;
++      case VK_STRUCTURE_TYPE_EXPORT_METAL_TEXTURE_INFO_EXT: {
++         VkExportMetalTextureInfoEXT *t = (VkExportMetalTextureInfoEXT *)s;
++         t->mtlTexture = kk_export_texture(t);
++         break;
++      }
++      case VK_STRUCTURE_TYPE_EXPORT_METAL_IO_SURFACE_INFO_EXT: {
++         VkExportMetalIOSurfaceInfoEXT *i = (VkExportMetalIOSurfaceInfoEXT *)s;
++         i->ioSurface = NULL;
++         if (i->image != VK_NULL_HANDLE) {
++            VK_FROM_HANDLE(kk_image, image, i->image);
++            if (image->planes[0].mtl_handle)
++               i->ioSurface =
++                  mtl_texture_get_iosurface(image->planes[0].mtl_handle);
++         }
++         break;
++      }
++      case VK_STRUCTURE_TYPE_EXPORT_METAL_SHARED_EVENT_INFO_EXT: {
++         VkExportMetalSharedEventInfoEXT *e =
++            (VkExportMetalSharedEventInfoEXT *)s;
++         e->mtlSharedEvent = kk_export_shared_event(e);
++         break;
++      }
++      default:
++         break;
++      }
++   }
++}
++
++VKAPI_ATTR VkResult VKAPI_CALL
++kk_CreateSemaphore(VkDevice device, const VkSemaphoreCreateInfo *pCreateInfo,
++                   const VkAllocationCallbacks *pAllocator,
++                   VkSemaphore *pSemaphore)
++{
++   VK_FROM_HANDLE(kk_device, dev, device);
++   const VkImportMetalSharedEventInfoEXT *import =
++      vk_find_struct_const(pCreateInfo->pNext,
++                           IMPORT_METAL_SHARED_EVENT_INFO_EXT);
++
++   VkResult result =
++      vk_common_CreateSemaphore(device, pCreateInfo, pAllocator, pSemaphore);
++   if (result != VK_SUCCESS || !import)
++      return result;
++
++   VK_FROM_HANDLE(vk_semaphore, sem, *pSemaphore);
++   struct vk_sync *sync = vk_semaphore_get_active_sync(sem);
++   if (!import->mtlSharedEvent || sem->type != VK_SEMAPHORE_TYPE_TIMELINE ||
++       sync->type != &kk_sync_type) {
++      vk_common_DestroySemaphore(device, *pSemaphore, pAllocator);
++      *pSemaphore = VK_NULL_HANDLE;
++      return vk_error(dev, VK_ERROR_INVALID_EXTERNAL_HANDLE);
++   }
++
++   if (mtl_shared_event_device_registry_id(import->mtlSharedEvent) !=
++       mtl_device_get_registry_id(dev->mtl_handle))
++      mesa_logw("kk: imported MTLSharedEvent belongs to another MTLDevice");
++
++   struct kk_sync_timeline *timeline =
++      container_of(sync, struct kk_sync_timeline, base);
++   void *retained = mtl_retain(import->mtlSharedEvent);
++   mtl_release(timeline->mtl_handle);
++   timeline->mtl_handle = retained;
++   return VK_SUCCESS;
++}
++
++#endif /* VK_USE_PLATFORM_METAL_EXT */
+diff --git a/src/kosmickrisp/vulkan/kk_physical_device.c b/src/kosmickrisp/vulkan/kk_physical_device.c
+index 65b99ed..ef751fb 100644
+--- a/src/kosmickrisp/vulkan/kk_physical_device.c
++++ b/src/kosmickrisp/vulkan/kk_physical_device.c
+@@ -181,6 +181,9 @@ kk_get_device_extensions(const struct kk_instance *instance,
+       .EXT_depth_clip_enable = true,
+       .EXT_extended_dynamic_state3 = true,
+       .EXT_external_memory_metal = true,
++#ifdef VK_USE_PLATFORM_METAL_EXT
++      .EXT_metal_objects = true,
++#endif
+       .EXT_external_memory_host = true,
+       .EXT_hdr_metadata = true,
+       .EXT_image_2d_view_of_3d = true,
+diff --git a/src/kosmickrisp/vulkan/meson.build b/src/kosmickrisp/vulkan/meson.build
+index f82e80f..d727865 100644
+--- a/src/kosmickrisp/vulkan/meson.build
++++ b/src/kosmickrisp/vulkan/meson.build
+@@ -88,6 +88,7 @@ kk_files = files(
+   'kk_image.c',
+   'kk_instance.h',
+   'kk_instance.c',
++  'kk_metal_objects.c',
+   'kk_nir_lower_custom_border.c',
+   'kk_nir_lower_descriptors.c',
+   'kk_nir_lower_image_view_min_lod.c',
+-- 
+2.54.0 (Apple Git-157)
+
