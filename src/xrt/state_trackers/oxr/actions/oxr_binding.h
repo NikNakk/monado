@@ -29,47 +29,9 @@ extern "C" {
  */
 
 /*!
- * Destroy an interaction profile.
- *
- * @param profile Interaction profile to destroy
- * @public @memberof oxr_interaction_profile
- */
-void
-oxr_interaction_profile_destroy(struct oxr_interaction_profile *profile);
-
-/*!
- * Clone an interaction profile.
- *
- * @param src_profile Source interaction profile to clone
- * @return Cloned interaction profile, or NULL if src_profile is NULL
- * @public @memberof oxr_interaction_profile
- */
-struct oxr_interaction_profile *
-oxr_interaction_profile_clone(const struct oxr_interaction_profile *src_profile);
-
-/*!
- * Find bindings from action key in a profile.
- *
- * @param log Logger
- * @param profile Interaction profile
- * @param key Action key
- * @param max_binding_count Maximum number of bindings to return
- * @param out_bindings Output bindings array
- * @param out_binding_count Output binding count
- * @public @memberof oxr_interaction_profile
- */
-void
-oxr_binding_find_bindings_from_act_key(struct oxr_logger *log,
-                                       struct oxr_interaction_profile *profile,
-                                       uint32_t key,
-                                       size_t max_binding_count,
-                                       struct oxr_binding **out_bindings,
-                                       size_t *out_binding_count);
-
-/*!
  * Suggest bindings for an interaction profile. Finds or creates the profile
- * for the given path, resets its binding keys, applies the suggested
- * action–path bindings and takes ownership of the given dpad state.
+ * for the given path, applies the suggested action-path bindings and takes
+ * ownership of the given dpad state.
  *
  * @param log Logger
  * @param store Path store; paths may be created in the store.

@@ -37,6 +37,7 @@
 #include "util/u_trace_marker.h"
 #include "util/u_distortion_mesh.h"
 #include "util/u_sink.h"
+#include "util/u_pretty_print.h"
 
 #ifdef XRT_OS_LINUX
 #include "util/u_linux.h"
@@ -1553,7 +1554,7 @@ wmr_hmd_guess_camera_orientation(struct wmr_hmd *wh)
 static int
 wmr_hmd_hand_track(struct wmr_hmd *wh,
                    struct t_stereo_camera_calibration *stereo_calib,
-                   struct xrt_hand_masks_sink *masks_sink,
+                   struct xrt_device_masks_sink *masks_sink,
                    struct xrt_slam_sinks **out_sinks,
                    struct xrt_device **out_device)
 {
@@ -1732,7 +1733,7 @@ wmr_hmd_setup_trackers(struct wmr_hmd *wh, struct xrt_slam_sinks *out_sinks, str
 	// Initialize hand tracker
 	struct xrt_slam_sinks *hand_sinks = NULL;
 	struct xrt_device *hand_device = NULL;
-	struct xrt_hand_masks_sink *masks_sink = slam_sinks ? slam_sinks->hand_masks : NULL;
+	struct xrt_device_masks_sink *masks_sink = slam_sinks ? slam_sinks->masks[0] : NULL;
 	if (wh->tracking.hand_enabled) {
 		int hand_status = wmr_hmd_hand_track(wh, stereo_calib, masks_sink, &hand_sinks, &hand_device);
 		if (hand_status != 0 || hand_sinks == NULL || hand_device == NULL) {
@@ -1997,10 +1998,10 @@ wmr_hmd_create(enum wmr_headset_type hmd_type,
 	}
 
 	// Stream data source into sinks (if populated)
-	bool stream_started = xrt_fs_slam_stream_start(wh->tracking.source, &sinks);
-	if (!stream_started) {
+	xrt_result_t xret = xrt_fs_slam_stream_start(wh->tracking.source, &sinks);
+	if (xret != XRT_SUCCESS) {
 		//! @todo Could reach this due to !XRT_HAVE_LIBUSB but the HMD should keep working
-		WMR_WARN(wh, "Failed to start WMR source");
+		WMR_WARN(wh, "Failed to start WMR source, got %s", u_str_xrt_result(xret));
 		wmr_hmd_destroy(&wh->base);
 		wh = NULL;
 		return;

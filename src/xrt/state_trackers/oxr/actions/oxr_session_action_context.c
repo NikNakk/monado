@@ -12,6 +12,9 @@
 #include "util/u_hashmap.h"
 
 #include "oxr_session_action_context.h"
+#include "oxr_binding_registry.h"
+#include "oxr_priority_group_cache.h"
+#include "oxr_suggested_profile_array.h"
 #include "../oxr_logger.h"
 #include "../oxr_objects.h"
 #include "oxr_input.h"
@@ -30,6 +33,13 @@ oxr_session_action_context_init(struct oxr_session_action_context *action_contex
 		return XR_ERROR_RUNTIME_FAILURE;
 	}
 
+	XrResult ret = oxr_priority_group_cache_init(&action_context->priority_group_cache);
+	if (ret != XR_SUCCESS) {
+		u_hashmap_int_destroy(&action_context->act_sets_attachments_by_key);
+		os_mutex_destroy(&action_context->sync_actions_mutex);
+		return ret;
+	}
+
 	// Initialize action set attachments
 	action_context->act_set_attachments = NULL;
 	action_context->action_set_attachment_count = 0;
@@ -45,7 +55,9 @@ oxr_session_action_context_init(struct oxr_session_action_context *action_contex
 void
 oxr_session_action_context_fini(struct oxr_session_action_context *action_context)
 {
-	oxr_interaction_profile_array_clear(&action_context->profiles_on_attachment);
+	oxr_suggested_profile_array_clear(&action_context->profiles_on_attachment);
+	oxr_binding_registry_unref(action_context->binding_registry);
+	action_context->binding_registry = NULL;
 
 	// Teardown action set attachments
 	for (size_t i = 0; i < action_context->action_set_attachment_count; ++i) {
@@ -54,6 +66,8 @@ oxr_session_action_context_fini(struct oxr_session_action_context *action_contex
 	free(action_context->act_set_attachments);
 	action_context->act_set_attachments = NULL;
 	action_context->action_set_attachment_count = 0;
+
+	oxr_priority_group_cache_fini(&action_context->priority_group_cache);
 
 	// If we tore everything down correctly, these are empty now.
 	assert(action_context->act_sets_attachments_by_key == NULL ||

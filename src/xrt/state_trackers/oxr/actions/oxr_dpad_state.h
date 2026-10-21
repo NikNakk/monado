@@ -81,7 +81,7 @@ struct oxr_dpad_entry
  */
 struct oxr_dpad_state
 {
-	struct u_hashmap_int *uhi;
+	struct u_hashmap_int *entries;
 };
 
 

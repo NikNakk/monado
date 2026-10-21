@@ -22,6 +22,13 @@ in the current profile. Broad reliability validation and the latest Linux CI
 remain outstanding. The dated investigation below preserves the evidence and
 implementation history.
 
+The 2026-10-21 [upstream review branch](macos-upstream-generic-controller.md)
+migrates generic-controller bindings to upstream's generated rebindings and
+adopts its factory calibration parsing fix. Per-controller LED storage preserves
+the measured corrections. The tested LED-space fusion convention is retained;
+upstream's IMU-space model migration requires a separate replay/calibration
+comparison. This review branch has not replaced `macos-upstream-clean`.
+
 ## Sources reviewed
 
 - Destination: `/Users/nickkennedy/Code/monado-2`, `macos-upstream-clean`,

@@ -6,8 +6,13 @@
  * @author Jan Schmidt <jan@centricular.com>
  * @ingroup aux_math
  */
+
+#include "xrt/xrt_defines.h"
+
 #include "util/u_misc.h"
+
 #include "m_clock_tracking.h"
+
 
 /* Fixed constants for discontinuity detection and
  * subsequent hold-off. These could be made configurable
@@ -122,7 +127,9 @@ m_clock_windowed_skew_tracker_push(struct m_clock_windowed_skew_tracker *t,
 		}
 		t->clock_reset_ts = 0;
 	}
+
 	t->last_observation = obs;
+	t->have_last_observation = true;
 
 	if (t->current_window_samples < t->max_window_samples) {
 		/* Window is still being filled */

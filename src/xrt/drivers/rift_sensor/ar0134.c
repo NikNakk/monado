@@ -103,7 +103,7 @@ rift_sensor_ar0134_init(libusb_device_handle *devh, bool usb2_mode)
 		ret = ar0134_read_reg(devh, 0x3000, &val);
 		if (ret < 0 || val != 0x2406) {
 			// 5000us sleep between retries
-			os_nanosleep(OS_NS_PER_USEC * 5000);
+			os_nanosleep(U_TIME_1US_IN_NS * 5000);
 			continue;
 		}
 		break;

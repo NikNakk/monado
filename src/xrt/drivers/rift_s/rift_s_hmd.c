@@ -86,7 +86,7 @@ rift_s_hmd_handle_report(struct rift_s_hmd *hmd, timepoint_ns local_ts, rift_s_h
 		/* Avoid wrap-around on 32-bit device times */
 		dt = report->timestamp - hmd->last_imu_timestamp32;
 	} else {
-		hmd->last_imu_timestamp_ns = (timepoint_ns)(report->timestamp) * OS_NS_PER_USEC;
+		hmd->last_imu_timestamp_ns = (timepoint_ns)(report->timestamp) * U_TIME_1US_IN_NS;
 		hmd->last_imu_timestamp32 = report->timestamp;
 	}
 
@@ -95,7 +95,7 @@ rift_s_hmd_handle_report(struct rift_s_hmd *hmd, timepoint_ns local_ts, rift_s_h
 	 * is USB packet arrival time, which is after the last IMU sample was captured,
 	 * so calculate the correct imu timestamp accordingly */
 	uint64_t packet_duration_us = (n_samples - 1) * TICK_LEN_US + dt;
-	uint64_t end_imu_timestamp_ns = hmd->last_imu_timestamp_ns + (OS_NS_PER_USEC * packet_duration_us);
+	uint64_t end_imu_timestamp_ns = hmd->last_imu_timestamp_ns + (U_TIME_1US_IN_NS * packet_duration_us);
 
 	rift_s_tracker_clock_update(hmd->tracker, end_imu_timestamp_ns, local_ts);
 
@@ -143,7 +143,7 @@ rift_s_hmd_handle_report(struct rift_s_hmd *hmd, timepoint_ns local_ts, rift_s_h
 		// Send the sample to the pose tracker
 		rift_s_tracker_imu_update(hmd->tracker, hmd->last_imu_timestamp_ns, &accel, &gyro);
 
-		hmd->last_imu_timestamp_ns += (uint64_t)dt * OS_NS_PER_USEC;
+		hmd->last_imu_timestamp_ns += (uint64_t)dt * U_TIME_1US_IN_NS;
 		hmd->last_imu_timestamp32 += dt;
 		dt = TICK_LEN_US;
 	}

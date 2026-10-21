@@ -1,5 +1,15 @@
+// Copyright 2020-2024, Collabora, Ltd.
+// Copyright 2024-2026, NVIDIA CORPORATION.
 // Copyright 2026, Nick Kennedy
 // SPDX-License-Identifier: BSL-1.0
+/*!
+ * @file
+ * @brief  IPC client thread shutdown and blocking I/O cancellation.
+ * @author Jonathan Steffan <jsteffan@fedoraproject.org>
+ * @author Nick Kennedy <code@nick-kennedy.com>
+ * @ingroup ipc_server
+ */
+
 #include "server/ipc_server.h"
 #include "server/ipc_server_thread_shutdown.h"
 
@@ -8,7 +18,7 @@
  * Cancel the blocking read each client thread is sitting in.
  *
  * The epoll based client loop wakes up on its own timeout and so notices
- * their thread entering STOPPING, but the Windows one blocks in ReadFile() with no
+ * the thread entering STOPPING, but the Windows one blocks in ReadFile() with no
  * timeout and would only notice once the client happens to send something.
  * Cancelling the pending I/O makes that read fail so the thread can run its
  * shutdown and be joined.
@@ -17,7 +27,7 @@
  * global state lock, so take it here as well, otherwise we could cancel I/O on
  * a handle that has just been closed and possibly reused.
  */
-void
+static void
 ipc_server_cancel_all_client_io(struct ipc_server *s)
 {
 	os_mutex_lock(&s->global_state.lock);
@@ -53,15 +63,42 @@ ipc_server_client_thread_set_running(struct ipc_server *s, struct ipc_thread *it
 	os_mutex_unlock(&s->global_state.lock);
 }
 
+bool
+ipc_server_client_thread_is_running(struct ipc_server *s, struct ipc_thread *it)
+{
+	os_mutex_lock(&s->global_state.lock);
+	bool running = it->state == IPC_THREAD_RUNNING;
+	os_mutex_unlock(&s->global_state.lock);
+	return running;
+}
+
+/*!
+ * Stop and join any remaining per-client threads.
+ *
+ * Client threads may still be inside common_shutdown(), which destroys each
+ * client's compositor and dereferences `s->xsysd` / `s->xso`. Joining them before
+ * teardown_all() destroys those resources avoids a race where a client thread
+ * locks a mutex that teardown has already freed (observed as an
+ * `om->initialized` assertion in multi_compositor_destroy).
+ *
+ * Stop their loops before joining: the epoll based client loop notices STOPPING
+ * on its next timeout, while the Windows one is woken by
+ * @ref ipc_server_cancel_all_client_io.
+ *
+ * Called from shutdown_clients() before the main loop returns, and again from
+ * teardown_all() as a fallback.
+ */
 void
-ipc_server_stop_and_join_client_threads(struct ipc_server *s, void (*cancel_io)(struct ipc_server *s))
+ipc_server_stop_and_join_client_threads(struct ipc_server *s)
 {
 	bool have_threads = false;
+	bool join_thread[IPC_MAX_CLIENTS] = {false};
 	os_mutex_lock(&s->global_state.lock);
 	for (uint32_t i = 0; i < IPC_MAX_CLIENTS; i++) {
 		struct ipc_thread *it = &s->threads[i];
 		if (it->state != IPC_THREAD_READY) {
 			it->state = IPC_THREAD_STOPPING;
+			join_thread[i] = true;
 			have_threads = true;
 		}
 	}
@@ -71,12 +108,12 @@ ipc_server_stop_and_join_client_threads(struct ipc_server *s, void (*cancel_io)(
 		return;
 	}
 	// Wake every blocked read before waiting for any one client to finish.
-	if (cancel_io != NULL) {
-		cancel_io(s);
-	}
+#ifdef XRT_OS_WINDOWS
+	ipc_server_cancel_all_client_io(s);
+#endif
 	for (uint32_t i = 0; i < IPC_MAX_CLIENTS; i++) {
 		struct ipc_thread *it = &s->threads[i];
-		if (it->state == IPC_THREAD_READY) {
+		if (!join_thread[i]) {
 			continue;
 		}
 		os_thread_join(&it->thread);

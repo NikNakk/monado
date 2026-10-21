@@ -1,5 +1,5 @@
 // Copyright 2019-2020, Collabora, Ltd.
-// Copyright 2024-2025, NVIDIA CORPORATION.
+// Copyright 2024-2026, NVIDIA CORPORATION.
 // SPDX-License-Identifier: BSL-1.0
 /*!
  * @file
@@ -42,6 +42,27 @@ oxr_xrEnumerateSwapchainFormats(XrSession session,
 
 	return oxr_session_enumerate_formats(&log, sess, formatCapacityInput, formatCountOutput, formats);
 }
+
+#ifdef OXR_HAVE_EXT_enumerate_swapchain_formats2
+XRAPI_ATTR XrResult XRAPI_CALL
+oxr_xrEnumerateSwapchainFormats2EXT(XrSession session,
+                                    XrSwapchainFormatsEnumerateInfoEXT *enumerateInfo,
+                                    uint32_t formatCapacityInput,
+                                    uint32_t *formatCountOutput,
+                                    int64_t *formats)
+{
+	OXR_TRACE_MARKER();
+
+	struct oxr_session *sess;
+	struct oxr_logger log;
+	OXR_VERIFY_SESSION_AND_INIT_LOG(&log, session, sess, "xrEnumerateSwapchainFormats2EXT");
+	OXR_VERIFY_SESSION_NOT_LOST(&log, sess);
+	OXR_VERIFY_EXTENSION(&log, sess->sys->inst, EXT_enumerate_swapchain_formats2);
+
+	return oxr_session_enumerate_formats2(&log, sess, enumerateInfo, formatCapacityInput, formatCountOutput,
+	                                      formats);
+}
+#endif
 
 XRAPI_ATTR XrResult XRAPI_CALL
 oxr_xrCreateSwapchain(XrSession session, const XrSwapchainCreateInfo *createInfo, XrSwapchain *out_swapchain)

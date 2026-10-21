@@ -234,48 +234,6 @@ static struct xrt_binding_output_pair simple_outputs_pssense[] = {
     {XRT_OUTPUT_NAME_SIMPLE_VIBRATION, XRT_OUTPUT_NAME_PSSENSE_VIBRATION},
 };
 
-/*
- * XR_KHR_generic_controller is a hardware-neutral fallback interaction
- * profile. Keep the mapping explicit so OpenXR applications can bind to
- * standard generic paths without pretending Sense is another vendor's
- * controller.
- *
- * L1/R1 is the closest squeeze actuator. Monado's existing input transform
- * converts its boolean click to the 0/1 float required by squeeze/value,
- * avoiding a second driver-level representation of the same physical input.
- * grip_surface first uses a driver's calibrated generic palm pose when one
- * is exposed, with the existing grip pose retained as a last-resort fallback.
- */
-static struct xrt_binding_input_pair generic_inputs_pssense_left[] = {
-    {XRT_INPUT_GENERIC_PRIMARY_CLICK, XRT_INPUT_PSSENSE_SQUARE_CLICK},
-    {XRT_INPUT_GENERIC_SECONDARY_CLICK, XRT_INPUT_PSSENSE_TRIANGLE_CLICK},
-    {XRT_INPUT_GENERIC_THUMBSTICK_CLICK, XRT_INPUT_PSSENSE_THUMBSTICK_CLICK},
-    {XRT_INPUT_GENERIC_THUMBSTICK, XRT_INPUT_PSSENSE_THUMBSTICK},
-    {XRT_INPUT_GENERIC_SQUEEZE_VALUE, XRT_INPUT_PSSENSE_SQUEEZE_CLICK},
-    {XRT_INPUT_GENERIC_TRIGGER_VALUE, XRT_INPUT_PSSENSE_TRIGGER_VALUE},
-    {XRT_INPUT_GENERIC_GRIP_POSE, XRT_INPUT_PSSENSE_GRIP_POSE},
-    {XRT_INPUT_GENERIC_GRIP_SURFACE_POSE, XRT_INPUT_GENERIC_PALM_POSE},
-    {XRT_INPUT_GENERIC_GRIP_SURFACE_POSE, XRT_INPUT_PSSENSE_GRIP_POSE},
-    {XRT_INPUT_GENERIC_AIM_POSE, XRT_INPUT_PSSENSE_AIM_POSE},
-};
-
-static struct xrt_binding_input_pair generic_inputs_pssense_right[] = {
-    {XRT_INPUT_GENERIC_PRIMARY_CLICK, XRT_INPUT_PSSENSE_CROSS_CLICK},
-    {XRT_INPUT_GENERIC_SECONDARY_CLICK, XRT_INPUT_PSSENSE_CIRCLE_CLICK},
-    {XRT_INPUT_GENERIC_THUMBSTICK_CLICK, XRT_INPUT_PSSENSE_THUMBSTICK_CLICK},
-    {XRT_INPUT_GENERIC_THUMBSTICK, XRT_INPUT_PSSENSE_THUMBSTICK},
-    {XRT_INPUT_GENERIC_SQUEEZE_VALUE, XRT_INPUT_PSSENSE_SQUEEZE_CLICK},
-    {XRT_INPUT_GENERIC_TRIGGER_VALUE, XRT_INPUT_PSSENSE_TRIGGER_VALUE},
-    {XRT_INPUT_GENERIC_GRIP_POSE, XRT_INPUT_PSSENSE_GRIP_POSE},
-    {XRT_INPUT_GENERIC_GRIP_SURFACE_POSE, XRT_INPUT_GENERIC_PALM_POSE},
-    {XRT_INPUT_GENERIC_GRIP_SURFACE_POSE, XRT_INPUT_PSSENSE_GRIP_POSE},
-    {XRT_INPUT_GENERIC_AIM_POSE, XRT_INPUT_PSSENSE_AIM_POSE},
-};
-
-static struct xrt_binding_output_pair generic_outputs_pssense[] = {
-    {XRT_OUTPUT_NAME_GENERIC_VIBRATION, XRT_OUTPUT_NAME_PSSENSE_VIBRATION},
-};
-
 static struct xrt_binding_input_pair index_inputs_pssense_left[] = {
     {XRT_INPUT_INDEX_SYSTEM_CLICK, XRT_INPUT_PSSENSE_PS_CLICK},
     {XRT_INPUT_INDEX_A_CLICK, XRT_INPUT_PSSENSE_SQUARE_CLICK},
@@ -318,13 +276,6 @@ static struct xrt_binding_output_pair index_outputs_pssense[] = {
 
 static struct xrt_binding_profile binding_profiles_pssense_left[] = {
     {
-        .name = XRT_DEVICE_GENERIC_CONTROLLER,
-        .inputs = generic_inputs_pssense_left,
-        .input_count = ARRAY_SIZE(generic_inputs_pssense_left),
-        .outputs = generic_outputs_pssense,
-        .output_count = ARRAY_SIZE(generic_outputs_pssense),
-    },
-    {
         .name = XRT_DEVICE_TOUCH_CONTROLLER,
         .inputs = touch_inputs_pssense,
         .input_count = ARRAY_SIZE(touch_inputs_pssense),
@@ -348,13 +299,6 @@ static struct xrt_binding_profile binding_profiles_pssense_left[] = {
 };
 
 static struct xrt_binding_profile binding_profiles_pssense_right[] = {
-    {
-        .name = XRT_DEVICE_GENERIC_CONTROLLER,
-        .inputs = generic_inputs_pssense_right,
-        .input_count = ARRAY_SIZE(generic_inputs_pssense_right),
-        .outputs = generic_outputs_pssense,
-        .output_count = ARRAY_SIZE(generic_outputs_pssense),
-    },
     {
         .name = XRT_DEVICE_TOUCH_CONTROLLER,
         .inputs = touch_inputs_pssense,
@@ -2087,15 +2031,27 @@ pssense_get_constellation_pose(struct pssense_device *pssense,
 }
 
 static void
-parse_pssense_calibration(const struct pssense_calibration_data *calibration_data,
+parse_pssense_calibration(struct pssense_device *pssense,
+                          const struct pssense_calibration_data *calibration_data,
                           struct pssense_parsed_calibration *out_parsed)
 {
-	const float rad_per_sec_ref = M_PI * 3.f;
+	int16_t gyro_speed_ref1 = (int16_t)__le16_to_cpu(calibration_data->gyro_speed_ref1);
+	int16_t gyro_speed_ref2 = (int16_t)__le16_to_cpu(calibration_data->gyro_speed_ref2);
+	float rad_per_sec_ref = ((float)gyro_speed_ref1 + (float)gyro_speed_ref2) * 0.5f * (float)(M_PI / 180.0);
+	if (!(rad_per_sec_ref > 0.0f)) {
+		PSSENSE_DEBUG(pssense, "Got invalid gyro speed reference of %f rad/s. Falling back to default.",
+		              rad_per_sec_ref);
+		rad_per_sec_ref = (float)(M_PI * 3.0);
+	}
+
+	PSSENSE_DEBUG(pssense, "Gyro speed reference: %f rad/s", rad_per_sec_ref);
 
 	int16_t gyro_plus_x = __le16_to_cpu(calibration_data->gyro_plus_x);
 	int16_t gyro_minus_x = __le16_to_cpu(calibration_data->gyro_minus_x);
+
 	int16_t gyro_plus_y = __le16_to_cpu(calibration_data->gyro_plus_y);
 	int16_t gyro_minus_y = __le16_to_cpu(calibration_data->gyro_minus_y);
+
 	int16_t gyro_plus_z = __le16_to_cpu(calibration_data->gyro_plus_z);
 	int16_t gyro_minus_z = __le16_to_cpu(calibration_data->gyro_minus_z);
 
@@ -2137,10 +2093,17 @@ parse_pssense_calibration(const struct pssense_calibration_data *calibration_dat
 	    .z = (1.0f / (float)(accel_plus_z - accel_bias.z)) * MATH_GRAVITY_M_S2,
 	};
 
+	PSSENSE_DEBUG(pssense, "Gyro scale: %f\t%f\t%f rad/s", gyro_scale.x, gyro_scale.y, gyro_scale.z);
+	PSSENSE_DEBUG(pssense, "Gyro bias: %d\t%d\t%d", gyro_bias.x, gyro_bias.y, gyro_bias.z);
+	PSSENSE_DEBUG(pssense, "Accel scale: %f\t%f\t%f m/s^2", accel_scale.x, accel_scale.y, accel_scale.z);
+	PSSENSE_DEBUG(pssense, "Accel bias: %f\t%f\t%f", accel_bias.x, accel_bias.y, accel_bias.z);
+
 	(*out_parsed) = XRT_C11_COMPOUND(struct pssense_parsed_calibration){
-	    .gyro_bias = gyro_bias,
 	    .gyro_scale = gyro_scale,
 	    .accel_scale = accel_scale,
+
+	    .accel_bias = accel_bias,
+	    .gyro_bias = gyro_bias,
 	};
 }
 
@@ -2213,7 +2176,7 @@ pssense_get_calibration_data(struct pssense_device *pssense)
 		}
 	} while (invalid_crc);
 
-	parse_pssense_calibration(&calibration_data, &pssense->calibration);
+	parse_pssense_calibration(pssense, &calibration_data, &pssense->calibration);
 	pssense->has_calibration = true;
 
 	PSSENSE_DEBUG(pssense, "Calibration data retrieved and parsed successfully");
@@ -4197,7 +4160,8 @@ pssense_create_internal(struct os_hid_device *hid,
 		    ARRAY_SIZE(binding_profiles_pssense_left) - (index_profile ? 0 : 1);
 
 		pssense->led_model.match_parameters = DEFAULT_MATCH_PARAMETERS;
-		pssense->led_model.leds = pssense_left_leds;
+		memcpy(pssense->corrected_leds, pssense_left_leds, sizeof(pssense_left_leds));
+		pssense->led_model.leds = pssense->corrected_leds;
 		pssense->led_model.led_count = ARRAY_SIZE(pssense_left_leds);
 
 		pssense->tracking.T_led_imu = (struct xrt_pose){
@@ -4212,7 +4176,8 @@ pssense_create_internal(struct os_hid_device *hid,
 		    ARRAY_SIZE(binding_profiles_pssense_right) - (index_profile ? 0 : 1);
 
 		pssense->led_model.match_parameters = DEFAULT_MATCH_PARAMETERS;
-		pssense->led_model.leds = pssense_right_leds;
+		memcpy(pssense->corrected_leds, pssense_right_leds, sizeof(pssense_right_leds));
+		pssense->led_model.leds = pssense->corrected_leds;
 		pssense->led_model.led_count = ARRAY_SIZE(pssense_right_leds);
 
 		pssense->tracking.T_led_imu = (struct xrt_pose){
@@ -4233,10 +4198,8 @@ pssense_create_internal(struct os_hid_device *hid,
 		const struct xrt_vec3 *corrections =
 		    pssense->hand == XRT_HAND_LEFT ? pssense_left_led_corrections : pssense_right_led_corrections;
 		for (size_t i = 0; i < pssense->led_model.led_count; i++) {
-			pssense->corrected_leds[i] = pssense->led_model.leds[i];
 			math_vec3_accum(&corrections[i], &pssense->corrected_leds[i].position);
 		}
-		pssense->led_model.leds = pssense->corrected_leds;
 		PSSENSE_INFO(pssense, "LED_CORRECTION side=%c leds=%zu", pssense->hand == XRT_HAND_LEFT ? 'L' : 'R',
 		             pssense->led_model.led_count);
 	}

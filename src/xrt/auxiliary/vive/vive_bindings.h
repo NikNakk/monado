@@ -13,10 +13,5 @@
 #include "xrt/xrt_device.h"
 
 
-extern struct xrt_binding_profile vive_binding_profiles_index[];
-extern struct xrt_binding_profile vive_binding_profiles_wand[];
 extern struct xrt_binding_profile vive_binding_profiles_flipvr[];
-
-extern uint32_t vive_binding_profiles_wand_count;
-extern uint32_t vive_binding_profiles_index_count;
 extern uint32_t vive_binding_profiles_flipvr_count;

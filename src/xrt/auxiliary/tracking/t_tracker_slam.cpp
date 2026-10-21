@@ -40,6 +40,7 @@
 #include <opencv2/core/mat.hpp>
 #include <opencv2/core/version.hpp>
 
+#include <array>
 #include <deque>
 #include <filesystem>
 #include <fstream>
@@ -226,8 +227,10 @@ struct TrajectoryWriter : public CSVWriter<xrt_pose_sample>
 {
 	TrajectoryWriter(const string &dir, const string &fn, bool e) : CSVWriter<xrt_pose_sample>(dir, fn, e)
 	{
-		column_names = {"timestamp [ns]", "p_RS_R_x [m]", "p_RS_R_y [m]", "p_RS_R_z [m]",
-		                "q_RS_w []",      "q_RS_x []",    "q_RS_y []",    "q_RS_z []"};
+		column_names = {
+		    "timestamp [ns]", "p_RS_R_x [m]", "p_RS_R_y [m]", "p_RS_R_z [m]",
+		    "q_RS_w []",      "q_RS_x []",    "q_RS_y []",    "q_RS_z []",
+		};
 	}
 };
 
@@ -274,7 +277,9 @@ struct TrackerSlam
 	struct xrt_frame_sink cam_sinks[XRT_TRACKING_MAX_CAMS]; //!< Sends camera frames to the SLAM system
 	struct xrt_imu_sink imu_sink = {};                      //!< Sends imu samples to the SLAM system
 	struct xrt_pose_sink gt_sink = {};                      //!< Register groundtruth trajectory for stats
-	struct xrt_hand_masks_sink hand_masks_sink = {};        //!< Register latest masks to ignore
+
+	//! Mask sinks
+	struct xrt_device_masks_sink mask_sinks[XRT_TRACKING_MAX_MASK_SINKS] = {};
 
 	bool submit;        //!< Whether to submit data pushed to sinks to the SLAM tracker
 	uint32_t cam_count; //!< Number of cameras used for tracking
@@ -287,10 +292,13 @@ struct TrackerSlam
 	struct openvr_tracker *ovr_tracker;    //!< OpenVR lighthouse tracker
 
 	// Used mainly for checking that the timestamps come in order
-	timepoint_ns last_imu_ts;                     //!< Last received IMU sample timestamp
-	vector<timepoint_ns> last_cam_ts;             //!< Last received image timestamp per cam
-	struct xrt_hand_masks_sample last_hand_masks; //!< Last received hand masks info
-	Mutex last_hand_masks_mutex;                  //!< Mutex for @ref last_hand_masks
+	timepoint_ns last_imu_ts;         //!< Last received IMU sample timestamp
+	vector<timepoint_ns> last_cam_ts; //!< Last received image timestamp per cam
+
+	//! Mutex for @ref last_masks
+	Mutex last_masks_mutex;
+	//! Last received masks info
+	std::array<struct xrt_device_masks_sample, XRT_TRACKING_MAX_MASK_SINKS> last_masks;
 
 	// Prediction
 
@@ -1200,16 +1208,20 @@ t_slam_gt_sink_push(struct xrt_pose_sink *sink, xrt_pose_sample *sample)
 	xrt_sink_push_pose(t.euroc_recorder->gt, sample);
 }
 
-//! Receive and register masks to use in the next image
-extern "C" void
-t_slam_hand_mask_sink_push(struct xrt_hand_masks_sink *sink, struct xrt_hand_masks_sample *hand_masks)
-{
-	XRT_TRACE_MARKER();
+#define DEFINE_MASK_PUSH(idx)                                                                                          \
+	extern "C" void t_slam_mask_sink_push_##idx(struct xrt_device_masks_sink *sink,                                \
+	                                            struct xrt_device_masks_sample *device_masks)                      \
+	{                                                                                                              \
+		XRT_TRACE_MARKER();                                                                                    \
+                                                                                                                       \
+		auto &t = *container_of(sink, TrackerSlam, mask_sinks[idx]);                                           \
+		unique_lock lock(t.last_masks_mutex);                                                                  \
+		t.last_masks[idx] = *device_masks;                                                                     \
+	}
 
-	auto &t = *container_of(sink, TrackerSlam, hand_masks_sink);
-	unique_lock lock(t.last_hand_masks_mutex);
-	t.last_hand_masks = *hand_masks;
-}
+XRT_TRACKING_FOR_EACH_MASK_SINK(DEFINE_MASK_PUSH)
+
+#undef DEFINE_MASK_PUSH
 
 //! Receive and send IMU samples to the external SLAM system
 extern "C" void
@@ -1305,30 +1317,35 @@ receive_frame(TrackerSlam &t, struct xrt_frame *frame, uint32_t cam_index)
 	default: SLAM_ERROR("Unknown image format"); return;
 	}
 
-	xrt_hand_masks_sample hand_masks{};
+	std::array<struct xrt_device_masks_sample, XRT_TRACKING_MAX_MASK_SINKS> mask_samples;
 	{
-		unique_lock lock(t.last_hand_masks_mutex);
-		hand_masks = t.last_hand_masks;
+		unique_lock masks_lock(t.last_masks_mutex);
+		// Copy only what we need
+		for (uint32_t sink = 0; sink < XRT_TRACKING_MAX_MASK_SINKS; sink++) {
+			mask_samples[sink].views[cam_index] = t.last_masks[sink].views[cam_index];
+		}
 	}
 
-	auto &view = hand_masks.views[cam_index];
 	std::vector<vit_mask_t> masks;
-	if (view.enabled) {
-		for (auto &hand : view.hands) {
-			if (!hand.enabled) {
+
+	for (auto &mask_sample : mask_samples) {
+		auto &device_view = mask_sample.views[cam_index];
+		for (auto &device : device_view.devices) {
+			if (!device.enabled) {
 				continue;
 			}
+
 			vit_mask_t mask{};
-			mask.x = hand.rect.x;
-			mask.y = hand.rect.y;
-			mask.w = hand.rect.w;
-			mask.h = hand.rect.h;
+			mask.x = device.rect.x;
+			mask.y = device.rect.y;
+			mask.w = device.rect.w;
+			mask.h = device.rect.h;
 			masks.push_back(mask);
 		}
-
-		sample.mask_count = masks.size();
-		sample.masks = masks.empty() ? nullptr : masks.data();
 	}
+
+	sample.mask_count = masks.size();
+	sample.masks = masks.empty() ? nullptr : masks.data();
 
 	{
 		XRT_TRACE_IDENT(slam_push);
@@ -1507,8 +1524,13 @@ t_slam_create(struct xrt_frame_context *xfctx,
 	t.gt_sink.push_pose = t_slam_gt_sink_push;
 	t.sinks.gt = &t.gt_sink;
 
-	t.hand_masks_sink.push_hand_masks = t_slam_hand_mask_sink_push;
-	t.sinks.hand_masks = &t.hand_masks_sink;
+#define COPY_MASK_SINKS(idx)                                                                                           \
+	t.mask_sinks[idx].push_device_masks = t_slam_mask_sink_push_##idx;                                             \
+	t.sinks.masks[idx] = &t.mask_sinks[idx];
+
+	XRT_TRACKING_FOR_EACH_MASK_SINK(COPY_MASK_SINKS)
+
+#undef COPY_MASK_SINKS
 
 	t.submit = config->submit_from_start;
 	t.cam_count = config->cam_count;
@@ -1522,7 +1544,9 @@ t_slam_create(struct xrt_frame_context *xfctx,
 
 	t.last_imu_ts = INT64_MIN;
 	t.last_cam_ts = vector<timepoint_ns>(t.cam_count, INT64_MIN);
-	t.last_hand_masks = xrt_hand_masks_sample{};
+	for (auto &last_mask : t.last_masks) {
+		last_mask = xrt_device_masks_sample{};
+	}
 
 	t.pred_type = config->prediction;
 

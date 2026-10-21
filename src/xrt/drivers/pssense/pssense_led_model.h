@@ -22,6 +22,7 @@ static const struct t_constellation_tracker_led_model_match_parameters DEFAULT_M
 };
 
 //! Rotation on X axis from LED -> IMU.
+//! Retain the fork's LED-space fusion convention: doc/macos-upstream-generic-controller.md.
 const float pssense_imu_angle = DEG_TO_RAD(50.27f);
 
 //! The offset from the LED origin -> IMU origin, for the left controller

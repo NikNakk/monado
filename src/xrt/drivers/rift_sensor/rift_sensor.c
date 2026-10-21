@@ -199,7 +199,7 @@ rift_sensor_read_calibration(struct rift_sensor_context *context,
 
 	switch (desc->idProduct) {
 	case OCULUS_DK2_SENSOR_PID: {
-		sensor->frame_interval = 16666 * OS_NS_PER_USEC;
+		sensor->frame_interval = 16666 * U_TIME_1US_IN_NS;
 		sensor->variant = RIFT_VARIANT_DK2;
 		sensor->calibration.distortion_model = T_DISTORTION_OPENCV_RADTAN_5;
 		struct t_camera_calibration_rt5_params calibration_params;
@@ -231,7 +231,7 @@ rift_sensor_read_calibration(struct rift_sensor_context *context,
 		break;
 	}
 	case OCULUS_CV1_SENSOR_PID: {
-		sensor->frame_interval = 19200 * OS_NS_PER_USEC;
+		sensor->frame_interval = 19200 * U_TIME_1US_IN_NS;
 		sensor->variant = RIFT_VARIANT_CV1;
 		sensor->calibration.distortion_model = T_DISTORTION_FISHEYE_KB4;
 		struct t_camera_calibration_kb4_params calibration_params;
@@ -298,12 +298,13 @@ rift_sensor_create(struct rift_sensor_context *context,
 	}
 
 	struct xrt_fs_mode *supported_modes;
-	uint32_t mode_count;
-	bool success = xrt_fs_enumerate_modes(sensor->frame_server, &supported_modes, &mode_count);
-	if (!success || mode_count == 0) {
+	uint32_t mode_count = 0;
+	xrt_result_t xret = xrt_fs_enumerate_modes(sensor->frame_server, &supported_modes, &mode_count);
+	if (xret != XRT_SUCCESS || mode_count == 0) {
 		libusb_close(device_handle);
-		SENSOR_ERROR(context, "Failed to enumerate UVC frameserver for sensor, mode count %d, skipping.",
-		             mode_count);
+		SENSOR_ERROR(context,
+		             "Failed to enumerate UVC frameserver for sensor, mode count %d, skipping, got xret %d.",
+		             mode_count, xret);
 
 		return -1;
 	}

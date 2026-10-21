@@ -171,9 +171,9 @@ handle_imu_update(struct rift_s_controller *ctrl,
 			return;
 		}
 
-		ctrl->last_imu_device_time_ns += (timepoint_ns)dt * OS_NS_PER_USEC;
+		ctrl->last_imu_device_time_ns += (timepoint_ns)dt * U_TIME_1US_IN_NS;
 	} else {
-		ctrl->last_imu_device_time_ns = (timepoint_ns)imu_timestamp * OS_NS_PER_USEC;
+		ctrl->last_imu_device_time_ns = (timepoint_ns)imu_timestamp * U_TIME_1US_IN_NS;
 		ctrl->imu_time_valid = true;
 	}
 	ctrl->imu_timestamp32 = imu_timestamp;

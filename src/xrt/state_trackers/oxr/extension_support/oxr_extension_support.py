@@ -73,6 +73,7 @@ EXTENSIONS = (
     ['XR_EXT_composition_layer_inverted_alpha', 'XRT_FEATURE_OPENXR_INVERTED_ALPHA'],
     ['XR_EXT_debug_utils', 'XRT_FEATURE_OPENXR_DEBUG_UTILS'],
     ['XR_EXT_dpad_binding'],
+    ['XR_EXT_enumerate_swapchain_formats2', 'XRT_FEATURE_OPENXR_ENUMERATE_SWAPCHAIN_FORMATS2'],
     ['XR_EXT_eye_gaze_interaction', 'XRT_FEATURE_OPENXR_INTERACTION_EXT_EYE_GAZE'],
     ['XR_EXT_future', 'XRT_FEATURE_OPENXR_FUTURE_EXT'],
     ['XR_EXT_hand_interaction', 'XRT_FEATURE_OPENXR_INTERACTION_EXT_HAND'],

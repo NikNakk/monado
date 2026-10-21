@@ -411,6 +411,29 @@ oxr_session_enumerate_formats(struct oxr_logger *log,
 	                    oxr_session_success_result(sess));
 }
 
+#ifdef OXR_HAVE_EXT_enumerate_swapchain_formats2
+XrResult
+oxr_session_enumerate_formats2(struct oxr_logger *log,
+                               struct oxr_session *sess,
+                               XrSwapchainFormatsEnumerateInfoEXT *enumerateInfo,
+                               uint32_t formatCapacityInput,
+                               uint32_t *formatCountOutput,
+                               int64_t *formats)
+{
+	if (enumerateInfo == NULL) {
+		return oxr_error(log, XR_ERROR_VALIDATION_FAILURE, "(enumerateInfo == NULL) cannot be null");
+	}
+	if (enumerateInfo->type != XR_TYPE_SWAPCHAIN_FORMATS_ENUMERATE_INFO_EXT) {
+		return oxr_error(log, XR_ERROR_VALIDATION_FAILURE, "(enumerateInfo->type) invalid");
+	}
+	if (enumerateInfo->next != NULL) {
+		return oxr_error(log, XR_ERROR_VALIDATION_FAILURE, "(enumerateInfo->next) must be NULL");
+	}
+
+	return oxr_session_enumerate_formats(log, sess, formatCapacityInput, formatCountOutput, formats);
+}
+#endif
+
 XrResult
 oxr_session_begin(struct oxr_logger *log, struct oxr_session *sess, const XrSessionBeginInfo *beginInfo)
 {

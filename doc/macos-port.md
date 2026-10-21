@@ -857,6 +857,16 @@ branch-oriented companion to this document.
 
 ## Upstream sync
 
+
+The 2026-10-21 [generic-controller comparison and upstream merge](macos-upstream-generic-controller.md)
+is prepared on `codex/upstream-generic-controller`, based on the current WSI
+fragment-output branch. It adopts upstream's generated action/rebinding system
+and 62 commits through `ffe0a758c`, preserving two generic fallback behaviors,
+Sense LED-space tracking and opt-in defaults. The latest eight I/O-cache commits
+are deferred until remaining driver mappings and opt-ins are migrated.
+This does not move `macos-upstream-clean` or install/push a runtime.
+
+
 On 2026-10-07, `macos-upstream-clean` merged GitLab upstream `main` through
 `ec188bb13` in merge commit `753698f92`, with no merge conflicts. The eight
 new commits replace thread naming with a current-thread API, correct WMR

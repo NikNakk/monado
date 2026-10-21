@@ -15,6 +15,7 @@ set(tests
     tests_generic_callbacks
     tests_foveation
     tests_glue_device
+    tests_glue_frameserver
     tests_glue_traits
     tests_history_buf
     tests_id_ringbuffer
@@ -61,6 +62,9 @@ if(XRT_FEATURE_OPENXR)
 		tests_foveation_openxr
 		tests_oxr_layer_color_scale_bias
 		)
+endif()
+if(XRT_FEATURE_OPENXR)
+	list(APPEND tests tests_binding_registry)
 endif()
 if(XRT_HAVE_OPENGL
    AND XRT_HAVE_OPENGL_GLX
@@ -131,6 +135,7 @@ endif()
 target_link_libraries(tests_cxx_wrappers PRIVATE xrt-interfaces)
 target_link_libraries(tests_glue_device PRIVATE xrt-interfaces aux_glue)
 target_link_libraries(tests_foveation PRIVATE aux_foveation)
+target_link_libraries(tests_glue_frameserver PRIVATE xrt-interfaces aux_glue)
 target_link_libraries(tests_glue_traits PRIVATE xrt-interfaces aux_glue)
 target_link_libraries(tests_history_buf PRIVATE aux_math)
 target_link_libraries(tests_lowpass_float PRIVATE aux_math)
@@ -273,9 +278,15 @@ if(XRT_FEATURE_OPENXR)
 		tests_generic_controller PRIVATE st_oxr xrt-interfaces xrt-external-openxr
 		)
 	add_dependencies(tests_generic_controller generate_oxr_bindings)
+	if(APPLE AND TARGET ipc_client)
+		target_link_libraries(tests_generic_controller PRIVATE ipc_client)
+	endif()
 	target_link_libraries(
 		tests_foveation_openxr PRIVATE st_oxr aux_foveation xrt-interfaces
 					       xrt-external-openxr
+		)
+	target_link_libraries(
+		tests_binding_registry PRIVATE st_oxr xrt-interfaces xrt-external-openxr
 		)
 endif()
 if(_have_opengl_test)

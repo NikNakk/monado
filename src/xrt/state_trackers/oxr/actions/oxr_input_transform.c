@@ -14,6 +14,8 @@
 
 #include "oxr_input_transform.h"
 
+#include "oxr_binding_registry.h"
+
 #include "../oxr_logger.h"
 #include "../oxr_objects.h"
 #include "../oxr_conversions.h"
@@ -229,15 +231,6 @@ oxr_input_transform_process(struct oxr_input_transform *transform,
 	return true;
 }
 
-static bool
-ends_with(const char *str, const char *suffix)
-{
-	size_t len = strlen(str);
-	size_t suffix_len = strlen(suffix);
-
-	return (len >= suffix_len) && (0 == strcmp(str + (len - suffix_len), suffix));
-}
-
 static inline bool
 input_is_float(enum xrt_input_type input_type)
 {
@@ -273,20 +266,20 @@ extend_transform_array(struct oxr_logger *log,
                        struct oxr_input_transform *transform,
                        const struct oxr_input_transform *parent,
                        XrActionType result_type,
-                       const char *bound_path_string)
+                       const struct oxr_binding_point *binding_point)
 {
 	enum xrt_input_type input_type = parent->result_type;
 	if (input_dim(input_type) == 2 && result_type != XR_ACTION_TYPE_VECTOR2F_INPUT) {
 		// reduce dimension
-		if (ends_with(bound_path_string, "/x")) {
+		if (binding_point->value_transform == OXR_BINDING_VALUE_TRANSFORM_VEC2_GET_X) {
 			oxr_slog(slog, "\t\t\tAdding transform: get x of Vec2\n");
 			return oxr_input_transform_init_vec2_get_x(transform, parent);
 		}
-		if (ends_with(bound_path_string, "/y")) {
+		if (binding_point->value_transform == OXR_BINDING_VALUE_TRANSFORM_VEC2_GET_Y) {
 			oxr_slog(slog, "\t\t\tAdding transform: get y of Vec2\n");
 			return oxr_input_transform_init_vec2_get_y(transform, parent);
 		}
-		oxr_slog(slog, "\t\t\tNo rule to get float from vec2f for binding %s\n", bound_path_string);
+		oxr_slog(slog, "\t\t\tNo rule to get float from vec2f for binding %s\n", binding_point->templ->path);
 		return false;
 	}
 
@@ -328,7 +321,7 @@ oxr_input_transform_create_chain(struct oxr_logger *log,
                                  enum xrt_input_type input_type,
                                  XrActionType result_type,
                                  const char *action_name,
-                                 const char *bound_path_string,
+                                 const struct oxr_binding_point *binding_point,
                                  struct oxr_input_transform **out_transforms,
                                  size_t *out_transform_count)
 {
@@ -347,6 +340,17 @@ oxr_input_transform_create_chain(struct oxr_logger *log,
 	bool identity = (result_type == XR_ACTION_TYPE_POSE_INPUT && input_type == XRT_INPUT_TYPE_POSE) ||
 	                oxr_type_matches_xrt(current_xform->result_type, result_type);
 
+	// Avoid binding vector2 actions through scalar components.
+	if (identity && result_type == XR_ACTION_TYPE_VECTOR2F_INPUT &&
+	    (binding_point->value_transform == OXR_BINDING_VALUE_TRANSFORM_VEC2_GET_X ||
+	     binding_point->value_transform == OXR_BINDING_VALUE_TRANSFORM_VEC2_GET_Y)) {
+		oxr_slog(slog, "\t\t\tCannot bind vector2 action through scalar component %s\n",
+		         binding_point->templ->path);
+		*out_transform_count = 0;
+		*out_transforms = NULL;
+		return false;
+	}
+
 	if (identity) {
 		// No transform needed, just return identity to keep this alive.
 		*out_transform_count = 1;
@@ -363,14 +367,14 @@ oxr_input_transform_create_chain(struct oxr_logger *log,
 			oxr_slog(
 			    slog,
 			    "\t\t\tSeem to have gotten into a loop, trying to make a rule to transform. '%s' '%s' \n",
-			    action_name, bound_path_string);
+			    action_name, binding_point->templ->path);
 			*out_transform_count = 0;
 			*out_transforms = NULL;
 			return false;
 		}
 
 		struct oxr_input_transform *new_xform = &(chain[transform_count]);
-		if (!extend_transform_array(log, slog, new_xform, current_xform, result_type, bound_path_string)) {
+		if (!extend_transform_array(log, slog, new_xform, current_xform, result_type, binding_point)) {
 			// Error has already been logged.
 
 			*out_transform_count = 0;

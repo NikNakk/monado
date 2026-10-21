@@ -2671,7 +2671,7 @@ psvr2_end_feature(struct xrt_device *xdev, enum xrt_device_feature_type type)
 }
 
 static struct xrt_binding_input_pair vive_pro_inputs_psvr2[] = {
-    {XRT_INPUT_VIVEPRO_SYSTEM_CLICK, XRT_INPUT_PSVR2_SYSTEM_CLICK},
+    {XRT_INPUT_VIVE_PRO_SYSTEM_CLICK, XRT_INPUT_PSVR2_SYSTEM_CLICK},
 };
 
 static struct xrt_binding_input_pair blubur_s1_inputs_psvr2[] = {

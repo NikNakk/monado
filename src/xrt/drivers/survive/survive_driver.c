@@ -33,7 +33,6 @@
 #include "os/os_time.h"
 
 #include "vive/vive_config.h"
-#include "vive/vive_bindings.h"
 #include "vive/vive_poses.h"
 
 #include "survive_internal.h"
@@ -1113,9 +1112,6 @@ _create_controller_device(struct survive_system *sys,
 
 		survive->base.outputs[0].name = XRT_OUTPUT_NAME_INDEX_HAPTIC;
 
-		survive->base.binding_profiles = vive_binding_profiles_index;
-		survive->base.binding_profile_count = vive_binding_profiles_index_count;
-
 		survive->base.get_hand_tracking = survive_controller_get_hand_tracking;
 		survive->base.supported.hand_tracking = !debug_get_bool_option_survive_disable_hand_emulation();
 
@@ -1136,9 +1132,6 @@ _create_controller_device(struct survive_system *sys,
 		SET_WAND_INPUT(GRIP_POSE, GRIP_POSE);
 
 		survive->base.outputs[0].name = XRT_OUTPUT_NAME_VIVE_HAPTIC;
-
-		survive->base.binding_profiles = vive_binding_profiles_wand;
-		survive->base.binding_profile_count = vive_binding_profiles_wand_count;
 
 		survive->base.device_type = XRT_DEVICE_TYPE_ANY_HAND_CONTROLLER;
 	} else if (survive->ctrl.config.variant == CONTROLLER_TRACKER_GEN1 ||

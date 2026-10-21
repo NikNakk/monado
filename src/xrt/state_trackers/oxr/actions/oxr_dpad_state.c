@@ -53,7 +53,7 @@ clone_oxr_dpad_entry(uint64_t key, const void *src_data, void *ctx)
 bool
 oxr_dpad_state_init(struct oxr_dpad_state *state)
 {
-	if (u_hashmap_int_create(&state->uhi) < 0) {
+	if (u_hashmap_int_create(&state->entries) < 0) {
 		return false;
 	}
 
@@ -64,7 +64,7 @@ const struct oxr_dpad_entry *
 oxr_dpad_state_get(const struct oxr_dpad_state *state, uint64_t key)
 {
 	void *ptr = NULL;
-	u_hashmap_int_find(state->uhi, key, &ptr);
+	u_hashmap_int_find(state->entries, key, &ptr);
 	return (struct oxr_dpad_entry *)ptr;
 }
 
@@ -72,11 +72,11 @@ struct oxr_dpad_entry *
 oxr_dpad_state_get_or_add(struct oxr_dpad_state *state, uint64_t key)
 {
 	void *ptr = NULL;
-	u_hashmap_int_find(state->uhi, key, &ptr);
+	u_hashmap_int_find(state->entries, key, &ptr);
 	struct oxr_dpad_entry *e = (struct oxr_dpad_entry *)ptr;
 	if (e == NULL) {
 		e = U_TYPED_CALLOC(struct oxr_dpad_entry);
-		XRT_MAYBE_UNUSED int ret = u_hashmap_int_insert(state->uhi, key, (void *)e);
+		XRT_MAYBE_UNUSED int ret = u_hashmap_int_insert(state->entries, key, (void *)e);
 		assert(ret >= 0);
 	}
 
@@ -86,9 +86,9 @@ oxr_dpad_state_get_or_add(struct oxr_dpad_state *state, uint64_t key)
 void
 oxr_dpad_state_deinit(struct oxr_dpad_state *state)
 {
-	if (state != NULL && state->uhi != NULL) {
-		u_hashmap_int_clear_and_call_for_each(state->uhi, destroy_callback, NULL);
-		u_hashmap_int_destroy(&state->uhi);
+	if (state != NULL && state->entries != NULL) {
+		u_hashmap_int_clear_and_call_for_each(state->entries, destroy_callback, NULL);
+		u_hashmap_int_destroy(&state->entries);
 	}
 }
 
@@ -100,12 +100,12 @@ oxr_dpad_state_clone(struct oxr_dpad_state *dst_dpad_state, const struct oxr_dpa
 	}
 
 	oxr_dpad_state_deinit(dst_dpad_state);
-	assert(dst_dpad_state->uhi == NULL);
+	assert(dst_dpad_state->entries == NULL);
 
 	if (!oxr_dpad_state_init(dst_dpad_state))
 		return false;
 
-	u_hashmap_int_for_each(src_dpad_state->uhi, clone_oxr_dpad_entry, dst_dpad_state);
+	u_hashmap_int_for_each(src_dpad_state->entries, clone_oxr_dpad_entry, dst_dpad_state);
 
 	return true;
 }

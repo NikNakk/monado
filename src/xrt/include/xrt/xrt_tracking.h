@@ -18,8 +18,12 @@
 #define XRT_TRACKING_MAX_IMUS 3
 #define XRT_TRACKING_FOR_EACH_IMU(_) _(0) _(1) _(2)
 
+#define XRT_TRACKING_MAX_MASK_SINKS 2
+#define XRT_TRACKING_FOR_EACH_MASK_SINK(_) _(0) _(1)
+
 #include "xrt/xrt_defines.h"
 
+#include "xrt/xrt_system.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -154,16 +158,15 @@ struct xrt_pose_sample
 /*!
  * Masks (bounding boxes) of different hands from current views
  */
-struct xrt_hand_masks_sample
+struct xrt_device_masks_sample
 {
-	struct xrt_hand_masks_sample_camera
+	struct xrt_device_masks_sample_camera
 	{
-		bool enabled; //!< Whether any hand mask for this camera is being reported
-		struct xrt_hand_masks_sample_hand
+		struct xrt_device_masks_sample_device
 		{
 			bool enabled;             //!< Whether a mask for this hand is being reported
 			struct xrt_rect_f32 rect; //!< The mask itself in pixel coordinates
-		} hands[2];
+		} devices[XRT_SYSTEM_MAX_DEVICES];
 	} views[XRT_TRACKING_MAX_CAMS];
 };
 
@@ -196,13 +199,13 @@ struct xrt_pose_sink
 };
 
 /*!
- * @interface xrt_hand_masks_sink
+ * @interface xrt_device_masks_sink
  *
- * An object to push @ref xrt_hand_masks_sample to.
+ * An object to push @ref xrt_device_masks_sample to.
  */
-struct xrt_hand_masks_sink
+struct xrt_device_masks_sink
 {
-	void (*push_hand_masks)(struct xrt_hand_masks_sink *, struct xrt_hand_masks_sample *hand_masks);
+	void (*push_device_masks)(struct xrt_device_masks_sink *, struct xrt_device_masks_sample *device_masks);
 };
 
 
@@ -216,8 +219,10 @@ struct xrt_slam_sinks
 	int imu_count;
 	struct xrt_frame_sink *cams[XRT_TRACKING_MAX_CAMS];
 	struct xrt_imu_sink *imus[XRT_TRACKING_MAX_IMUS];
-	struct xrt_pose_sink *gt; //!< Can receive ground truth poses if available
-	struct xrt_hand_masks_sink *hand_masks;
+	//! Can receive ground truth poses if available
+	struct xrt_pose_sink *gt;
+	//! SLAM masks, one per optical tracker (so they can push masks asynchronously).
+	struct xrt_device_masks_sink *masks[XRT_TRACKING_MAX_MASK_SINKS];
 };
 
 /*!
@@ -334,11 +339,11 @@ xrt_sink_push_pose(struct xrt_pose_sink *sink, struct xrt_pose_sample *sample)
 	sink->push_pose(sink, sample);
 }
 
-//! @public @memberof xrt_hand_masks_sink
+//! @public @memberof xrt_device_masks_sink
 XRT_NONNULL_ALL static inline void
-xrt_sink_push_hand_masks(struct xrt_hand_masks_sink *sink, struct xrt_hand_masks_sample *hand_masks)
+xrt_sink_push_device_masks(struct xrt_device_masks_sink *sink, struct xrt_device_masks_sample *device_masks)
 {
-	sink->push_hand_masks(sink, hand_masks);
+	sink->push_device_masks(sink, device_masks);
 }
 
 //! @public @memberof xrt_tracked_psmv

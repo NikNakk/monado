@@ -43,6 +43,7 @@
 { symbol: ["XRT_FEATURE_OPENXR_BODY_TRACKING_FULL_BODY_META", "public", "\"xrt/xrt_config_build.h\"", "public"] },
 { symbol: ["XRT_FEATURE_OPENXR_DEBUG_UTILS", "public", "\"xrt/xrt_config_build.h\"", "public"] },
 { symbol: ["XRT_FEATURE_OPENXR_DISPLAY_REFRESH_RATE", "public", "\"xrt/xrt_config_build.h\"", "public"] },
+{ symbol: ["XRT_FEATURE_OPENXR_ENUMERATE_SWAPCHAIN_FORMATS2", "public", "\"xrt/xrt_config_build.h\"", "public"] },
 { symbol: ["XRT_FEATURE_OPENXR_FACE_TRACKING_ANDROID", "public", "\"xrt/xrt_config_build.h\"", "public"] },
 { symbol: ["XRT_FEATURE_OPENXR_FACE_TRACKING2_FB", "public", "\"xrt/xrt_config_build.h\"", "public"] },
 { symbol: ["XRT_FEATURE_OPENXR_FACIAL_TRACKING_HTC", "public", "\"xrt/xrt_config_build.h\"", "public"] },

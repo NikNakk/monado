@@ -626,7 +626,14 @@ if(XRT_BUILD_DRIVER_SIMULAVR)
 endif()
 
 if(XRT_BUILD_DRIVER_STEAMVR_LIGHTHOUSE OR XRT_BUILD_DRIVER_SURVIVE)
-	add_library(drv_vp2 STATIC vp2/vp2_hid.c vp2/vp2_hid.h vp2/vp2_config.cpp vp2/vp2_config.h)
+	add_library(
+		drv_vp2 STATIC
+		vp2/vp2_hid.c
+		vp2/vp2_hid.h
+		vp2/vp2_config.cpp
+		vp2/vp2_config.h
+		vp2/vp2_protocol.h
+		)
 	target_link_libraries(
 		drv_vp2
 		PRIVATE

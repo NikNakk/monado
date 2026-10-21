@@ -143,6 +143,16 @@ record are carried with the runtime corrections.
   per-thread scheduling fix, followed by the tracking, pose, image-reuse,
   output-barrier and diagnostics work. Shared tracking stays opt-in.
 - Canonical upstream remains the Monado project on freedesktop.org.
+
+
+The 2026-10-21 [generic-controller comparison and upstream merge](macos-upstream-generic-controller.md)
+is prepared on `codex/upstream-generic-controller`, based on the current WSI
+fragment-output branch. It adopts upstream's generated action/rebinding system
+and 62 commits through `ffe0a758c`, preserving two generic fallback behaviors,
+Sense LED-space tracking and opt-in defaults. The latest eight I/O-cache commits
+are deferred until remaining driver mappings and opt-ins are migrated.
+This does not move `macos-upstream-clean` or install/push a runtime.
+
 - Latest local sync: `macos-upstream-clean` merged GitLab `main` through
   `ec188bb13` on 2026-10-07 in `753698f92`, without conflicts. The fork's
   passthrough and floor-calibration workers now use upstream's replacement

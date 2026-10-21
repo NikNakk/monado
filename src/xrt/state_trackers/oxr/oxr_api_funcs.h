@@ -411,6 +411,16 @@ oxr_xrEnumerateSwapchainFormats(XrSession session,
                                 uint32_t *formatCountOutput,
                                 int64_t *formats);
 
+#ifdef OXR_HAVE_EXT_enumerate_swapchain_formats2
+//! OpenXR API function @ep{xrEnumerateSwapchainFormats2EXT}
+XRAPI_ATTR XrResult XRAPI_CALL
+oxr_xrEnumerateSwapchainFormats2EXT(XrSession session,
+                                    XrSwapchainFormatsEnumerateInfoEXT *enumerateInfo,
+                                    uint32_t formatCapacityInput,
+                                    uint32_t *formatCountOutput,
+                                    int64_t *formats);
+#endif
+
 //! OpenXR API function @ep{xrCreateSwapchain}
 XRAPI_ATTR XrResult XRAPI_CALL
 oxr_xrCreateSwapchain(XrSession session, const XrSwapchainCreateInfo *createInfo, XrSwapchain *swapchain);

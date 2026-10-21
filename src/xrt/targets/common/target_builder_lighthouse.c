@@ -202,7 +202,7 @@ valve_index_hand_track(struct lighthouse_system *lhs,
                        struct xrt_frame_context *xfctx,
                        struct xrt_pose head_in_left_cam,
                        struct t_stereo_camera_calibration *stereo_calib,
-                       struct xrt_hand_masks_sink *masks_sink,
+                       struct xrt_device_masks_sink *masks_sink,
                        struct xrt_slam_sinks **out_sinks,
                        struct xrt_device **out_devices)
 {
@@ -386,7 +386,7 @@ valve_index_setup_visual_trackers(struct lighthouse_system *lhs,
 	// Initialize hand tracker
 	struct xrt_slam_sinks *hand_sinks = NULL;
 	struct xrt_device *hand_devices[2] = {NULL};
-	struct xrt_hand_masks_sink *masks_sink = slam_sinks ? slam_sinks->hand_masks : NULL;
+	struct xrt_device_masks_sink *masks_sink = slam_sinks ? slam_sinks->masks[0] : NULL;
 	if (hand_enabled) {
 		bool success = valve_index_hand_track( //
 		    lhs,                               //
@@ -482,9 +482,9 @@ stream_data_sources(struct lighthouse_system *lhs,
 		vive_source_hook_into_sinks(vive_head->source, &sinks);
 	}
 
-	bool bret = xrt_fs_stream_start(lhs->xfs, sinks.cams[0], XRT_FS_CAPTURE_TYPE_TRACKING, mode);
-	if (!bret) {
-		LH_ERROR("Unable to start data streaming");
+	xrt_result_t xret = xrt_fs_stream_start(lhs->xfs, sinks.cams[0], XRT_FS_CAPTURE_TYPE_TRACKING, mode);
+	if (xret != XRT_SUCCESS) {
+		LH_ERROR("Unable to start data streaming, got %d", xret);
 		return false;
 	}
 

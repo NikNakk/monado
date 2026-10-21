@@ -11,24 +11,42 @@
 #include "common/openvr_error.hpp"
 #include "common/openvr_logger.hpp"
 
+#include "XRTVRApplications.hpp"
 #include "XRTVRChaperone.hpp"
 #include "XRTVRChaperoneSetup.hpp"
 #include "XRTVRClientCore.hpp"
 #include "XRTVRCompositor.hpp"
+#include "XRTVRControlPanel.hpp"
+#include "XRTVRDebug.hpp"
+#include "XRTVRDriverManager.hpp"
+#include "XRTVRExtendedDisplay.hpp"
+#include "XRTVRHeadsetView.hpp"
+#include "XRTVRInput.hpp"
+#include "XRTVRIOBuffer.hpp"
+#include "XRTVRNotifications.hpp"
+#include "XRTVROverlay.hpp"
+#include "XRTVROverlayView.hpp"
 #include "XRTVRRenderModels.hpp"
+#include "XRTVRResources.hpp"
+#include "XRTVRScreenshots.hpp"
+#include "XRTVRSettings.hpp"
+#include "XRTVRSpatialAnchors.hpp"
 #include "XRTVRSystem.hpp"
+#include "XRTVRTrackedCamera.hpp"
 
-#include "old/XRTVRChaperone_003.hpp"
-#include "old/XRTVRChaperoneSetup_005.hpp"
-#include "old/XRTVRCompositor_022.hpp"
-#include "old/XRTVRCompositor_024.hpp"
-#include "old/XRTVRCompositor_026.hpp"
-#include "old/XRTVRCompositor_027.hpp"
-#include "old/XRTVRCompositor_028.hpp"
-#include "old/XRTVRSystem_019.hpp"
-#include "old/XRTVRSystem_020.hpp"
-#include "old/XRTVRSystem_021.hpp"
-#include "old/XRTVRSystem_023.hpp"
+#include "old/IVRApplications.hpp"
+#include "old/IVRChaperone.hpp"
+#include "old/IVRChaperoneSetup.hpp"
+#include "old/IVRCompositor.hpp"
+#include "old/IVRInput.hpp"
+#include "old/IVRIOBuffer.hpp"
+#include "old/IVRIPCResourceManagerClient.hpp"
+#include "old/IVRNotifications.hpp"
+#include "old/IVROverlay.hpp"
+#include "old/IVRRenderModels.hpp"
+#include "old/IVRSettings.hpp"
+#include "old/IVRSystem.hpp"
+#include "old/IVRTrackedCamera.hpp"
 
 #include <cstring>
 
@@ -124,6 +142,7 @@ XRTVRClientCore_003::Init(vr::EVRApplicationType eApplicationType, const char *p
 	this->events = std::make_shared<Events>(this->xs);
 	this->compositor = std::make_shared<Compositor>(this->xsysd, this->xcn, this->xsysc, this->events);
 	this->devices = std::make_shared<Devices>(logger, this->xso, this->xsysd, this->events);
+	this->input = std::make_shared<Input>();
 
 	return vr::EVRInitError::VRInitError_None;
 }

@@ -291,7 +291,7 @@ client_loop(volatile struct ipc_client_state *ics)
 
 	struct ipc_thread *it = &ics->server->threads[ics->server_thread_index];
 	ipc_server_client_thread_set_running(ics->server, it);
-	while (it->state == IPC_THREAD_RUNNING) {
+	while (ipc_server_client_thread_is_running(ics->server, it)) {
 		const int half_a_second_ms = 500;
 		int ret = 0;
 
@@ -417,7 +417,7 @@ client_loop(volatile struct ipc_client_state *ics)
 
 	struct ipc_thread *it = &ics->server->threads[ics->server_thread_index];
 	ipc_server_client_thread_set_running(ics->server, it);
-	while (it->state == IPC_THREAD_RUNNING) {
+	while (ipc_server_client_thread_is_running(ics->server, it)) {
 		uint8_t buf[IPC_BUF_SIZE] = {0};
 		DWORD len = 0;
 		BOOL bret = false;
