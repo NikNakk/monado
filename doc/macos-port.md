@@ -10,7 +10,8 @@ An isolated [external FD synchronization fix and KosmicKrisp Alyx candidate](mac
 passes 88 tests and paired 180-frame xrizer probes with timeline handoff. The
 installed runtime/service is unchanged. After the initial user IPC-version
 conflict, the launcher now starts a matching temporary simulated-HMD service;
-actual Alyx on the new driver is the next user checkpoint.
+Alyx reaches menu/hands, but the main environment and intro are missing. A
+targeted custom-resolve fallback test is next; scene rendering is unvalidated.
 
 
 Presenter selection now uses `XRT_MACOS_PRESENTER=wsi|wsi-adaptive|native`

@@ -128,3 +128,39 @@ cmake -S ~/Code/monado-2/build/review/kk-fd-guard \
   -DCMAKE_BUILD_TYPE=RelWithDebInfo -DBUILD_TESTING=ON
 cmake --build ~/Code/alyx-native/build/monado-kk-fd-guard --parallel 6
 ```
+
+## First paired Alyx result: main scene missing — 21 October
+
+The user reports the intro did not play and menu/hands appeared, but the main
+rendered environment was absent: grey 3D background with Alyx logo. This is
+explicitly not the xrizer loading-stage override. The run ends with Ctrl+C
+(exit 130) after 49.13 seconds. Full scene compatibility is not validated.
+
+The unsupported override warning also occurs with MoltenVK, but does not explain
+the missing application environment. The compared runs all have 50 error-texture
+and 100 command-buffer-purge warnings. No graphics-pipeline failure is logged;
+this does not establish correct pipelines/shaders. Intro playback has no decisive
+error in this capture and remains unexplained.
+
+The concrete enabled-extension difference in the engine log is
+VK_EXT_custom_resolve. Only KK logs programmable resolves. The actual ARM64
+renderer contains the built-in option `-vulkan_disable_ext_custom_resolve`.
+Test that fallback without modifying the game or driver, using the same profile:
+
+```sh
+~/Code/alyx-native/run-alyx-kosmickrisp \
+  --output ~/Code/alyx-native/runs/kk-alyx-3 --timeout 300 \
+  -- -vulkan_disable_ext_custom_resolve +vr_fidelity_level_auto 0 +vr_fidelity_level 0
+```
+
+A dry-run verifies that option is forwarded and KK/timeline/GPU feedback stay
+selected (explicit 24576 MiB was used for the sandboxed dry-run only). This is a
+hypothesis, not a confirmed cause. Check the intro/menu environment first, then
+load the usual save if they return. The next log must confirm programmable
+resolves are no longer selected before attributing a visual difference to the
+option. If the environment remains missing, instrument the actual scene render
+passes and pipelines rather than implement the unrelated stage-override renderer.
+
+[Sanitized run identity and comparisons](alyx-valve-lua-results/kk-fd-sync-guard/kk-alyx-2-menu.json)
+retain the evidence without private game logs. The installed runtime and default
+experimental profile are unchanged.

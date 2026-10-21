@@ -1,0 +1,52 @@
+{
+  "run": "kk-alyx-2",
+  "binaries": {
+    "host": {
+      "path": "/Users/nickkennedy/Code/alyx-native/build/host-timeline/alyx_host",
+      "sha256": "45f4c3b85ddab9272c1937eb2d0f69658df32cb7513721b236f92b95d3e9f725"
+    },
+    "xrizer": {
+      "path": "/Users/nickkennedy/Code/alyx-native/build/xrizer-gpu-timing/release/libxrizer.dylib",
+      "sha256": "6547068da978895e603df51cc25040b40c9cebebee973d684429cd8a6d97a9aa"
+    },
+    "openxr_loader": {
+      "path": "/Users/nickkennedy/Code/OpenXR-SDK/build/macos/src/loader/Release/libopenxr_loader.dylib",
+      "sha256": "965161677bbc6415110ebc264216891114963eb89689db5153316b55802642a0"
+    },
+    "engine": {
+      "path": "/Users/nickkennedy/Code/alyx-native/workspace/alyx-native-game-root/game/bin/linuxsteamrtarm64/libengine2.so",
+      "sha256": "43ff2a7ce24488690b408d61976a3d0f9609dc61ca4d5675d3e07f5b038bf333"
+    },
+    "monado_runtime": {
+      "path": "/Users/nickkennedy/Code/alyx-native/build/monado-kk-fd-guard/src/xrt/targets/openxr/libopenxr_monado.dylib",
+      "sha256": "ce577d53dfde349f175b7227b5776e912d5b59893bb48df720e6be4708957a0b"
+    }
+  },
+  "driver_identity": "device=Apple M5 vendor=0x106b deviceID=0x64 api=1.4.363 driverVersion=109457507 driverID=28 driver=KosmicKrisp info=Mesa 27.0.0-devel (git-0c9a1f072e) UUID=4c050000010000000000000000000000",
+  "driver_library_sha256": "83e46e62122f6352a2b94e7efc25abe1e122e41a7b5ad8eb02dc869a4bee0664",
+  "exit_code": 130,
+  "elapsed_seconds": 49.130651235580444,
+  "user_observation": "Intro video absent; menu and hands visible but the main rendered environment/stage is missing (grey 3D background with Alyx logo). User explicitly distinguishes this from xrizer stage override.",
+  "comparisons": {
+    "kk-alyx-2": {
+      "unsupported_override_warning": 1,
+      "error_texture_warning": 50,
+      "command_buffer_purge_warning": 100,
+      "custom_resolve_path_logged": true
+    },
+    "gpu-timing-1": {
+      "unsupported_override_warning": 1,
+      "error_texture_warning": 50,
+      "command_buffer_purge_warning": 100,
+      "custom_resolve_path_logged": false
+    },
+    "foveation-observe-1": {
+      "unsupported_override_warning": 1,
+      "error_texture_warning": 50,
+      "command_buffer_purge_warning": 100,
+      "custom_resolve_path_logged": false
+    }
+  },
+  "next_test": "Same KK profile with engine option -vulkan_disable_ext_custom_resolve; cause unconfirmed.",
+  "interpretation": "Known xrizer stage-override warning does not explain the missing application environment. Full Alyx scene rendering is not validated."
+}
