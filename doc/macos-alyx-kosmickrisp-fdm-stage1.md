@@ -85,6 +85,41 @@ shader reads the multisampled samples back.
   subsampled samplers (`r_subsampled_sampler_desc`) when it reads the
   subsampled resolve target later.
 
+## Timing comparison: FDM off vs full-rate FDM on
+
+Both runs used the same KosmicKrisp build (`build/kk-fdm`) and the same
+non-observer launcher (`kk-tests/run-alyx-kk-cr-debug` with `KK_ICD` set). Custom
+resolve was on, fidelity was fixed at 0 and `+vr_fdm 1` was passed. The only
+difference was `MESA_KK_EXPERIMENTAL=fdm`. The user loaded the same autosave in
+each and followed the same routine (`runs/claude-fdm-timing-off-2`,
+`runs/claude-fdm-timing-on-1`). FDM was enabled and the map created only in the
+second run. Segments come from the per-frame GPU timing CSV. The save restore
+happens about 33 s in, loading runs to about 40 s, and the level follows.
+
+| Level, steady (42-115 s, excluding 80-92 s) | FDM off | FDM on |
+|---|---:|---:|
+| Frame rate | 59.3 fps | 59.4 fps |
+| Application GPU time, median / p99 | 13.24 / 17.99 ms | 13.25 / 17.87 ms |
+| Frame interval, median / p99 | 16.67 / 21.2 ms | 16.67 / 19.9 ms |
+| Frames over 20 ms | 1.3% | 1.0% |
+
+The menu segment matches as well. Full-rate FDM therefore costs nothing
+measurable. The worse pacing felt in the earlier FDM run came from the observer's
+logging (about 29,000 records), not from FDM.
+
+One difference remains. At a similar point in the routine, the FDM-on run
+stalled for 3.2 s and the FDM-off run for about 0.3 s. The log shows nothing
+timestamped there. A likely cause is first-use pipeline compilation; each run
+starts with an empty, isolated cache. A repeat run, or a run with a persistent
+cache, would confirm it.
+
+Loading does not leave one long gap in the timeline: Alyx keeps presenting a few
+frames per second while loading. Find load phases from frame rate, not a single
+gap. The first FDM-off attempt crashed during startup in Alyx's Steam networking
+module (`libnetworksystem.so`), unrelated to graphics. Both timing runs ended
+with xrizer's known instance-loss panic on window close, after the measured
+data.
+
 ## Stage 2 outline (not started)
 
 A shaped map makes acceleration on Metal more practical than Codex's
