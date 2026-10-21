@@ -12,7 +12,9 @@ installed runtime/service is unchanged. After the initial user IPC-version
 conflict, the launcher now starts a matching temporary simulated-HMD service;
 The user confirms the custom-resolve fallback restores the missing scene.
 KK captures show larger frame-time tails than earlier MoltenVK; a paired
-MoltenVK control is ready before attributing the stalls to the driver.
+MoltenVK control has similar selected-window pacing to the earlier good run.
+Driver changes reset Alyx's recommended graphics settings, so equal active
+quality is unverified; the launcher now records video settings before/after.
 
 
 Presenter selection now uses `XRT_MACOS_PRESENTER=wsi|wsi-adaptive|native`

@@ -216,3 +216,58 @@ are committed; private game logs remain in the permanent workspace. If the
 paired MVK capture is smooth, instrument KK pipeline compilation and queue
 submission around the outlier frames. Do not optimize or benchmark FDM before
 establishing this non-FDM baseline.
+
+## Recommended-settings reset invalidates equal-quality assumption — 21 October
+
+The user reports the current MVK control feels better than KK but perhaps below
+the best MVK run, and reports recommended-settings notifications on the first
+KK and current MVK runs. Both logs confirm `Graphics Device changed, resetting
+video config`. The drivers expose different real Vulkan device IDs, even though
+they use the same physical Apple M5. Alyx persists one shared
+`game/hlvr/cfg/deckard/video2.txt`, so changing driver can trigger re-detection.
+
+| Initial logged reset | First KK | Current MVK control |
+|---|---:|---:|
+| setting.cpu_level | 2 | 2 |
+| setting.mem_level | 2 | 2 |
+| setting.gpu_mem_level | 0 | 3 |
+
+Those are initial reset assignments, **not a complete final active-quality
+snapshot**. The currently saved file has gpu_mem_level 1, showing that subsequent
+configuration activity differs from the startup assignment. It also contains
+separate settings for texture limits/filtering, shadows, characters, fog and
+audio. Fixing vr_fidelity_level 0 does not fix all those controls. No historic
+before/after files were captured, so the precise preset delta cannot be recovered
+from current files alone. The unrelated `cfg/video.txt` is not evidence of what
+the earlier deckard run used. No settings are rewritten by this investigation.
+
+Alyx logs physical GPU memory of 5,359 MB for KK versus 18,186 MB for MVK
+(using the engine's unit labels). This
+is another reported-resource difference relevant to recommendation logic and
+texture budgets; it does not prove the cause of the rendering stalls. No GPU
+identity or memory value is spoofed to suppress the reset.
+
+For the same post-load API 90–115-second window, the current MVK control has
+pose-interval median 16.673ms, p99 21.018ms; GPU-clock median 12.992ms, p99
+15.541ms. The old fixed-fidelity MVK window has pose median 16.819ms, p99
+21.808ms; GPU median 14.031ms, p99 15.461ms. Thus this selected window has
+similar pacing to the earlier run, even though the user perceives the overall
+run as less good. Movement near the end is not represented by that window.
+Quality, motion, caches and thermal conditions prevent a definitive performance
+ratio; the new control was matched in intended software configuration, **not
+proven matched in active game quality**.
+
+The paired launcher now writes read-only `video-settings.json` before and after
+each actual client run beside its service logs. It records the two video config
+paths, numeric/setting entries, hash and mtime, without modifying them or
+capturing user configuration/Steam identifiers. Dry-run remains side-effect free.
+Three unit cases pass (selected values/read-only behavior, missing files, changed
+values), plus a real no-game paired-service lifecycle whose before/after hashes
+and mtimes are identical. Existing service cleanup behavior is retained.
+
+[Settings evidence and current MVK timings](alyx-valve-lua-results/kk-fd-sync-guard/recommended-settings-investigation.json)
+are recorded. Next comparisons need an explicit common in-game graphics preset
+and verified active settings as well as fixed fidelity, with warmed caches and
+controlled scene/motion. Do not treat the historical KK/MVK tail difference as
+a pure driver throughput comparison. No further game run is requested solely
+to remeasure the same unpinned setup.

@@ -1,0 +1,125 @@
+{
+  "runs": {
+    "kk-alyx-2": {
+      "graphics_device_reset": true,
+      "initial_setting_assignments": {
+        "setting.cpu_level": "2",
+        "setting.mem_level": "2",
+        "setting.gpu_mem_level": "0"
+      },
+      "recommendation_messages": [
+        "Recommended config level 0, currently configured for level -1"
+      ],
+      "gpu_memory_messages": [
+        "Dedicated GPU Memory: 110 MB used of 5,250 MB budget.  Physical size: 5,343 MB"
+      ]
+    },
+    "kk-alyx-3": {
+      "graphics_device_reset": false,
+      "initial_setting_assignments": {},
+      "recommendation_messages": [
+        "Recommended config level 1, currently configured for level 0"
+      ],
+      "gpu_memory_messages": [
+        "Dedicated GPU Memory: 110 MB used of 5,632 MB budget.  Physical size: 5,359 MB"
+      ],
+      "window_90_115": {
+        "pose_interval": {
+          "count": 928,
+          "median_ms": 17.09302100000798,
+          "p95_ms": 53.359948149999056,
+          "p99_ms": 214.3216236599974
+        },
+        "gpu_clock_interval": {
+          "count": 929,
+          "median_ms": 13.49475,
+          "p95_ms": 21.10109279999998,
+          "p99_ms": 107.654016800001
+        },
+        "end_frame_wall": {
+          "count": 928,
+          "median_ms": 0.109625,
+          "p95_ms": 0.26588915,
+          "p99_ms": 2.284080110000006
+        }
+      }
+    },
+    "mvk-paired-control-1": {
+      "graphics_device_reset": true,
+      "initial_setting_assignments": {
+        "setting.cpu_level": "2",
+        "setting.mem_level": "2",
+        "setting.gpu_mem_level": "3"
+      },
+      "recommendation_messages": [
+        "Recommended config level 1, currently configured for level -1"
+      ],
+      "gpu_memory_messages": [
+        "Dedicated GPU Memory: 96 MB used of 18,186 MB budget.  Physical size: 18,186 MB"
+      ],
+      "window_90_115": {
+        "pose_interval": {
+          "count": 1499,
+          "median_ms": 16.672749999997905,
+          "p95_ms": 19.837262200005053,
+          "p99_ms": 21.018347499999948
+        },
+        "gpu_clock_interval": {
+          "count": 1500,
+          "median_ms": 12.992354500000001,
+          "p95_ms": 14.0491122,
+          "p99_ms": 15.54050017
+        },
+        "end_frame_wall": {
+          "count": 1500,
+          "median_ms": 0.15575,
+          "p95_ms": 0.37848305,
+          "p99_ms": 0.4801319999999998
+        }
+      }
+    },
+    "gpu-timing-fixed0-1": {
+      "graphics_device_reset": false,
+      "initial_setting_assignments": {},
+      "recommendation_messages": [
+        "Recommended config level 1, currently configured for level 0"
+      ],
+      "gpu_memory_messages": [
+        "Dedicated GPU Memory: 96 MB used of 18,186 MB budget.  Physical size: 18,186 MB"
+      ],
+      "window_90_115": {
+        "pose_interval": {
+          "count": 1494,
+          "median_ms": 16.819312499990247,
+          "p95_ms": 20.12358925000086,
+          "p99_ms": 21.808478559993883
+        },
+        "gpu_clock_interval": {
+          "count": 1495,
+          "median_ms": 14.0305,
+          "p95_ms": 14.9769294,
+          "p99_ms": 15.460645519999995
+        },
+        "end_frame_wall": {
+          "count": 1495,
+          "median_ms": 0.147583,
+          "p95_ms": 0.25722049999999996,
+          "p99_ms": 0.48501753999999975
+        }
+      }
+    }
+  },
+  "current_config_selected_settings": {
+    "VendorID": "4203",
+    "DeviceID": "436666890",
+    "setting.cpu_level": "2",
+    "setting.mem_level": "2",
+    "setting.gpu_mem_level": "1",
+    "setting.r_high_quality_shadows": "0",
+    "setting.volume_fog_width": "48",
+    "setting.r_texture_stream_max_resolution": "2048",
+    "setting.vr_perf_mode_override2": "2"
+  },
+  "limitations": "No before/after snapshots of these historical runs exist. Initial logged reset values do not establish final active settings. Fidelity 0 does not pin the full quality preset.",
+  "new_capture_validation": "3 unit cases pass; actual no-game paired lifecycle records before/after, identical SHA256 and mtime."
+}

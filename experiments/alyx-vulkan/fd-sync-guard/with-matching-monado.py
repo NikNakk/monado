@@ -8,10 +8,28 @@ import json
 import os
 from pathlib import Path
 import plistlib
+import re
 import signal
 import subprocess
 import tempfile
 import time
+
+
+
+def snapshot_video_settings(root):
+    """Read numeric/setting entries only; never change shared game configuration."""
+    result = {'captured_unix': time.time(), 'files': {}}
+    for relative in ['game/hlvr/cfg/deckard/video2.txt', 'game/hlvr/cfg/video.txt']:
+        path = root / 'workspace/alyx-native-game-root' / relative
+        try:
+            data = path.read_bytes()
+            values = dict(re.findall(r'"(setting\.[^"\n]+|VendorID|DeviceID|Version)"\s*"([^"\n]*)"',
+                                     data.decode('utf-8', errors='replace')))
+            result['files'][relative] = {'exists': True, 'sha256': hashlib.sha256(data).hexdigest(),
+                                        'mtime_ns': path.stat().st_mtime_ns, 'settings': values}
+        except OSError as error:
+            result['files'][relative] = {'exists': path.exists(), 'read_error': type(error).__name__}
+    return result
 
 
 def main():
@@ -56,6 +74,10 @@ def main():
     if output.exists() or service_output.exists():
         parser.error('client and companion -monado output directories must both be new')
     service_output.mkdir(parents=True)
+    native_root = Path(os.environ.get('ALYX_NATIVE_ROOT', str(Path.home()/'Code/alyx-native')))
+    settings = {'before': snapshot_video_settings(native_root)}
+    settings_path = service_output/'video-settings.json'
+    settings_path.write_text(json.dumps(settings, indent=2)+'\n')
     label = f'org.freedesktop.monado.alyx-kosmickrisp.{os.getpid()}'
     domain = f'gui/{os.getuid()}'
     with tempfile.TemporaryDirectory(prefix='alyx-kk-ipc-') as temporary:
@@ -108,6 +130,8 @@ def main():
                     child.wait()
             if bootstrapped:
                 subprocess.run(['launchctl', 'bootout', domain, str(plist)], check=False, timeout=10)
+            settings['after'] = snapshot_video_settings(native_root)
+            settings_path.write_text(json.dumps(settings, indent=2)+'\n')
 
 
 if __name__ == '__main__':
