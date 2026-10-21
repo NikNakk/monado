@@ -1,0 +1,331 @@
+From 3761ec4f111ca34d9c5182d4959c5b9f47e9e7a0 Mon Sep 17 00:00:00 2001
+From: Nick Kennedy <nick@nick-kennedy.com>
+Date: Wed, 21 Oct 2026 20:04:59 +0100
+Subject: [PATCH 4/4] kosmickrisp: map FragCoord and subsampled sampler reads
+ under fdm_rate
+
+Adds rate map decoder NIR intrinsics, emitted as MSL
+rasterization_rate_map_decoder calls. Fragment shaders in FDM pipelines
+convert FragCoord from physical to screen space when a rate map is
+bound. Sampling through an immutable subsampled sampler maps screen
+coordinates to the physical layout using the image's parameter block.
+
+The FragCoord pass uses nir_shader_lower_instructions, since it inserts
+control flow around the replacement.
+
+AI-written commit text (biblioklept).
+
+Generated-by: LLM
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ src/compiler/nir/nir_intrinsics.py            |  4 +
+ src/kosmickrisp/compiler/msl_type_inference.c |  7 ++
+ src/kosmickrisp/compiler/nir_to_msl.c         | 14 +++
+ src/kosmickrisp/vulkan/kk_descriptor_set.c    |  6 ++
+ src/kosmickrisp/vulkan/kk_descriptor_types.h  |  3 +-
+ .../vulkan/kk_nir_lower_descriptors.c         | 94 +++++++++++++++++++
+ src/kosmickrisp/vulkan/kk_shader.c            | 42 +++++++++
+ 7 files changed, 169 insertions(+), 1 deletion(-)
+
+diff --git a/src/compiler/nir/nir_intrinsics.py b/src/compiler/nir/nir_intrinsics.py
+index dd46072..53ff59f 100644
+--- a/src/compiler/nir/nir_intrinsics.py
++++ b/src/compiler/nir/nir_intrinsics.py
+@@ -3330,6 +3330,10 @@ load("per_draw_ptr_kk", [], [], [CAN_ELIMINATE, CAN_REORDER])
+ load("texture_handle_kk", [1], [DEST_TYPE, IMAGE_DIM, IMAGE_ARRAY, ACCESS, FLAGS], [CAN_ELIMINATE])
+ # Same as above but for depth<T> textures, T is always float
+ load("depth_texture_kk", [1], [IMAGE_DIM, IMAGE_ARRAY], [CAN_ELIMINATE])
++intrinsic("rate_map_physical_to_screen_kk", src_comp=[1, 2, 1], dest_comp=2,
++          flags=[CAN_ELIMINATE, CAN_REORDER], bit_sizes=[32])
++intrinsic("rate_map_screen_to_physical_kk", src_comp=[1, 2, 1], dest_comp=2,
++          flags=[CAN_ELIMINATE, CAN_REORDER], bit_sizes=[32])
+ # Load a bindless sampler handle mapping a binding table sampler.
+ intrinsic("load_sampler_handle_kk", [1], 1, [],
+           flags=[CAN_ELIMINATE, CAN_REORDER],
+diff --git a/src/kosmickrisp/compiler/msl_type_inference.c b/src/kosmickrisp/compiler/msl_type_inference.c
+index 12e46d5..5b9f076 100644
+--- a/src/kosmickrisp/compiler/msl_type_inference.c
++++ b/src/kosmickrisp/compiler/msl_type_inference.c
+@@ -381,6 +381,13 @@ infer_types_from_intrinsic(struct hash_table *types, nir_intrinsic_instr *instr)
+    case nir_intrinsic_load_buffer_ptr_kk:
+       set_type(types, &instr->def, TYPE_UINT);
+       break;
++   case nir_intrinsic_rate_map_physical_to_screen_kk:
++   case nir_intrinsic_rate_map_screen_to_physical_kk:
++      set_type(types, &instr->src[0], TYPE_UINT);
++      set_type(types, &instr->src[1], TYPE_FLOAT);
++      set_type(types, &instr->src[2], TYPE_UINT);
++      set_type(types, &instr->def, TYPE_FLOAT);
++      break;
+    // The defs of these instructions don't participate in type inference
+    // but their sources are pointers (i.e. uints).
+    case nir_intrinsic_load_texture_handle_kk:
+diff --git a/src/kosmickrisp/compiler/nir_to_msl.c b/src/kosmickrisp/compiler/nir_to_msl.c
+index 63d2ec1..7320384 100644
+--- a/src/kosmickrisp/compiler/nir_to_msl.c
++++ b/src/kosmickrisp/compiler/nir_to_msl.c
+@@ -1331,6 +1331,20 @@ intrinsic_to_msl(struct nir_to_msl_ctx *ctx, nir_intrinsic_instr *instr)
+    case nir_intrinsic_load_per_draw_ptr_kk:
+       P(ctx, "(ulong)&per_draw.contents[0];\n");
+       break;
++   case nir_intrinsic_rate_map_physical_to_screen_kk:
++   case nir_intrinsic_rate_map_screen_to_physical_kk:
++      P(ctx, "rasterization_rate_map_decoder(*(constant "
++             "rasterization_rate_map_data*)(");
++      src_to_msl(ctx, &instr->src[0]);
++      P(ctx, ")).map_%s_coordinates(",
++        instr->intrinsic == nir_intrinsic_rate_map_physical_to_screen_kk
++           ? "physical_to_screen"
++           : "screen_to_physical");
++      src_to_msl(ctx, &instr->src[1]);
++      P(ctx, ", ");
++      src_to_msl(ctx, &instr->src[2]);
++      P(ctx, ");\n");
++      break;
+    case nir_intrinsic_load_global: {
+       enum gl_access_qualifier access = nir_intrinsic_access(instr);
+       const char *type = msl_type_for_def(ctx->types, &instr->def);
+diff --git a/src/kosmickrisp/vulkan/kk_descriptor_set.c b/src/kosmickrisp/vulkan/kk_descriptor_set.c
+index c5c74cb..afd0ab2 100644
+--- a/src/kosmickrisp/vulkan/kk_descriptor_set.c
++++ b/src/kosmickrisp/vulkan/kk_descriptor_set.c
+@@ -12,6 +12,7 @@
+ #include "kk_buffer_view.h"
+ #include "kk_descriptor_set_layout.h"
+ #include "kk_device.h"
++#include "kk_image.h"
+ #include "kk_entrypoints.h"
+ #include "kk_image_view.h"
+ #include "kk_physical_device.h"
+@@ -89,6 +90,11 @@ get_sampled_image_view_desc(VkDescriptorType descriptor_type,
+                view->planes[plane].sampled_gpu_resource_id;
+          }
+ 
++         const struct kk_image *image =
++            container_of(view->vk.image, struct kk_image, vk);
++         desc[plane].rate_params =
++            image->rate_params ? image->rate_params->gpu : 0;
++
+          float min_lod = MAX2(view->vk.min_lod - view->vk.base_mip_level, 0.0);
+          desc[plane].image_min_lod_fp16 = _mesa_float_to_half(min_lod);
+          desc[plane].image_min_lod_uint16 = min_lod;
+diff --git a/src/kosmickrisp/vulkan/kk_descriptor_types.h b/src/kosmickrisp/vulkan/kk_descriptor_types.h
+index 3c0f8b8..46ceeeb 100644
+--- a/src/kosmickrisp/vulkan/kk_descriptor_types.h
++++ b/src/kosmickrisp/vulkan/kk_descriptor_types.h
+@@ -28,7 +28,8 @@ struct kk_sampled_image_descriptor {
+ 
+    uint16_t pad_to_64_bits;
+    uint32_t border[4];
+-   uint64_t pad_to_power_2[3];
++   uint64_t rate_params;
++   uint64_t pad_to_power_2[2];
+ };
+ 
+ static_assert(sizeof(struct kk_sampled_image_descriptor) == 64,
+diff --git a/src/kosmickrisp/vulkan/kk_nir_lower_descriptors.c b/src/kosmickrisp/vulkan/kk_nir_lower_descriptors.c
+index 050206a..44ba9f4 100644
+--- a/src/kosmickrisp/vulkan/kk_nir_lower_descriptors.c
++++ b/src/kosmickrisp/vulkan/kk_nir_lower_descriptors.c
+@@ -7,9 +7,12 @@
+  * SPDX-License-Identifier: MIT
+  */
+ #include "kk_cmd_buffer.h"
++#include "kk_debug.h"
+ #include "kk_descriptor_set.h"
+ #include "kk_descriptor_set_layout.h"
+ #include "kk_shader.h"
++#include "kk_image.h"
++#include "kk_sampler.h"
+ 
+ #include "kosmickrisp/compiler/nir_to_msl.h"
+ 
+@@ -468,6 +471,87 @@ try_lower_intrin(nir_builder *b, nir_intrinsic_instr *intrin,
+    }
+ }
+ 
++static bool
++kk_sampler_deref_is_subsampled(nir_builder *b, nir_deref_instr *deref,
++                               const struct lower_descriptors_ctx *ctx)
++{
++   uint32_t set, binding;
++   nir_def *index;
++   get_resource_deref_binding(b, deref, &set, &binding, &index);
++   const struct kk_descriptor_set_binding_layout *binding_layout =
++      get_binding_layout(set, binding, ctx);
++   return binding_layout->immutable_samplers != NULL &&
++          binding_layout->immutable_samplers[0] != NULL &&
++          (binding_layout->immutable_samplers[0]->vk.flags &
++           VK_SAMPLER_CREATE_SUBSAMPLED_BIT_EXT);
++}
++
++static nir_def *
++kk_load_rate_u32(nir_builder *b, nir_def *addr, unsigned offset,
++                 unsigned components)
++{
++   return nir_build_load_global_constant(b, components, 32,
++                                         nir_iadd_imm(b, addr, offset),
++                                         .align_mul = 4);
++}
++
++static void
++kk_lower_subsampled_coord(nir_builder *b, nir_tex_instr *tex,
++                          nir_deref_instr *texture, uint64_t plane_offset_B,
++                          const struct lower_descriptors_ctx *ctx)
++{
++   int ci = nir_tex_instr_src_index(tex, nir_tex_src_coord);
++   if (ci < 0)
++      return;
++   nir_def *coord = tex->src[ci].src.ssa;
++   if (coord->num_components < 2 || coord->bit_size != 32)
++      return;
++
++   nir_def *addr = load_resource_deref_desc(
++      b, 1, 64, texture,
++      plane_offset_B + offsetof(struct kk_sampled_image_descriptor, rate_params),
++      ctx);
++
++   nir_push_if(b, nir_ine_imm(b, addr, 0));
++   nir_def *valid =
++      kk_load_rate_u32(b, addr, offsetof(struct kk_rate_params_header, valid), 1);
++   nir_push_if(b, nir_ine_imm(b, valid, 0));
++
++   nir_def *screen = nir_u2f32(
++      b, kk_load_rate_u32(b, addr, offsetof(struct kk_rate_params_header, screen), 2));
++   nir_def *layer = nir_imm_int(b, 0);
++   if (tex->is_array) {
++      nir_def *layers = kk_load_rate_u32(
++         b, addr, offsetof(struct kk_rate_params_header, layers), 1);
++      nir_def *l = nir_f2u32(
++         b, nir_fround_even(b, nir_channel(b, coord, coord->num_components - 1)));
++      layer = nir_umin(b, l, nir_iadd_imm(b, layers, -1));
++   }
++   nir_def *phys_addr = nir_iadd(
++      b, nir_iadd_imm(b, addr, offsetof(struct kk_rate_params_header, physical)),
++      nir_u2u64(b, nir_imul_imm(b, layer, 8)));
++   nir_def *phys_size = nir_u2f32(
++      b, nir_build_load_global_constant(b, 2, 32, phys_addr, .align_mul = 4));
++
++   nir_def *xy = nir_fmul(b, nir_channels(b, coord, 0x3), screen);
++   nir_def *ph = nir_rate_map_screen_to_physical_kk(
++      b, nir_iadd_imm(b, addr, KK_RATE_PARAMS_HEADER_B), xy, layer);
++   ph = nir_fmax(b, ph, nir_imm_float(b, 0.5f));
++   ph = nir_fmin(b, ph, nir_fadd_imm(b, phys_size, -0.5f));
++   nir_def *uv = nir_fdiv(b, ph, screen);
++
++   nir_def *comps[4];
++   for (unsigned i = 0; i < coord->num_components; i++)
++      comps[i] = i < 2 ? nir_channel(b, uv, i) : nir_channel(b, coord, i);
++   nir_def *mapped = nir_vec(b, comps, coord->num_components);
++   nir_pop_if(b, NULL);
++   nir_def *inner = nir_if_phi(b, mapped, coord);
++   nir_pop_if(b, NULL);
++   nir_def *result = nir_if_phi(b, inner, coord);
++
++   nir_src_rewrite(&tex->src[ci].src, result);
++}
++
+ static bool
+ lower_tex(nir_builder *b, nir_tex_instr *tex,
+           const struct lower_descriptors_ctx *ctx)
+@@ -487,6 +571,16 @@ lower_tex(nir_builder *b, nir_tex_instr *tex,
+    const uint64_t plane_offset_B =
+       plane * sizeof(struct kk_sampled_image_descriptor);
+ 
++   if (KK_EXPERIMENTAL(FDM_RATE) && sampler != NULL &&
++       !tex->is_shadow &&
++       (tex->op == nir_texop_tex || tex->op == nir_texop_txb ||
++        tex->op == nir_texop_txl || tex->op == nir_texop_txd) &&
++       kk_sampler_deref_is_subsampled(
++          b, nir_src_as_deref(nir_src_for_ssa(sampler)), ctx))
++      kk_lower_subsampled_coord(b, tex,
++                                nir_src_as_deref(nir_src_for_ssa(texture)),
++                                plane_offset_B, ctx);
++
+    /* LOD bias is passed in the descriptor set, rather than embedded into
+     * the sampler descriptor. There's no spot in the hardware descriptor,
+     * plus this saves on precious sampler heap spots.
+diff --git a/src/kosmickrisp/vulkan/kk_shader.c b/src/kosmickrisp/vulkan/kk_shader.c
+index c4b2a41..d64ae09 100644
+--- a/src/kosmickrisp/vulkan/kk_shader.c
++++ b/src/kosmickrisp/vulkan/kk_shader.c
+@@ -12,6 +12,7 @@
+ #include "kk_descriptor_set_layout.h"
+ #include "kk_device.h"
+ #include "kk_format.h"
++#include "kk_image.h"
+ #include "kk_nir_lower_vbo.h"
+ #include "kk_physical_device.h"
+ #include "kk_sampler.h"
+@@ -129,6 +130,7 @@ struct kk_fs_key {
+    uint8_t depth_input_att;
+    uint8_t stencil_input_att;
+    bool custom_resolve;
++   bool fdm_frag_coord;
+    uint8_t input_color_count;
+    uint8_t input_color_map[MESA_VK_MAX_COLOR_ATTACHMENTS];
+ };
+@@ -171,6 +173,10 @@ kk_populate_fs_key(struct kk_fs_key *key,
+       BITSET_TEST(state->dynamic, MESA_VK_DYNAMIC_INPUT_ATTACHMENT_MAP);
+ 
+    key->custom_resolve = state->rp->custom_resolve;
++   key->fdm_frag_coord =
++      KK_EXPERIMENTAL(FDM_RATE) &&
++      (state->pipeline_flags &
++       VK_PIPELINE_CREATE_2_RENDERING_FRAGMENT_DENSITY_MAP_ATTACHMENT_BIT_EXT);
+    if (key->custom_resolve && state->ial) {
+       key->input_color_count = state->ial->color_attachment_count;
+       memcpy(key->input_color_map, state->ial->color_map,
+@@ -782,6 +788,36 @@ kk_lower_custom_resolve_input(nir_builder *b, nir_tex_instr *tex, void *data)
+    return true;
+ }
+ 
++static bool
++kk_is_frag_coord(const nir_instr *instr, UNUSED const void *data)
++{
++   return instr->type == nir_instr_type_intrinsic &&
++          nir_instr_as_intrinsic(instr)->intrinsic ==
++             nir_intrinsic_load_frag_coord;
++}
++
++static nir_def *
++kk_lower_fdm_frag_coord(nir_builder *b, nir_instr *instr, UNUSED void *data)
++{
++   nir_def *phys = &nir_instr_as_intrinsic(instr)->def;
++   nir_def *root = nir_load_buffer_ptr_kk(b, 1, 64, .binding = 0);
++   nir_def *addr = nir_build_load_global_constant(
++      b, 1, 64,
++      nir_iadd_imm(b, root,
++                   offsetof(struct kk_root_descriptor_table, fdm_rate_params)),
++      .align_mul = 8);
++
++   nir_push_if(b, nir_ine_imm(b, addr, 0));
++   nir_def *screen = nir_rate_map_physical_to_screen_kk(
++      b, nir_iadd_imm(b, addr, KK_RATE_PARAMS_HEADER_B),
++      nir_channels(b, phys, 0x3), nir_load_layer_id(b));
++   nir_def *mapped = nir_vec4(b, nir_channel(b, screen, 0),
++                              nir_channel(b, screen, 1), nir_channel(b, phys, 2),
++                              nir_channel(b, phys, 3));
++   nir_pop_if(b, NULL);
++   return nir_if_phi(b, mapped, phys);
++}
++
+ static void
+ kk_lower_nir(struct kk_device *dev, nir_shader *nir, bool emulated_stage,
+              const struct vk_pipeline_robustness_state *rs,
+@@ -816,6 +852,12 @@ kk_lower_nir(struct kk_device *dev, nir_shader *nir, bool emulated_stage,
+    } else if (nir->info.stage == MESA_SHADER_FRAGMENT) {
+       NIR_PASS(_, nir, kk_nir_lower_fs_multiview, state->mv->view_mask);
+ 
++      if (KK_EXPERIMENTAL(FDM_RATE) && state && state->rp &&
++          (state->pipeline_flags &
++           VK_PIPELINE_CREATE_2_RENDERING_FRAGMENT_DENSITY_MAP_ATTACHMENT_BIT_EXT))
++         NIR_PASS(_, nir, nir_shader_lower_instructions, kk_is_frag_coord,
++                  kk_lower_fdm_frag_coord, NULL);
++
+       /* Run before nir_lower_input_attachments() below, which rewrites the
+        * subpass loads it looks for. */
+       if (kk_fs_needs_forced_depth_write(nir, state))
+-- 
+2.54.0 (Apple Git-157)
+

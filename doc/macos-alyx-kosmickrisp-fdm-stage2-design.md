@@ -92,3 +92,44 @@ than an expansion pass.
     it is not.
   - Run with `fdm_rate`, check the picture, and repeat the stage 1 timing
     comparison.
+
+## Milestone 2a results
+
+Mesa branch `claude/kk-fdm-stage1` in `workspace/kk-fdm`, built at `build/kk-fdm`
+([patches](../experiments/alyx-vulkan/kosmickrisp-fdm/mesa-patches) 0003-0004):
+
+| Commit | Change |
+|---|---|
+| `0c4a485` | Design steps 1-4: capture the map, build and cache the Metal rate map, apply it to all-subsampled passes and across the custom-resolve switch, and publish parameter blocks |
+| `3761ec4` | Design steps 5-7: decoder intrinsics, screen-space `FragCoord` and subsampled-sampler mapping |
+
+The first version of the `FragCoord` pass returned zeros. It rewrote uses with
+`nir_def_rewrite_uses_after`, which assumes the replacement is in the same
+block. Because the replacement sits behind an `if`, the phi ended up reading
+itself and the position load was dropped. The pass now uses
+`nir_shader_lower_instructions`.
+
+[Rate probe](../experiments/alyx-vulkan/kosmickrisp-fdm/rate-probe)
+(`build.sh OUT`, then `OUT/probe_rate OUT [--custom-resolve]`). It uses Alyx's
+map, 672x768x2 multiview, writes `gl_FragCoord` and reads back through a
+subsampled sampler. Runs used Metal API validation, which reported nothing.
+
+| Mode | Flags | Invocations | Centre error | Periphery error |
+|---|---|---:|---:|---:|
+| Single-sample | `fdm` | 100% | 0.01 px | 0.01 px |
+| Single-sample | `fdm,fdm_rate` | **34.8%** | 0.01 px | 2.24 px |
+| 2 samples + custom resolve | `fdm` | 200% | 0.01 px | 0.01 px |
+| 2 samples + custom resolve | `fdm,fdm_rate` | **69.6%** (34.8% of 200%) | 0.01 px | 2.24 px |
+
+Both layers pass and land on the right layer. With 2 samples, the shader runs
+per sample even without reading `gl_FragCoord`, probably because it writes
+memory (the invocation counter). The ratio is unchanged.
+
+Regression: with no flags, with `fdm` and with `fdm,fdm_rate`, the stage 1 FDM
+probe (normal and subsampled) passes. So do the custom resolve probe (default,
+`--segments 3`, `--dummy-descriptors`, `--no-depth-input`, `--restricted-views`)
+and the Metal interop test.
+
+The stage 1 probe still gets a per-pixel checkerboard with `fdm_rate`. Its map
+is filled with `vkCmdClearColorImage`, which the driver does not capture, so the pass falls back to full rate, as
+designed.

@@ -1,0 +1,784 @@
+From 0c4a48560db0471c6b53b2b406ee46527d50abbc Mon Sep 17 00:00:00 2001
+From: Nick Kennedy <nick@nick-kennedy.com>
+Date: Wed, 21 Oct 2026 20:00:07 +0100
+Subject: [PATCH 3/4] kosmickrisp: apply Metal rate maps to subsampled FDM
+ passes (fdm_rate)
+
+With MESA_KK_EXPERIMENTAL=fdm,fdm_rate, keep a CPU copy of density map
+uploads, build a cached MTLRasterizationRateMap from it (two samples per
+map texel, per-axis maxima per layer) and set it on render passes whose
+attachments are all subsampled, carrying it across the custom resolve
+switch. Subsampled images and the density image get a parameter block
+holding the map's physical sizes and Metal parameter data, and the root
+table carries the active block's address. KK_FDM_DEBUG=1 logs map
+creation and full-rate fallbacks.
+
+FragCoord and subsampled sampling are not yet mapped, so output is not
+correct with fdm_rate; without it nothing changes.
+
+AI-written commit text (biblioklept).
+
+Generated-by: LLM
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ src/kosmickrisp/bridge/meson.build          |   2 +
+ src/kosmickrisp/bridge/mtl_rate_map.h       |  32 ++
+ src/kosmickrisp/bridge/mtl_rate_map.m       |  74 +++++
+ src/kosmickrisp/bridge/stubs/mtl_rate_map.c |  41 +++
+ src/kosmickrisp/vulkan/kk_cmd_buffer.h      |   7 +
+ src/kosmickrisp/vulkan/kk_cmd_copy.c        |   7 +
+ src/kosmickrisp/vulkan/kk_cmd_draw.c        |   5 +
+ src/kosmickrisp/vulkan/kk_debug.c           |   1 +
+ src/kosmickrisp/vulkan/kk_debug.h           |   1 +
+ src/kosmickrisp/vulkan/kk_fdm.c             | 314 ++++++++++++++++++++
+ src/kosmickrisp/vulkan/kk_fdm.h             |  22 ++
+ src/kosmickrisp/vulkan/kk_image.c           |  11 +
+ src/kosmickrisp/vulkan/kk_image.h           |  33 ++
+ src/kosmickrisp/vulkan/meson.build          |   2 +
+ 14 files changed, 552 insertions(+)
+ create mode 100644 src/kosmickrisp/bridge/mtl_rate_map.h
+ create mode 100644 src/kosmickrisp/bridge/mtl_rate_map.m
+ create mode 100644 src/kosmickrisp/bridge/stubs/mtl_rate_map.c
+ create mode 100644 src/kosmickrisp/vulkan/kk_fdm.c
+ create mode 100644 src/kosmickrisp/vulkan/kk_fdm.h
+
+diff --git a/src/kosmickrisp/bridge/meson.build b/src/kosmickrisp/bridge/meson.build
+index 8a57f71..b1c337f 100644
+--- a/src/kosmickrisp/bridge/meson.build
++++ b/src/kosmickrisp/bridge/meson.build
+@@ -20,6 +20,7 @@ if host_machine.system() == 'darwin'
+     'mtl_encoder.m',
+     'mtl_heap.m',
+     'mtl_metal_objects.m',
++    'mtl_rate_map.m',
+     'mtl_render_state.m',
+     'mtl_residency_set.m',
+     'mtl_sampler.m',
+@@ -39,6 +40,7 @@ else
+     'stubs/mtl_encoder.c',
+     'stubs/mtl_heap.c',
+     'stubs/mtl_metal_objects.c',
++    'stubs/mtl_rate_map.c',
+     'stubs/mtl_render_state.c',
+     'stubs/mtl_residency_set.c',
+     'stubs/mtl_sampler.c',
+diff --git a/src/kosmickrisp/bridge/mtl_rate_map.h b/src/kosmickrisp/bridge/mtl_rate_map.h
+new file mode 100644
+index 0000000..836fecb
+--- /dev/null
++++ b/src/kosmickrisp/bridge/mtl_rate_map.h
+@@ -0,0 +1,32 @@
++/*
++ * Copyright 2026 Nick Kennedy
++ * SPDX-License-Identifier: MIT
++ */
++
++#ifndef MTL_RATE_MAP_H
++#define MTL_RATE_MAP_H 1
++
++#include "mtl_types.h"
++
++#include <stdint.h>
++
++typedef void mtl_rate_map;
++
++mtl_rate_map *mtl_new_rate_map(mtl_device *device, uint32_t screen_width,
++                               uint32_t screen_height, uint32_t layer_count,
++                               uint32_t horizontal_count,
++                               uint32_t vertical_count, const float *horizontal,
++                               const float *vertical);
++
++void mtl_rate_map_physical_size(mtl_rate_map *map, uint32_t layer,
++                                uint32_t *width, uint32_t *height);
++
++uint64_t mtl_rate_map_parameter_size(mtl_rate_map *map);
++
++void mtl_rate_map_copy_parameters(mtl_rate_map *map, mtl_buffer *buffer,
++                                  uint64_t offset);
++
++void mtl_render_pass_descriptor_set_rate_map(
++   mtl_render_pass_descriptor *descriptor, mtl_rate_map *map);
++
++#endif /* MTL_RATE_MAP_H */
+diff --git a/src/kosmickrisp/bridge/mtl_rate_map.m b/src/kosmickrisp/bridge/mtl_rate_map.m
+new file mode 100644
+index 0000000..8df6454
+--- /dev/null
++++ b/src/kosmickrisp/bridge/mtl_rate_map.m
+@@ -0,0 +1,74 @@
++/*
++ * Copyright 2026 Nick Kennedy
++ * SPDX-License-Identifier: MIT
++ */
++
++#include "mtl_rate_map.h"
++
++#include <Metal/MTL4RenderPass.h>
++#include <Metal/MTLDevice.h>
++#include <Metal/MTLRasterizationRate.h>
++
++mtl_rate_map *
++mtl_new_rate_map(mtl_device *device, uint32_t screen_width,
++                 uint32_t screen_height, uint32_t layer_count,
++                 uint32_t horizontal_count, uint32_t vertical_count,
++                 const float *horizontal, const float *vertical)
++{
++   @autoreleasepool {
++      id<MTLDevice> dev = (id<MTLDevice>)device;
++      if (![dev supportsRasterizationRateMapWithLayerCount:layer_count])
++         return NULL;
++      MTLRasterizationRateMapDescriptor *desc = [MTLRasterizationRateMapDescriptor
++         rasterizationRateMapDescriptorWithScreenSize:MTLSizeMake(screen_width,
++                                                                  screen_height, 0)];
++      for (uint32_t l = 0; l < layer_count; l++) {
++         MTLRasterizationRateLayerDescriptor *layer =
++            [[[MTLRasterizationRateLayerDescriptor alloc]
++               initWithSampleCount:MTLSizeMake(horizontal_count, vertical_count, 0)
++                        horizontal:horizontal + l * horizontal_count
++                          vertical:vertical + l * vertical_count] autorelease];
++         [desc setLayer:layer atIndex:l];
++      }
++      return [dev newRasterizationRateMapWithDescriptor:desc];
++   }
++}
++
++void
++mtl_rate_map_physical_size(mtl_rate_map *map, uint32_t layer, uint32_t *width,
++                           uint32_t *height)
++{
++   @autoreleasepool {
++      MTLSize size = [(id<MTLRasterizationRateMap>)map physicalSizeForLayer:layer];
++      *width = size.width;
++      *height = size.height;
++   }
++}
++
++uint64_t
++mtl_rate_map_parameter_size(mtl_rate_map *map)
++{
++   @autoreleasepool {
++      return ((id<MTLRasterizationRateMap>)map).parameterBufferSizeAndAlign.size;
++   }
++}
++
++void
++mtl_rate_map_copy_parameters(mtl_rate_map *map, mtl_buffer *buffer,
++                             uint64_t offset)
++{
++   @autoreleasepool {
++      [(id<MTLRasterizationRateMap>)map copyParameterDataToBuffer:(id<MTLBuffer>)buffer
++                                                           offset:offset];
++   }
++}
++
++void
++mtl_render_pass_descriptor_set_rate_map(mtl_render_pass_descriptor *descriptor,
++                                        mtl_rate_map *map)
++{
++   @autoreleasepool {
++      ((MTL4RenderPassDescriptor *)descriptor).rasterizationRateMap =
++         (id<MTLRasterizationRateMap>)map;
++   }
++}
+diff --git a/src/kosmickrisp/bridge/stubs/mtl_rate_map.c b/src/kosmickrisp/bridge/stubs/mtl_rate_map.c
+new file mode 100644
+index 0000000..76c41fb
+--- /dev/null
++++ b/src/kosmickrisp/bridge/stubs/mtl_rate_map.c
+@@ -0,0 +1,41 @@
++/*
++ * Copyright 2026 Nick Kennedy
++ * SPDX-License-Identifier: MIT
++ */
++
++#include "mtl_rate_map.h"
++
++mtl_rate_map *
++mtl_new_rate_map(mtl_device *device, uint32_t screen_width,
++                 uint32_t screen_height, uint32_t layer_count,
++                 uint32_t horizontal_count, uint32_t vertical_count,
++                 const float *horizontal, const float *vertical)
++{
++   return NULL;
++}
++
++void
++mtl_rate_map_physical_size(mtl_rate_map *map, uint32_t layer, uint32_t *width,
++                           uint32_t *height)
++{
++   *width = 0;
++   *height = 0;
++}
++
++uint64_t
++mtl_rate_map_parameter_size(mtl_rate_map *map)
++{
++   return 0;
++}
++
++void
++mtl_rate_map_copy_parameters(mtl_rate_map *map, mtl_buffer *buffer,
++                             uint64_t offset)
++{
++}
++
++void
++mtl_render_pass_descriptor_set_rate_map(mtl_render_pass_descriptor *descriptor,
++                                        mtl_rate_map *map)
++{
++}
+diff --git a/src/kosmickrisp/vulkan/kk_cmd_buffer.h b/src/kosmickrisp/vulkan/kk_cmd_buffer.h
+index ff746ef..60352fb 100644
+--- a/src/kosmickrisp/vulkan/kk_cmd_buffer.h
++++ b/src/kosmickrisp/vulkan/kk_cmd_buffer.h
+@@ -62,6 +62,8 @@ struct kk_root_descriptor_table {
+    uint8_t set_dynamic_buffer_start[KK_MAX_SETS];
+ 
+    uint64_t custom_resolve_inputs[KK_MAX_RTS + 2];
++
++   uint64_t fdm_rate_params;
+ };
+ 
+ struct kk_descriptor_state {
+@@ -153,6 +155,11 @@ struct kk_graphics_state {
+    enum kk_dirty dirty;
+    uint32_t pipeline_sample_count;
+ 
++   struct {
++      struct kk_image *density;
++      bool carry;
++   } fdm;
++
+    struct {
+       struct kk_image_view *ms_iview;
+       struct kk_image_view *resolve_iview;
+diff --git a/src/kosmickrisp/vulkan/kk_cmd_copy.c b/src/kosmickrisp/vulkan/kk_cmd_copy.c
+index 67bb33f..8ab0089 100644
+--- a/src/kosmickrisp/vulkan/kk_cmd_copy.c
++++ b/src/kosmickrisp/vulkan/kk_cmd_copy.c
+@@ -103,6 +103,13 @@ kk_CmdCopyBufferToImage2(VkCommandBuffer commandBuffer,
+       info.mtl_data.image = plane->mtl_handle;
+       size_t buffer_offset = kk_buffer_mtl_offset(buffer, region->bufferOffset);
+ 
++      kk_fdm_capture(image,
++                     (const uint8_t *)mtl_get_contents(buffer->metal.handle) +
++                        buffer_offset,
++                     region->bufferRowLength, region->bufferImageHeight,
++                     &region->imageSubresource, region->imageOffset,
++                     region->imageExtent);
++
+       kk_foreach_slice(slice, image, imageSubresource)
+       {
+          info.mtl_data.image_slice = slice;
+diff --git a/src/kosmickrisp/vulkan/kk_cmd_draw.c b/src/kosmickrisp/vulkan/kk_cmd_draw.c
+index cf1f27d..d44edee 100644
+--- a/src/kosmickrisp/vulkan/kk_cmd_draw.c
++++ b/src/kosmickrisp/vulkan/kk_cmd_draw.c
+@@ -8,6 +8,7 @@
+  */
+ 
+ #include "kk_entrypoints.h"
++#include "kk_fdm.h"
+ 
+ #include "kk_buffer.h"
+ #include "kk_cmd_buffer.h"
+@@ -439,6 +440,9 @@ kk_CmdBeginRendering(VkCommandBuffer commandBuffer,
+    // TODO_KOSMICKRISP Fragment shading rate support goes here if Metal supports
+    // it
+ 
++   kk_fdm_setup_rendering(cmd, pRenderingInfo, pass_descriptor,
++                          framebuffer_extent);
++
+    /* Rendering with no attachments requires pushing the start of the render
+     * pass to first pipeline binding to know sample count. */
+    cmd->state.gfx.render_pass_descriptor = pass_descriptor;
+@@ -812,6 +816,7 @@ kk_CmdBeginCustomResolveEXT(
+    }
+ 
+    kk_CmdEndRendering2KHR(commandBuffer, &end_info);
++   kk_fdm_carry_to_next_rendering(cmd);
+    kk_CmdBeginRendering(commandBuffer, &rendering_info);
+ 
+    struct kk_descriptor_state *desc = &cmd->state.gfx.descriptors;
+diff --git a/src/kosmickrisp/vulkan/kk_debug.c b/src/kosmickrisp/vulkan/kk_debug.c
+index 9a3cff0..edd3143 100644
+--- a/src/kosmickrisp/vulkan/kk_debug.c
++++ b/src/kosmickrisp/vulkan/kk_debug.c
+@@ -24,6 +24,7 @@ const struct debug_named_value experimental_flags[] = {
+    {"image_view_min_lod", KK_EXPERIMENTAL_IMAGE_VIEW_MIN_LOD},
+    {"m5_optimize_e5b9g9r9", KK_EXPERIMENTAL_M5_OPTIMIZE_E5B9G9R9},
+    {"fdm", KK_EXPERIMENTAL_FDM},
++   {"fdm_rate", KK_EXPERIMENTAL_FDM_RATE},
+    {NULL, 0},
+ };
+ 
+diff --git a/src/kosmickrisp/vulkan/kk_debug.h b/src/kosmickrisp/vulkan/kk_debug.h
+index a3b3117..27e0fcd 100644
+--- a/src/kosmickrisp/vulkan/kk_debug.h
++++ b/src/kosmickrisp/vulkan/kk_debug.h
+@@ -27,6 +27,7 @@ enum kk_experimental {
+     * vkCmdCopyImage() tests in CTS to fail, but it is otherwise usable */
+    KK_EXPERIMENTAL_M5_OPTIMIZE_E5B9G9R9 = 1ull << 2,
+    KK_EXPERIMENTAL_FDM = 1ull << 3,
++   KK_EXPERIMENTAL_FDM_RATE = 1ull << 4,
+ };
+ 
+ extern enum kk_experimental kk_mesa_experimental_flags;
+diff --git a/src/kosmickrisp/vulkan/kk_fdm.c b/src/kosmickrisp/vulkan/kk_fdm.c
+new file mode 100644
+index 0000000..779cd47
+--- /dev/null
++++ b/src/kosmickrisp/vulkan/kk_fdm.c
+@@ -0,0 +1,314 @@
++/*
++ * Copyright 2026 Nick Kennedy
++ * SPDX-License-Identifier: MIT
++ */
++
++#include "kk_fdm.h"
++
++#include "kk_bo.h"
++#include "kk_debug.h"
++#include "kk_cmd_buffer.h"
++#include "kk_device.h"
++#include "kk_image.h"
++#include "kk_image_view.h"
++
++#include "kosmickrisp/bridge/mtl_bridge.h"
++#include "kosmickrisp/bridge/mtl_rate_map.h"
++
++#include "util/log.h"
++#include "util/u_debug.h"
++#include "vk_util.h"
++
++#include <stdlib.h>
++#include <string.h>
++
++static bool
++kk_fdm_debug(void)
++{
++   static int enabled = -1;
++   if (enabled < 0)
++      enabled = debug_get_bool_option("KK_FDM_DEBUG", false);
++   return enabled;
++}
++
++void
++kk_fdm_capture(struct kk_image *image, const uint8_t *src, uint32_t row_length,
++               uint32_t image_height, const VkImageSubresourceLayers *subresource,
++               VkOffset3D offset, VkExtent3D extent)
++{
++   if (!KK_EXPERIMENTAL(FDM_RATE) ||
++       !(image->vk.usage & VK_IMAGE_USAGE_FRAGMENT_DENSITY_MAP_BIT_EXT) ||
++       image->vk.format != VK_FORMAT_R8G8_UNORM || src == NULL)
++      return;
++
++   const uint32_t w = image->vk.extent.width;
++   const uint32_t h = image->vk.extent.height;
++   const uint32_t layers = image->vk.array_layers;
++   if (image->fdm.cpu == NULL) {
++      image->fdm.cpu = calloc((size_t)w * h * layers, 2);
++      if (image->fdm.cpu == NULL)
++         return;
++      image->fdm.width = w;
++      image->fdm.height = h;
++      image->fdm.layers = layers;
++   }
++
++   if (row_length == 0)
++      row_length = extent.width;
++   if (image_height == 0)
++      image_height = extent.height;
++
++   const uint32_t layer_count = vk_image_subresource_layer_count(&image->vk, subresource);
++   for (uint32_t l = 0; l < layer_count; l++) {
++      const uint32_t layer = subresource->baseArrayLayer + l;
++      if (layer >= layers)
++         break;
++      for (uint32_t y = 0; y < extent.height && offset.y + y < h; y++) {
++         uint32_t copy_w = MIN2(extent.width, w - MIN2((uint32_t)offset.x, w));
++         memcpy(image->fdm.cpu +
++                   (((size_t)layer * h + offset.y + y) * w + offset.x) * 2,
++                src + (((size_t)l * image_height + y) * row_length) * 2,
++                (size_t)copy_w * 2);
++      }
++   }
++   image->fdm.version++;
++}
++
++VkResult
++kk_fdm_image_init(struct kk_device *dev, struct kk_image *image)
++{
++   if (!KK_EXPERIMENTAL(FDM_RATE) ||
++       !(image->vk.create_flags & VK_IMAGE_CREATE_SUBSAMPLED_BIT_EXT))
++      return VK_SUCCESS;
++
++   VkResult result = kk_alloc_bo(dev, &image->vk.base, KK_RATE_PARAMS_SIZE_B, 0,
++                                 &image->rate_params);
++   if (result != VK_SUCCESS)
++      return result;
++   memset(image->rate_params->cpu, 0, KK_RATE_PARAMS_HEADER_B);
++   return VK_SUCCESS;
++}
++
++void
++kk_fdm_image_finish(struct kk_device *dev, struct kk_image *image)
++{
++   if (image->rate_params)
++      kk_destroy_bo(dev, image->rate_params);
++   if (image->fdm.params)
++      kk_destroy_bo(dev, image->fdm.params);
++   if (image->fdm.map)
++      mtl_release(image->fdm.map);
++   free(image->fdm.cpu);
++}
++
++static float
++kk_fdm_density(const struct kk_image *density, uint32_t layer, uint32_t x,
++               uint32_t y, uint32_t channel)
++{
++   const uint8_t *texel =
++      density->fdm.cpu +
++      (((size_t)layer * density->fdm.height + y) * density->fdm.width + x) * 2;
++   return MAX2(texel[channel] / 255.0f, 1.0f / 16.0f);
++}
++
++static void *
++kk_fdm_get_map(struct kk_device *dev, struct kk_image *density,
++               VkExtent2D screen)
++{
++   if (density->fdm.cpu == NULL)
++      return NULL;
++
++   if (density->fdm.map && density->fdm.map_version == density->fdm.version &&
++       density->fdm.map_width == screen.width &&
++       density->fdm.map_height == screen.height)
++      return density->fdm.map;
++
++   const uint32_t mw = density->fdm.width, mh = density->fdm.height;
++   const uint32_t layers = MIN2(density->fdm.layers, KK_RATE_PARAMS_MAX_LAYERS);
++   const uint32_t nh = 2 * mw + 1, nv = 2 * mh + 1;
++   float *horizontal = calloc((size_t)nh * layers, sizeof(float));
++   float *vertical = calloc((size_t)nv * layers, sizeof(float));
++   if (horizontal == NULL || vertical == NULL) {
++      free(horizontal);
++      free(vertical);
++      return NULL;
++   }
++
++   for (uint32_t l = 0; l < layers; l++) {
++      for (uint32_t i = 0; i < nh; i++) {
++         uint32_t a = i / 2, b = i / 2;
++         if (!(i & 1)) {
++            a = i ? i / 2 - 1 : 0;
++            b = MIN2(i / 2, mw - 1);
++         }
++         float q = 0;
++         for (uint32_t y = 0; y < mh; y++) {
++            q = MAX2(q, kk_fdm_density(density, l, a, y, 0));
++            q = MAX2(q, kk_fdm_density(density, l, b, y, 0));
++         }
++         horizontal[l * nh + i] = q;
++      }
++      for (uint32_t i = 0; i < nv; i++) {
++         uint32_t a = i / 2, b = i / 2;
++         if (!(i & 1)) {
++            a = i ? i / 2 - 1 : 0;
++            b = MIN2(i / 2, mh - 1);
++         }
++         float q = 0;
++         for (uint32_t x = 0; x < mw; x++) {
++            q = MAX2(q, kk_fdm_density(density, l, x, a, 1));
++            q = MAX2(q, kk_fdm_density(density, l, x, b, 1));
++         }
++         vertical[l * nv + i] = q;
++      }
++   }
++
++   void *map = mtl_new_rate_map(dev->mtl_handle, screen.width, screen.height,
++                                layers, nh, nv, horizontal, vertical);
++   free(horizontal);
++   free(vertical);
++   if (map == NULL)
++      return NULL;
++
++   if (mtl_rate_map_parameter_size(map) >
++       KK_RATE_PARAMS_SIZE_B - KK_RATE_PARAMS_HEADER_B) {
++      mtl_release(map);
++      return NULL;
++   }
++   if (density->fdm.params == NULL &&
++       kk_alloc_bo(dev, &density->vk.base, KK_RATE_PARAMS_SIZE_B, 0,
++                   &density->fdm.params) != VK_SUCCESS) {
++      mtl_release(map);
++      return NULL;
++   }
++
++   struct kk_rate_params_header *header = density->fdm.params->cpu;
++   memset(header, 0, KK_RATE_PARAMS_HEADER_B);
++   mtl_rate_map_copy_parameters(map, density->fdm.params->map,
++                                KK_RATE_PARAMS_HEADER_B);
++   header->layers = layers;
++   header->screen[0] = screen.width;
++   header->screen[1] = screen.height;
++   for (uint32_t l = 0; l < layers; l++)
++      mtl_rate_map_physical_size(map, l, &header->physical[l][0],
++                                 &header->physical[l][1]);
++   header->valid = 1;
++
++   if (density->fdm.map)
++      mtl_release(density->fdm.map);
++   density->fdm.map = map;
++   density->fdm.map_version = density->fdm.version;
++   density->fdm.map_width = screen.width;
++   density->fdm.map_height = screen.height;
++   density->fdm.map_layers = layers;
++
++   if (kk_fdm_debug())
++      mesa_logi("kk-fdm: rate map %ux%u from %ux%ux%u density map, layer 0 "
++                "physical %ux%u (%.1f%%)",
++                screen.width, screen.height, mw, mh, layers,
++                header->physical[0][0], header->physical[0][1],
++                100.0 * header->physical[0][0] * header->physical[0][1] /
++                   ((double)screen.width * screen.height));
++   return map;
++}
++
++static bool
++kk_fdm_subsampled(const struct kk_image_view *iview)
++{
++   return iview == NULL ||
++          (iview->vk.image->create_flags & VK_IMAGE_CREATE_SUBSAMPLED_BIT_EXT);
++}
++
++static bool
++kk_fdm_all_subsampled(const struct kk_rendering_state *render)
++{
++   for (uint32_t i = 0; i < render->color_att_count; i++) {
++      if (!kk_fdm_subsampled(render->color_att[i].iview) ||
++          (render->color_att[i].resolve_mode != VK_RESOLVE_MODE_NONE &&
++           !kk_fdm_subsampled(render->color_att[i].resolve_iview)))
++         return false;
++   }
++   return kk_fdm_subsampled(render->depth_att.iview) &&
++          kk_fdm_subsampled(render->stencil_att.iview) &&
++          (render->depth_att.resolve_mode == VK_RESOLVE_MODE_NONE ||
++           kk_fdm_subsampled(render->depth_att.resolve_iview)) &&
++          (render->stencil_att.resolve_mode == VK_RESOLVE_MODE_NONE ||
++           kk_fdm_subsampled(render->stencil_att.resolve_iview));
++}
++
++static void
++kk_fdm_publish(struct kk_image *density, struct kk_image_view *iview)
++{
++   if (iview == NULL)
++      return;
++   struct kk_image *image = container_of(iview->vk.image, struct kk_image, vk);
++   if (image->rate_params == NULL)
++      return;
++   if (image->rate_params_owner == density->fdm.map &&
++       image->rate_params_version == density->fdm.map_version)
++      return;
++   memcpy(image->rate_params->cpu, density->fdm.params->cpu,
++          KK_RATE_PARAMS_SIZE_B);
++   image->rate_params_owner = density->fdm.map;
++   image->rate_params_version = density->fdm.map_version;
++}
++
++void
++kk_fdm_setup_rendering(struct kk_cmd_buffer *cmd,
++                       const VkRenderingInfo *pRenderingInfo,
++                       mtl_render_pass_descriptor *descriptor,
++                       VkExtent2D screen)
++{
++   struct kk_device *dev = kk_cmd_buffer_device(cmd);
++   struct kk_graphics_state *gfx = &cmd->state.gfx;
++   struct kk_rendering_state *render = &gfx->render;
++   struct kk_image *density = NULL;
++
++   if (KK_EXPERIMENTAL(FDM_RATE)) {
++      const VkRenderingFragmentDensityMapAttachmentInfoEXT *fdm_info =
++         vk_find_struct_const(pRenderingInfo->pNext,
++                              RENDERING_FRAGMENT_DENSITY_MAP_ATTACHMENT_INFO_EXT);
++      if (fdm_info && fdm_info->imageView != VK_NULL_HANDLE) {
++         VK_FROM_HANDLE(kk_image_view, view, fdm_info->imageView);
++         density = container_of(view->vk.image, struct kk_image, vk);
++      } else if (gfx->fdm.carry) {
++         density = gfx->fdm.density;
++      }
++   }
++   gfx->fdm.carry = false;
++
++   void *map = density ? kk_fdm_get_map(dev, density, screen) : NULL;
++   if (map && !kk_fdm_all_subsampled(render)) {
++      static uint32_t logged;
++      if (kk_fdm_debug() && logged++ < 8)
++         mesa_logi("kk-fdm: full rate, pass has a non-subsampled attachment");
++      map = NULL;
++   }
++
++   gfx->fdm.density = map ? density : NULL;
++   uint64_t params = 0;
++   if (map) {
++      mtl_render_pass_descriptor_set_rate_map(descriptor, map);
++      params = density->fdm.params->gpu;
++      for (uint32_t i = 0; i < render->color_att_count; i++) {
++         kk_fdm_publish(density, render->color_att[i].iview);
++         kk_fdm_publish(density, render->color_att[i].resolve_iview);
++      }
++      kk_fdm_publish(density, render->depth_att.iview);
++      kk_fdm_publish(density, render->depth_att.resolve_iview);
++      kk_fdm_publish(density, render->stencil_att.iview);
++      kk_fdm_publish(density, render->stencil_att.resolve_iview);
++   }
++
++   struct kk_descriptor_state *desc = &gfx->descriptors;
++   if (desc->root.fdm_rate_params != params) {
++      desc->root.fdm_rate_params = params;
++      desc->root_dirty = true;
++   }
++}
++
++void
++kk_fdm_carry_to_next_rendering(struct kk_cmd_buffer *cmd)
++{
++   cmd->state.gfx.fdm.carry = cmd->state.gfx.fdm.density != NULL;
++}
+diff --git a/src/kosmickrisp/vulkan/kk_fdm.h b/src/kosmickrisp/vulkan/kk_fdm.h
+new file mode 100644
+index 0000000..6ca86ff
+--- /dev/null
++++ b/src/kosmickrisp/vulkan/kk_fdm.h
+@@ -0,0 +1,22 @@
++/*
++ * Copyright 2026 Nick Kennedy
++ * SPDX-License-Identifier: MIT
++ */
++
++#ifndef KK_FDM_H
++#define KK_FDM_H 1
++
++#include "kk_private.h"
++
++#include "kosmickrisp/bridge/mtl_types.h"
++
++struct kk_cmd_buffer;
++
++void kk_fdm_setup_rendering(struct kk_cmd_buffer *cmd,
++                            const VkRenderingInfo *pRenderingInfo,
++                            mtl_render_pass_descriptor *descriptor,
++                            VkExtent2D screen);
++
++void kk_fdm_carry_to_next_rendering(struct kk_cmd_buffer *cmd);
++
++#endif
+diff --git a/src/kosmickrisp/vulkan/kk_image.c b/src/kosmickrisp/vulkan/kk_image.c
+index f8eb5e8..1a4c8d7 100644
+--- a/src/kosmickrisp/vulkan/kk_image.c
++++ b/src/kosmickrisp/vulkan/kk_image.c
+@@ -601,6 +601,7 @@ kk_image_finish(struct kk_device *dev, struct kk_image *image,
+ #ifdef VK_USE_PLATFORM_METAL_EXT
+    kk_image_release_metal_import(dev, image);
+ #endif
++   kk_fdm_image_finish(dev, image);
+    for (uint8_t plane = 0; plane < image->plane_count; plane++) {
+       kk_image_plane_finish(dev, &image->planes[plane], image->vk.create_flags,
+                             pAllocator);
+@@ -633,6 +634,13 @@ kk_CreateImage(VkDevice _device, const VkImageCreateInfo *pCreateInfo,
+       return result;
+    }
+ 
++   result = kk_fdm_image_init(dev, image);
++   if (result != VK_SUCCESS) {
++      kk_image_finish(dev, image, pAllocator);
++      vk_free2(&dev->vk.alloc, pAllocator, image);
++      return result;
++   }
++
+ #ifdef VK_USE_PLATFORM_METAL_EXT
+    result = kk_image_import_metal(dev, image, pCreateInfo);
+    if (result != VK_SUCCESS) {
+@@ -1100,6 +1108,9 @@ kk_CopyMemoryToImage(UNUSED VkDevice device,
+          vk_memory_to_image_copy_to_mtl_texture_memory_copy(region, plane);
+ 
+       const uint8_t *host_ptr = region->pHostPointer;
++      kk_fdm_capture(image, host_ptr, region->memoryRowLength,
++                     region->memoryImageHeight, &region->imageSubresource,
++                     region->imageOffset, region->imageExtent);
+       kk_foreach_slice(slice, image, imageSubresource)
+       {
+          info.mtl_data.image_slice = slice;
+diff --git a/src/kosmickrisp/vulkan/kk_image.h b/src/kosmickrisp/vulkan/kk_image.h
+index dce687d..d44c43d 100644
+--- a/src/kosmickrisp/vulkan/kk_image.h
++++ b/src/kosmickrisp/vulkan/kk_image.h
+@@ -10,6 +10,8 @@
+ 
+ #include "kk_private.h"
+ 
++struct kk_bo;
++
+ #include "kk_device_memory.h"
+ #include "kk_image_layout.h"
+ 
+@@ -55,6 +57,19 @@ struct kk_image {
+ 
+    bool metal_imported;
+ 
++   struct {
++      uint8_t *cpu;
++      uint32_t width, height, layers;
++      uint32_t version;
++      void *map;
++      uint32_t map_version, map_width, map_height, map_layers;
++      struct kk_bo *params;
++   } fdm;
++
++   struct kk_bo *rate_params;
++   const void *rate_params_owner;
++   uint32_t rate_params_version;
++
+    uint8_t plane_count;
+    struct kk_image_plane planes[3];
+ };
+@@ -142,6 +157,24 @@ mtl_texture *kk_image_plane_create_texture(struct kk_image_plane *plane,
+ 
+ void kk_image_set_label(struct kk_image *image, const char *label);
+ 
++#define KK_RATE_PARAMS_HEADER_B 256
++#define KK_RATE_PARAMS_SIZE_B   (64 * 1024)
++#define KK_RATE_PARAMS_MAX_LAYERS 8
++
++struct kk_rate_params_header {
++   uint32_t valid;
++   uint32_t layers;
++   uint32_t screen[2];
++   uint32_t physical[KK_RATE_PARAMS_MAX_LAYERS][2];
++};
++
++void kk_fdm_capture(struct kk_image *image, const uint8_t *src,
++                    uint32_t row_length, uint32_t image_height,
++                    const VkImageSubresourceLayers *subresource,
++                    VkOffset3D offset, VkExtent3D extent);
++VkResult kk_fdm_image_init(struct kk_device *dev, struct kk_image *image);
++void kk_fdm_image_finish(struct kk_device *dev, struct kk_image *image);
++
+ #ifdef VK_USE_PLATFORM_METAL_EXT
+ VkResult kk_image_import_metal(struct kk_device *dev, struct kk_image *image,
+                                const VkImageCreateInfo *info);
+diff --git a/src/kosmickrisp/vulkan/meson.build b/src/kosmickrisp/vulkan/meson.build
+index d727865..ec03935 100644
+--- a/src/kosmickrisp/vulkan/meson.build
++++ b/src/kosmickrisp/vulkan/meson.build
+@@ -89,6 +89,8 @@ kk_files = files(
+   'kk_instance.h',
+   'kk_instance.c',
+   'kk_metal_objects.c',
++  'kk_fdm.h',
++  'kk_fdm.c',
+   'kk_nir_lower_custom_border.c',
+   'kk_nir_lower_descriptors.c',
+   'kk_nir_lower_image_view_min_lod.c',
+-- 
+2.54.0 (Apple Git-157)
+
