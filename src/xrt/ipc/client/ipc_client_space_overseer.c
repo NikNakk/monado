@@ -1,5 +1,5 @@
 // Copyright 2023, Collabora, Ltd.
-// Copyright 2025, NVIDIA CORPORATION.
+// Copyright 2025-2026, NVIDIA CORPORATION.
 // SPDX-License-Identifier: BSL-1.0
 /*!
  * @file
@@ -77,13 +77,7 @@ space_destroy(struct xrt_space *xs)
 static void
 alloc_space_with_id(struct ipc_client_space_overseer *icspo, uint32_t id, struct xrt_space **out_space)
 {
-	struct ipc_client_space *icsp = U_TYPED_CALLOC(struct ipc_client_space);
-	icsp->base.reference.count = 1;
-	icsp->base.destroy = space_destroy;
-	icsp->ipc_c = icspo->ipc_c;
-	icsp->id = id;
-
-	*out_space = &icsp->base;
+	ipc_client_space_create(icspo->ipc_c, id, out_space);
 }
 
 
@@ -445,4 +439,16 @@ ipc_client_space_get_id(struct xrt_space *space)
 	assert(space != NULL);
 
 	return ipc_client_space(space)->id;
+}
+
+void
+ipc_client_space_create(struct ipc_connection *ipc_c, uint32_t id, struct xrt_space **out_space)
+{
+	struct ipc_client_space *icsp = U_TYPED_CALLOC(struct ipc_client_space);
+	icsp->base.reference.count = 1;
+	icsp->base.destroy = space_destroy;
+	icsp->ipc_c = ipc_c;
+	icsp->id = id;
+
+	*out_space = &icsp->base;
 }

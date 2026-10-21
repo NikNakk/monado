@@ -25,6 +25,7 @@ u_system_devices_populate_function_pointers(struct xrt_system_devices *xsysd,
 	xsysd->get_roles = get_roles_fn;
 	xsysd->create_body_tracker = u_system_devices_ni_create_body_tracker;
 	xsysd->create_hand_tracker = u_system_devices_ni_create_hand_tracker;
+	xsysd->create_io_cache = u_system_devices_ni_create_io_cache;
 	xsysd->feature_inc = u_system_devices_ni_feature_inc;
 	xsysd->feature_dec = u_system_devices_ni_feature_dec;
 	xsysd->destroy = destroy_fn;

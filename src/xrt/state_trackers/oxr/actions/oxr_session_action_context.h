@@ -14,6 +14,7 @@
 
 #include "oxr_forward_declarations.h"
 #include "oxr_extension_support.h"
+#include "oxr_io_cache.h"
 #include "oxr_priority_group_cache.h"
 #include "oxr_subaction.h"
 #include "oxr_suggested_profile_array.h"
@@ -22,6 +23,11 @@
 #ifdef __cplusplus
 extern "C" {
 #endif
+
+
+struct xrt_system_devices;
+struct xrt_space_overseer;
+struct oxr_logger;
 
 
 /*
@@ -114,6 +120,8 @@ struct oxr_session_action_context
 
 	struct oxr_priority_group_cache priority_group_cache;
 
+	struct oxr_io_cache io_cache;
+
 	/*!
 	 * Currently bound interaction profile.
 	 * @{
@@ -140,11 +148,16 @@ struct oxr_session_action_context
  *
  * @public @memberof oxr_session_action_context
  */
-XRT_NONNULL_ALL XRT_CHECK_RESULT XrResult
-oxr_session_action_context_init(struct oxr_session_action_context *action_context);
+XRT_CHECK_RESULT XrResult
+oxr_session_action_context_init(struct oxr_session_action_context *action_context,
+                                struct xrt_system_devices *xsysd,
+                                struct xrt_space_overseer *xso);
 
 /*!
  * Finalize and cleanup the action context for a session.
+ *
+ * Safe to call after a failed @ref oxr_session_action_context_init; only resources
+ * that init successfully created are torn down.
  *
  * @public @memberof oxr_session_action_context
  */

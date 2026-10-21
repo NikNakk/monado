@@ -46,6 +46,16 @@ u_system_devices_ni_create_hand_tracker(struct xrt_system_devices *xsysd,
                                         struct xrt_hand_tracker **out_xht);
 
 /*!
+ * Not implemented function for @ref xrt_system_devices::create_io_cache.
+ *
+ * @ingroup aux_util
+ */
+xrt_result_t
+u_system_devices_ni_create_io_cache(struct xrt_system_devices *xsysd,
+                                    struct xrt_space_overseer *xso,
+                                    struct xrt_io_cache **out_xic);
+
+/*!
  * Not implemented function for @ref xrt_system_devices::feature_inc
  *
  * @ingroup aux_util

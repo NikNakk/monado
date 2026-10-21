@@ -1591,18 +1591,21 @@ struct oxr_action_state
 };
 
 /*!
- * A input action pair of a @ref xrt_input and a @ref xrt_device, along with the
- * required transform.
+ * A resolved input binding for an action, along with the required transform.
  *
  * @ingroup oxr_input
  *
- * @see xrt_device
+ * @see oxr_io_cache
  * @see xrt_input
  */
 struct oxr_action_input
 {
-	struct xrt_device *xdev; // Used for poses and transform is null.
-	struct xrt_input *input; // Ditto
+	//! Cache this input is resolved against (owned by the action context).
+	const struct oxr_io_cache *io_cache;
+	//! Device this input reads from.
+	struct xrt_device_id device_id;
+	//! The resolved input, pointing into @ref oxr_io_cache::inputs.
+	struct xrt_input *input;
 	const struct oxr_binding_point *binding_point;
 	struct oxr_priority_group_state *priority_group_state;
 	struct oxr_input_transform *transforms;
@@ -1619,7 +1622,10 @@ struct oxr_action_input
  */
 struct oxr_action_output
 {
-	struct xrt_device *xdev;
+	//! Cache this output is resolved against (owned by the action context).
+	const struct oxr_io_cache *io_cache;
+	//! Device this output routes to.
+	struct xrt_device_id device_id;
 	enum xrt_output_name name;
 	const struct oxr_binding_point *binding_point;
 };
@@ -1751,7 +1757,7 @@ struct oxr_space
 	struct
 	{
 		struct xrt_space *xs;
-		struct xrt_device *xdev;
+		struct xrt_device_id device_id;
 		enum xrt_input_name name;
 
 		bool feature_eye_tracking;

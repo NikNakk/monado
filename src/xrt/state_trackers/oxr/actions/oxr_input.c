@@ -32,6 +32,7 @@
 #include "oxr_generated_bindings.h"
 #include "oxr_handle_base.h"
 #include "oxr_suggested_profile_array.h"
+#include "oxr_session_action_context.h"
 
 #include "../oxr_objects.h"
 #include "../oxr_logger.h"
@@ -119,7 +120,7 @@ oxr_action_bind_io(struct oxr_logger *log,
                    struct oxr_sink_logger *slog,
                    const struct oxr_session_action_context *sess_context,
                    const struct oxr_profile_resolver_info *info,
-                   struct xrt_device *xdev,
+                   const struct xrt_io_cache_device *dev,
                    XrPath subaction_path,
                    struct oxr_action_cache *cache,
                    struct oxr_action_attachment *act_attached);
@@ -545,6 +546,29 @@ oxr_action_get_pose_input(struct oxr_session *sess,
 	return XR_SUCCESS;
 }
 
+/*!
+ * Look up the cache device entry for a role slot, where @p index is one of the
+ * @ref xrt_io_cache_info role indices (left, right, gamepad, head, eyes).
+ *
+ * Every top-level role is resolved purely through the @ref xrt_io_cache; returns
+ * NULL when the role has no assigned device.
+ */
+static const struct xrt_io_cache_device *
+binding_device_from_cache(const struct oxr_io_cache *io_cache, int32_t index)
+{
+	if (index < 0 || index >= (int32_t)io_cache->info.device_count) {
+		return NULL;
+	}
+
+	return &io_cache->info.devices[index];
+}
+
+/*!
+ * Every top-level role (left, right, gamepad, head, eyes) is looked up in the
+ * io cache via the matching @ref xrt_io_cache_info role index.
+ */
+#define GET_BINDING_DEVICE(NAME, IOC) binding_device_from_cache((IOC), (IOC)->info.NAME)
+
 static void
 resolve_binding_infos_from_roles(struct oxr_logger *log,
                                  const struct oxr_session_action_context *action_context,
@@ -554,17 +578,18 @@ resolve_binding_infos_from_roles(struct oxr_logger *log,
                                  struct oxr_profiles_per_subaction *out_infos)
 {
 	struct oxr_sink_logger slog = {0};
+	const struct oxr_io_cache *io_cache = &action_context->io_cache;
 
 #define RESOLVE_INFO(NAME, NAME_CAPS, PATH, LOCALIZED_NAME)                                                            \
 	do {                                                                                                           \
-		struct xrt_device *xdev = GET_XDEV_BY_ROLE(roles, NAME);                                               \
-		if (xdev == NULL) {                                                                                    \
-			oxr_slog(&slog, "\n\t" #NAME ": No xdev");                                                     \
+		const struct xrt_io_cache_device *dev = GET_BINDING_DEVICE(NAME, io_cache);                            \
+		if (dev == NULL) {                                                                                     \
+			oxr_slog(&slog, "\n\t" #NAME ": No device");                                                   \
 			break;                                                                                         \
 		}                                                                                                      \
-		oxr_slog(&slog, "\n\t" #NAME ": (%s)", u_str_xrt_device_name(xdev->name));                             \
-		oxr_resolver_populate_profile(log, &slog, action_context->binding_registry, suggested_profiles, xdev,  \
-		                              GET_PROFILE_NAME_BY_ROLE(roles, NAME), &out_infos->NAME);                \
+		oxr_slog(&slog, "\n\t" #NAME ": (%s)", u_str_xrt_device_name(dev->name));                              \
+		oxr_resolver_populate_profile(log, &slog, action_context->binding_registry, suggested_profiles,        \
+		                              io_cache, dev, GET_PROFILE_NAME_BY_ROLE(roles, NAME), &out_infos->NAME); \
 	} while (false);
 	OXR_FOR_EACH_VALID_SUBACTION_PATH_DETAILED(RESOLVE_INFO)
 #undef RESOLVE_INFO
@@ -583,7 +608,6 @@ static void
 oxr_action_attachment_bind(struct oxr_logger *log,
                            struct oxr_instance *inst,
                            struct oxr_action_attachment *act_attached,
-                           const struct oxr_roles *roles,
                            const struct oxr_profiles_per_subaction *resolver_infos)
 {
 	struct oxr_sink_logger slog = {0};
@@ -616,9 +640,10 @@ oxr_action_attachment_bind(struct oxr_logger *log,
 #define BIND_SUBACTION(NAME, NAME_CAPS, PATH, LOCALIZED_NAME)                                                          \
 	if (act_ref->subaction_paths.NAME || act_ref->subaction_paths.any) {                                           \
 		oxr_slog(&slog, "\tFor: %s\n", #NAME);                                                                 \
-		oxr_action_bind_io(log, &slog, act_attached->act_set_attached->sess_context, &resolver_infos->NAME,    \
-		                   GET_XDEV_BY_ROLE(roles, NAME), inst->path_cache.NAME, &act_attached->NAME,          \
-		                   act_attached);                                                                      \
+		struct oxr_session_action_context *sess_context = act_attached->act_set_attached->sess_context;        \
+		const struct xrt_io_cache_device *dev = GET_BINDING_DEVICE(NAME, &sess_context->io_cache);             \
+		oxr_action_bind_io(log, &slog, sess_context, &resolver_infos->NAME, dev, inst->path_cache.NAME,        \
+		                   &act_attached->NAME, act_attached);                                                 \
 	}
 	OXR_FOR_EACH_VALID_SUBACTION_PATH_DETAILED(BIND_SUBACTION)
 #undef BIND_SUBACTION
@@ -669,9 +694,9 @@ oxr_action_cache_stop_output(struct oxr_logger *log, struct oxr_session *sess, s
 
 	for (uint32_t i = 0; i < cache->output_count; i++) {
 		struct oxr_action_output *output = &cache->outputs[i];
-		struct xrt_device *xdev = output->xdev;
 
-		xrt_result_t xret = xrt_device_set_output(xdev, output->name, &value);
+		xrt_result_t xret =
+		    xrt_io_cache_set_output(output->io_cache->xic, output->device_id, output->name, &value);
 		if (xret != XRT_SUCCESS) {
 			struct oxr_sink_logger slog = {0};
 			oxr_slog(&slog, "Failed to stop output ");
@@ -1158,7 +1183,7 @@ oxr_action_bind_io(struct oxr_logger *log,
                    struct oxr_sink_logger *slog,
                    const struct oxr_session_action_context *sess_context,
                    const struct oxr_profile_resolver_info *info,
-                   struct xrt_device *xdev,
+                   const struct xrt_io_cache_device *dev,
                    XrPath subaction_path,
                    struct oxr_action_cache *cache,
                    struct oxr_action_attachment *act_attached)
@@ -1166,8 +1191,8 @@ oxr_action_bind_io(struct oxr_logger *log,
 	// The resolver functions assumes that the cache is empty.
 	oxr_action_cache_teardown(cache);
 
-	if (xdev == NULL) {
-		oxr_slog(slog, "\t\tNo xdev!\n");
+	if (dev == NULL) {
+		oxr_slog(slog, "\t\tNo device!\n");
 		return;
 	}
 
@@ -1175,8 +1200,9 @@ oxr_action_bind_io(struct oxr_logger *log,
 		oxr_resolver_populate_output( //
 		    log,                      //
 		    slog,                     //
+		    &sess_context->io_cache,  //
 		    info,                     //
-		    xdev,                     //
+		    dev,                      //
 		    subaction_path,           //
 		    act_attached,             //
 		    cache);                   //
@@ -1186,8 +1212,9 @@ oxr_action_bind_io(struct oxr_logger *log,
 	oxr_resolver_populate_input( //
 	    log,                     //
 	    slog,                    //
+	    &sess_context->io_cache, //
 	    info,                    //
-	    xdev,                    //
+	    dev,                     //
 	    subaction_path,          //
 	    act_attached,            //
 	    cache);                  //
@@ -1293,6 +1320,26 @@ oxr_session_attach_action_sets(struct oxr_logger *log,
 	return XR_SUCCESS;
 }
 
+/*!
+ * Tear down the resolved input/output bindings of every attached action.
+ *
+ * Used before recreating the io cache: the bindings hold pointers into the
+ * cache's snapshot arrays, so they must be dropped before those arrays go away.
+ */
+static void
+session_clear_action_bindings(struct oxr_session_action_context *action_context)
+{
+	for (size_t i = 0; i < action_context->action_set_attachment_count; i++) {
+		struct oxr_action_set_attachment *act_set_attached = &action_context->act_set_attachments[i];
+		for (size_t k = 0; k < act_set_attached->action_attachment_count; k++) {
+			struct oxr_action_attachment *act_attached = &act_set_attached->act_attachments[k];
+#define CACHE_TEARDOWN(X) oxr_action_cache_teardown(&(act_attached->X));
+			OXR_FOR_EACH_SUBACTION_PATH(CACHE_TEARDOWN)
+#undef CACHE_TEARDOWN
+		}
+	}
+}
+
 static XrResult
 session_update_action_bindings(struct oxr_logger *log,
                                struct oxr_instance *inst,
@@ -1318,7 +1365,7 @@ session_update_action_bindings(struct oxr_logger *log,
 		struct oxr_action_set_attachment *act_set_attached = &action_context->act_set_attachments[i];
 		for (size_t k = 0; k < act_set_attached->action_attachment_count; k++) {
 			struct oxr_action_attachment *act_attached = &act_set_attached->act_attachments[k];
-			oxr_action_attachment_bind(log, inst, act_attached, roles, &profiles);
+			oxr_action_attachment_bind(log, inst, act_attached, &profiles);
 		}
 	}
 
@@ -1347,6 +1394,46 @@ session_update_action_bindings(struct oxr_logger *log,
 	*out_interaction_profile_changed = interaction_profile_changed;
 
 	return XR_SUCCESS;
+}
+
+static XrResult
+session_sync_io_cache_locked(struct oxr_logger *log,
+                             struct oxr_instance *inst,
+                             struct oxr_session_action_context *sess_context,
+                             const struct oxr_roles *roles,
+                             bool *out_interaction_profile_changed)
+{
+	bool io_cache_stale = false;
+	XrResult sync_ret = oxr_io_cache_sync(log, &sess_context->io_cache, &io_cache_stale);
+	if (sync_ret != XR_SUCCESS || !io_cache_stale) {
+		return sync_ret;
+	}
+
+	/*
+	 * The set of devices changed (hotplug): the cache layout is out
+	 * of date and the action bindings still point into the old
+	 * snapshot arrays. Clear the bindings, recreate the cache for
+	 * the new layout, rebind so inputs point into the new arrays,
+	 * then read again.
+	 */
+	session_clear_action_bindings(sess_context);
+	sync_ret = oxr_io_cache_recreate(log, &sess_context->io_cache);
+	if (sync_ret != XR_SUCCESS) {
+		return sync_ret;
+	}
+
+	sync_ret = session_update_action_bindings( //
+	    log,                                   //
+	    inst,                                  //
+	    sess_context,                          //
+	    roles,                                 //
+	    out_interaction_profile_changed);      //
+	if (sync_ret != XR_SUCCESS) {
+		return sync_ret;
+	}
+
+	// If the layout changed yet again, the next xrSyncActions recreates it.
+	return oxr_io_cache_sync(log, &sess_context->io_cache, &io_cache_stale);
 }
 
 XrResult
@@ -1456,12 +1543,16 @@ oxr_action_sync_data_with_context(struct oxr_logger *log,
 	// Synchronize outputs to this time.
 	int64_t now = time_state_get_now(sess->sys->inst->timekeeping);
 
-	// Loop over all xdev devices.
-	for (size_t i = 0; i < sess->sys->xsysd->static_xdev_count; i++) {
-		if (sess->sys->xsysd->static_xdevs[i]) {
-			xrt_result_t xret = xrt_device_update_inputs(sess->sys->xsysd->static_xdevs[i]);
-			OXR_CHECK_XRET(log, sess, xret, xrt_device_update_inputs);
-		}
+	/*
+	 * Refresh this action context's input/output cache under the same lock
+	 * used for binding updates, so stale layout handling cannot race them.
+	 */
+	XrResult sync_ret;
+	os_mutex_lock(&sess_context->sync_actions_mutex);
+	sync_ret = session_sync_io_cache_locked(log, inst, sess_context, &roles, out_interaction_profile_changed);
+	os_mutex_unlock(&sess_context->sync_actions_mutex);
+	if (sync_ret != XR_SUCCESS) {
+		return sync_ret;
 	}
 
 	// Reset all action set attachments.

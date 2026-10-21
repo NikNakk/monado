@@ -14,6 +14,7 @@
 
 #include "xrt/xrt_body_tracker.h"
 #include "xrt/xrt_hand_tracker.h"
+#include "xrt/xrt_io_cache.h"
 
 #ifdef __APPLE__
 #include "util/u_macos_display_host.h"
@@ -204,6 +205,11 @@ common_shutdown(volatile struct ipc_client_state *ics)
 	// Destroy app instances owned by this client.
 	for (uint32_t i = 0; i < IPC_MAX_CLIENT_APP_INSTANCES; i++) {
 		xrt_app_instance_destroy((struct xrt_app_instance **)&ics->objects.xainsts[i]);
+	}
+
+	// Destroy input/output caches owned by this client.
+	for (uint32_t i = 0; i < IPC_MAX_CLIENT_IO_CACHES; i++) {
+		xrt_io_cache_destroy((struct xrt_io_cache **)&ics->objects.xics[i]);
 	}
 
 	// Clear the tracking origins array.

@@ -14,6 +14,7 @@
 struct xrt_space;
 struct xrt_body_tracker;
 struct xrt_hand_tracker;
+struct xrt_io_cache;
 struct ipc_client_state;
 
 
@@ -242,3 +243,37 @@ ipc_server_objects_get_xasys_id_or_add(volatile struct ipc_client_state *ics,
 
 xrt_result_t
 ipc_server_objects_destroy_xasys(volatile struct ipc_client_state *ics, uint32_t id);
+
+
+/*
+ *
+ * Input/output cache functions.
+ *
+ */
+
+/*!
+ * Get an input/output cache by ID, must only be called from the per client thread.
+ *
+ * @ingroup ipc_server
+ */
+xrt_result_t
+ipc_server_objects_get_xic_and_validate(volatile struct ipc_client_state *ics,
+                                        uint32_t id,
+                                        struct xrt_io_cache **out_xic);
+
+/*!
+ * Track a newly created input/output cache and return its ID. Takes ownership of
+ * @p xic until explicit destroy or client disconnect.
+ *
+ * @ingroup ipc_server
+ */
+xrt_result_t
+ipc_server_objects_get_xic_id_or_add(volatile struct ipc_client_state *ics, struct xrt_io_cache *xic, uint32_t *out_id);
+
+/*!
+ * Destroy a tracked input/output cache.
+ *
+ * @ingroup ipc_server
+ */
+xrt_result_t
+ipc_server_objects_destroy_xic(volatile struct ipc_client_state *ics, uint32_t id);

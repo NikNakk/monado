@@ -46,6 +46,8 @@ add_library(
 	actions/oxr_rebinding_profile.h
 	actions/oxr_instance_path_cache.c
 	actions/oxr_instance_path_cache.h
+	actions/oxr_io_cache.c
+	actions/oxr_io_cache.h
 	actions/oxr_session_action_context.c
 	actions/oxr_session_action_context.h
 	actions/oxr_session_attached_actions.c

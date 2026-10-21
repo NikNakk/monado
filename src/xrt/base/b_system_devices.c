@@ -11,6 +11,7 @@
 #include "b_system_devices.h"
 #include "b_body_tracker.h"
 #include "b_hand_tracker.h"
+#include "b_io_cache.h"
 
 #include "util/u_device.h"
 #include "util/u_logging.h"
@@ -271,6 +272,13 @@ create_hand_tracker(struct xrt_system_devices *xsysd,
 	return b_hand_tracker_create(xsysd, info, out_xht);
 }
 
+static xrt_result_t
+create_io_cache(struct xrt_system_devices *xsysd, struct xrt_space_overseer *xso, struct xrt_io_cache **out_xic)
+{
+	return b_io_cache_create(xsysd, xso, out_xic);
+}
+
+
 /*
  *
  * 'Exported' functions.
@@ -284,6 +292,7 @@ b_system_devices_allocate(void)
 	bsysd->base.destroy = destroy;
 	bsysd->base.create_body_tracker = create_body_tracker;
 	bsysd->base.create_hand_tracker = create_hand_tracker;
+	bsysd->base.create_io_cache = create_io_cache;
 
 	return bsysd;
 }
@@ -308,6 +317,7 @@ b_system_devices_static_allocate(void)
 	u_system_devices_populate_function_pointers(&bsysds->base.base, get_roles, destroy);
 	bsysds->base.base.create_body_tracker = create_body_tracker;
 	bsysds->base.base.create_hand_tracker = create_hand_tracker;
+	bsysds->base.base.create_io_cache = create_io_cache;
 	bsysds->base.base.feature_inc = feature_inc;
 	bsysds->base.base.feature_dec = feature_dec;
 

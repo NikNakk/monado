@@ -55,6 +55,7 @@ struct oxr_action_attachment;
 struct oxr_action_set_attachment;
 struct oxr_action_input;
 struct oxr_action_output;
+struct oxr_io_cache;
 struct oxr_action_profile_bindings;
 struct oxr_session_action_context;
 struct oxr_session_attached_actions;

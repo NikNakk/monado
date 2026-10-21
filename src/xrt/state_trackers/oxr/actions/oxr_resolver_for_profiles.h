@@ -9,6 +9,8 @@
 #pragma once
 
 #include "xrt/xrt_defines.h"
+#include "xrt/xrt_device.h"
+#include "xrt/xrt_io_cache.h"
 
 #include "oxr_extension_support.h"
 #include "oxr_forward_declarations.h"
@@ -22,15 +24,16 @@ extern "C" {
 
 /*!
  * Short-lived result of choosing a suggested profile for one subaction slot
- * (for example `/user/hand/left`), plus any rebinding or device fallback needed
- * to apply it.
+ * (for example `/user/hand/left`), plus any rebinding needed to apply it.
  */
 struct oxr_profile_resolver_info
 {
+	//! Optional service-provided mapping when there is no generated rebinding.
+	const struct xrt_io_cache_binding_profile *compatibility_profile;
+
 	/*!
-	 * The suggested profile to bind for, if no matching profile is found,
-	 * no rebinding or fallback is found this and all other fields will be
-	 * NULL.
+	 * The suggested profile to bind for. If no matching profile or rebinding
+	 * is found, this and all other fields will be NULL.
 	 */
 	const struct oxr_suggested_profile *profile;
 
@@ -50,32 +53,26 @@ struct oxr_profile_resolver_info
 	 * Runtime binding profile targeted by @ref rebinding_profile.
 	 */
 	const struct oxr_binding_profile *rebinding_target_profile;
-
-	/*!
-	 * If the device is not the same as the profile, and no rebinding
-	 * profile the code will look for a fallback on the device and set this
-	 * to the fallback binding profile.
-	 */
-	const struct xrt_binding_profile *xbp;
 };
 
 /*!
  * Resolve the binding information for a given device.
  *
- * @param log Logger, must not be NULL.
- * @param slog Sink logger, must not be NULL.
- * @param registry Binding registry, must not be NULL.
- * @param suggested_profiles Suggested profiles, must not be NULL.
- * @param xdev Device, must not be NULL.
- * @param override_device_name Profile name to prefer before @p xdev->name, can be XRT_DEVICE_INVALID.
- * @param info Binding information, must not be NULL.
+ * @param log                  Logger, must not be NULL.
+ * @param slog                 Sink logger, must not be NULL.
+ * @param registry             Binding registry, must not be NULL.
+ * @param suggested_profiles   Suggested profiles, must not be NULL.
+ * @param dev                  Cache device to resolve for, must not be NULL.
+ * @param override_device_name Profile name to prefer before @p dev->name, can be XRT_DEVICE_INVALID.
+ * @param info                 Binding information, must not be NULL.
  */
 XRT_NONNULL_ALL void
 oxr_resolver_populate_profile(struct oxr_logger *log,
                               struct oxr_sink_logger *slog,
                               const struct oxr_binding_registry *registry,
                               const struct oxr_suggested_profile_array *suggested_profiles,
-                              struct xrt_device *xdev,
+                              const struct oxr_io_cache *cache,
+                              const struct xrt_io_cache_device *dev,
                               enum xrt_device_name override_device_name,
                               struct oxr_profile_resolver_info *info);
 

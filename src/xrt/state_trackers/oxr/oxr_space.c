@@ -51,17 +51,15 @@ get_xrt_space_action(struct oxr_logger *log, struct oxr_space *spc, struct xrt_s
 	if (input == NULL) {
 		xrt_space_reference(&spc->action.xs, NULL);
 		spc->action.name = 0;
-		spc->action.xdev = NULL;
+		spc->action.device_id = XRT_DEVICE_ID_INVALID;
 		return XR_SUCCESS;
 	}
 
-	struct xrt_device *xdev = input->xdev;
 	enum xrt_input_name name = input->input->name;
 
-	assert(xdev != NULL);
 	assert(name != 0);
 
-	if (xdev != spc->action.xdev || name != spc->action.name) {
+	if (input->device_id.val != spc->action.device_id.val || name != spc->action.name) {
 		struct xrt_system_devices *xsysd = spc->sess->sys->xsysd;
 
 		if (spc->action.feature_eye_tracking) {
@@ -71,11 +69,11 @@ get_xrt_space_action(struct oxr_logger *log, struct oxr_space *spc, struct xrt_s
 
 		xrt_space_reference(&spc->action.xs, NULL);
 
-		xrt_result_t xret = xrt_space_overseer_create_pose_space( //
-		    spc->sess->sys->xso,                                  //
-		    xdev,                                                 //
-		    name,                                                 //
-		    &spc->action.xs);                                     //
+		xrt_result_t xret = xrt_io_cache_create_space( //
+		    input->io_cache->xic,                      //
+		    input->device_id,                          //
+		    name,                                      //
+		    &spc->action.xs);                          //
 		if (xret != XRT_SUCCESS) {
 			oxr_warn(log, "Failed to create pose space");
 		} else {
@@ -86,7 +84,7 @@ get_xrt_space_action(struct oxr_logger *log, struct oxr_space *spc, struct xrt_s
 				spc->action.feature_eye_tracking = true;
 			}
 
-			spc->action.xdev = xdev;
+			spc->action.device_id = input->device_id;
 			spc->action.name = name;
 		}
 	}
@@ -156,7 +154,7 @@ oxr_space_destroy(struct oxr_logger *log, struct oxr_handle_base *hb)
 
 	xrt_space_reference(&spc->xdev_pose.xs, NULL);
 	xrt_space_reference(&spc->action.xs, NULL);
-	spc->action.xdev = NULL;
+	spc->action.device_id = XRT_DEVICE_ID_INVALID;
 	spc->action.name = 0;
 
 	free(spc);
@@ -264,6 +262,14 @@ oxr_space_xdev_pose_create(struct oxr_logger *log,
 	}
 
 	struct xrt_space *xspace = NULL;
+	/*!
+	 * @todo: Unlike action spaces, this MNDX xdev-pose path is intentionally
+	 * NOT routed through the xrt_io_cache yet. XR_MNDX_xdev_space is a
+	 * Monado-specific/experimental extension that is likely to be reworked
+	 * or superseded by a new extension, so it continues to use the space
+	 * overseer (and sess->sys->xsysd/xso) directly for now. Porting it to
+	 * the input/output cache is deferred to a later change.
+	 */
 	xrt_result_t xret = xrt_space_overseer_create_pose_space( //
 	    sess->sys->xso,                                       //
 	    xdev,                                                 //

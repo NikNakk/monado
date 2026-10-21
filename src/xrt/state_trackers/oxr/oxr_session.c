@@ -1278,7 +1278,7 @@ oxr_session_allocate_and_init(struct oxr_logger *log,
 	}
 
 	// Needs to happen early due to mutex.
-	ret = oxr_session_action_context_init(&sess->action_context);
+	ret = oxr_session_action_context_init(&sess->action_context, sys->xsysd, sys->xso);
 	if (ret != XR_SUCCESS) {
 		return oxr_error(log, ret, "Failed to initialize action context");
 	}

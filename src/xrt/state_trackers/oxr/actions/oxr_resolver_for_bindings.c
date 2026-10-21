@@ -1,4 +1,5 @@
 // Copyright 2026, NVIDIA CORPORATION.
+// Copyright 2026, Nick Kennedy
 // SPDX-License-Identifier: BSL-1.0
 /*!
  * @file
@@ -8,6 +9,7 @@
 
 #include "util/u_debug.h"
 #include "util/u_misc.h"
+#include "oxr_io_cache.h"
 #include "oxr_resolver_for_bindings.h"
 #include "oxr_binding_profile.h"
 #include "oxr_binding_registry.h"
@@ -49,35 +51,6 @@ struct output_storage
  * Input & output helpers.
  *
  */
-
-static bool
-find_xdev_input_name_from_pairs(const struct xrt_device *xdev,
-                                const struct xrt_binding_profile *xbp,
-                                enum xrt_input_name from_name,
-                                enum xrt_input_name *out_name)
-{
-	// Dpad activation is optional. An unset activate input means the dpad is always active.
-	if (from_name == XRT_INPUT_NAME_INVALID) {
-		*out_name = XRT_INPUT_NAME_INVALID;
-		return true;
-	}
-
-	for (size_t i = 0; i < xbp->input_count; i++) {
-		if (from_name != xbp->inputs[i].from) {
-			continue;
-		}
-
-		enum xrt_input_name xdev_name = xbp->inputs[i].device;
-		for (uint32_t k = 0; k < xdev->input_count; k++) {
-			if (xdev->inputs[k].name == xdev_name) {
-				*out_name = xdev_name;
-				return true;
-			}
-		}
-	}
-
-	return false;
-}
 
 static bool
 is_action_type_output(XrActionType action_type)
@@ -258,7 +231,8 @@ find_matching_dpad(const struct oxr_dpad_entry *dpad_entry,
 /* Prefer the calibrated palm pose. Preserve the fork's approximate grip
  * fallback only for the generic profile's grip-surface input when absent. */
 static bool
-find_generic_grip_surface_fallback(struct xrt_device *xdev,
+find_generic_grip_surface_fallback(const struct oxr_io_cache *io_cache,
+                                   const struct xrt_io_cache_device *dev,
                                    const struct oxr_suggested_profile *profile,
                                    const struct oxr_binding_point *point,
                                    struct xrt_input **out_input)
@@ -272,7 +246,8 @@ find_generic_grip_surface_fallback(struct xrt_device *xdev,
 		const struct oxr_binding_point *grip = &point->profile->binding_points[i];
 		if (grip->subaction == point->subaction && grip->kind == OXR_BINDING_POINT_KIND_INPUT &&
 		    strstr(grip->templ->path, "/input/grip/pose") != NULL) {
-			return oxr_xdev_find_input(xdev, grip->input.name, out_input);
+			*out_input = oxr_io_cache_find_input(io_cache, dev, grip->input.name);
+			return *out_input != NULL;
 		}
 	}
 	return false;
@@ -281,11 +256,12 @@ find_generic_grip_surface_fallback(struct xrt_device *xdev,
 static void
 append_resolved_input(struct oxr_logger *log,
                       struct oxr_sink_logger *slog,
+                      const struct oxr_io_cache *io_cache,
                       const struct oxr_suggested_profile *profile,
+                      const struct xrt_io_cache_binding_profile *compatibility_profile,
                       const struct oxr_suggested_binding *suggested_binding,
                       const char *action_name,
-                      struct xrt_device *xdev,
-                      const struct xrt_binding_profile *xbp,
+                      const struct xrt_io_cache_device *dev,
                       const struct oxr_binding_point *binding_point,
                       struct oxr_action_attachment *act_attached,
                       struct input_storage *input_storage)
@@ -309,33 +285,20 @@ append_resolved_input(struct oxr_logger *log,
 	enum xrt_input_name target_name = source_input;
 	enum xrt_input_name target_dpad_activate = source_dpad_activate;
 
-	if (xbp != NULL) {
-		bool t1 = find_xdev_input_name_from_pairs(xdev, xbp, source_input, &target_name);
-		/*
-		 * A missing dpad activate input means the dpad is always active.
-		 * find_xdev_input_name_from_pairs treats XRT_INPUT_NAME_INVALID as found.
-		 */
-		bool t2 = find_xdev_input_name_from_pairs(xdev, xbp, source_dpad_activate, &target_dpad_activate);
+	struct xrt_input *input = oxr_io_cache_resolve_input(io_cache, dev, compatibility_profile, target_name);
+	if (input == NULL && !find_generic_grip_surface_fallback(io_cache, dev, profile, binding_point, &input)) {
+		oxr_slog(slog, "\t\t\tRejected! (INPUT NOT IN CACHE)\n");
+		return;
+	}
 
-		// We couldn't find the needed inputs on the device.
-		if (!t1 || !t2) {
-			oxr_slog(slog, "\t\t\tRejected! (NO XRT BINDING PAIR)\n");
+	struct xrt_input *activate_cached = NULL;
+	if (target_dpad_activate != XRT_INPUT_NAME_INVALID) {
+		activate_cached =
+		    oxr_io_cache_resolve_input(io_cache, dev, compatibility_profile, target_dpad_activate);
+		if (activate_cached == NULL) {
+			oxr_slog(slog, "\t\t\tRejected! (NO DPAD ACTIVATE INPUT)\n");
 			return;
 		}
-	}
-
-	struct xrt_input *input = NULL;
-	if (!oxr_xdev_find_input(xdev, target_name, &input) &&
-	    !find_generic_grip_surface_fallback(xdev, profile, binding_point, &input)) {
-		oxr_slog(slog, "\t\t\tRejected! (NO XDEV INPUT)\n");
-		return;
-	}
-
-	struct xrt_input *activate_input = NULL;
-	if (target_dpad_activate != XRT_INPUT_NAME_INVALID &&
-	    !oxr_xdev_find_input(xdev, target_dpad_activate, &activate_input)) {
-		oxr_slog(slog, "\t\t\tRejected! (NO DPAD ACTIVATE INPUT)\n");
-		return;
 	}
 
 	// The binding point is generated from a template, so we can use the template path.
@@ -355,7 +318,7 @@ append_resolved_input(struct oxr_logger *log,
 		find_matching_dpad(entry, binding_point->dpad.emulation->path, &dpad_binding_modification);
 
 		enum xrt_input_name activate_name =
-		    activate_input != NULL ? activate_input->name : XRT_INPUT_NAME_INVALID;
+		    activate_cached != NULL ? activate_cached->name : XRT_INPUT_NAME_INVALID;
 		enum xrt_input_type activate_type = XRT_GET_INPUT_TYPE(activate_name);
 
 		bool bret = oxr_input_transform_create_chain_dpad( //
@@ -367,7 +330,7 @@ append_resolved_input(struct oxr_logger *log,
 		    dpad_binding_modification,                     //
 		    dpad_region,                                   //
 		    activate_type,                                 //
-		    activate_input,                                //
+		    activate_cached,                               //
 		    &transforms,                                   //
 		    &transform_count);                             //
 		if (!bret) {
@@ -404,7 +367,8 @@ append_resolved_input(struct oxr_logger *log,
 
 	uint32_t index = input_storage->count++;
 	input_storage->inputs[index] = XRT_C11_COMPOUND(struct oxr_action_input){
-	    .xdev = xdev,
+	    .io_cache = io_cache,
+	    .device_id = dev->id,
 	    .input = input,
 	    .binding_point = binding_point,
 	    .priority_group_state = priority_group_state,
@@ -417,31 +381,24 @@ append_resolved_input(struct oxr_logger *log,
 
 static void
 append_resolved_output(struct oxr_sink_logger *slog,
-                       struct xrt_device *xdev,
-                       const struct xrt_binding_profile *xbp,
+                       const struct oxr_io_cache *io_cache,
+                       const struct xrt_io_cache_device *dev,
+                       const struct xrt_io_cache_binding_profile *compatibility_profile,
                        const struct oxr_binding_point *binding_point,
                        struct output_storage *storage)
 {
-	enum xrt_output_name output_name = binding_point->output.name;
-	if (xbp != NULL) {
-		output_name = XRT_OUTPUT_NAME_INVALID;
-		for (size_t i = 0; i < xbp->output_count; i++) {
-			if (binding_point->output.name == xbp->outputs[i].from) {
-				output_name = xbp->outputs[i].device;
-				break;
-			}
-		}
-	}
+	enum xrt_output_name output_name =
+	    oxr_io_cache_resolve_output(io_cache, dev, compatibility_profile, binding_point->output.name);
 
-	struct xrt_output *output = NULL;
-	if (output_name == XRT_OUTPUT_NAME_INVALID || !oxr_xdev_find_output(xdev, output_name, &output)) {
+	if (output_name == XRT_OUTPUT_NAME_INVALID || !oxr_io_cache_has_output(io_cache, dev, output_name)) {
 		oxr_slog(slog, "\t\t\tRejected! (NO XDEV OUTPUT)\n");
 		return;
 	}
 
 	uint32_t index = storage->count++;
 	storage->outputs[index] = XRT_C11_COMPOUND(struct oxr_action_output){
-	    .xdev = xdev,
+	    .io_cache = io_cache,
+	    .device_id = dev->id,
 	    .name = output_name,
 	    .binding_point = binding_point,
 	};
@@ -467,8 +424,9 @@ suggested_binding_matches(const struct oxr_suggested_binding *binding,
 void
 oxr_resolver_populate_input(struct oxr_logger *log,
                             struct oxr_sink_logger *slog,
+                            const struct oxr_io_cache *io_cache,
                             const struct oxr_profile_resolver_info *info,
-                            struct xrt_device *xdev,
+                            const struct xrt_io_cache_device *dev,
                             XrPath subaction_path,
                             struct oxr_action_attachment *act_attached,
                             struct oxr_action_cache *cache)
@@ -477,7 +435,7 @@ oxr_resolver_populate_input(struct oxr_logger *log,
 	assert(log != NULL);
 	assert(slog != NULL);
 	assert(info != NULL);
-	assert(xdev != NULL);
+	assert(dev != NULL);
 	assert(act_attached != NULL);
 	assert(cache != NULL);
 	assert(cache->inputs == NULL);
@@ -521,11 +479,12 @@ oxr_resolver_populate_input(struct oxr_logger *log,
 		append_resolved_input(           //
 		    log,                         //
 		    slog,                        //
+		    io_cache,                    //
 		    profile,                     //
+		    info->compatibility_profile, //
 		    suggested_binding,           //
 		    act_attached->act_ref->name, //
-		    xdev,                        //
-		    info->xbp,                   //
+		    dev,                         //
 		    binding_point,               //
 		    act_attached,                //
 		    &storage);                   //
@@ -554,8 +513,9 @@ oxr_resolver_populate_input(struct oxr_logger *log,
 void
 oxr_resolver_populate_output(struct oxr_logger *log,
                              struct oxr_sink_logger *slog,
+                             const struct oxr_io_cache *io_cache,
                              const struct oxr_profile_resolver_info *info,
-                             struct xrt_device *xdev,
+                             const struct xrt_io_cache_device *dev,
                              XrPath subaction_path,
                              struct oxr_action_attachment *act_attached,
                              struct oxr_action_cache *cache)
@@ -564,7 +524,7 @@ oxr_resolver_populate_output(struct oxr_logger *log,
 	assert(log != NULL);
 	assert(slog != NULL);
 	assert(info != NULL);
-	assert(xdev != NULL);
+	assert(dev != NULL);
 	assert(act_attached != NULL);
 	assert(cache != NULL);
 	assert(cache->inputs == NULL);
@@ -604,7 +564,7 @@ oxr_resolver_populate_output(struct oxr_logger *log,
 			continue;
 		}
 
-		append_resolved_output(slog, xdev, info->xbp, binding_point, &storage);
+		append_resolved_output(slog, io_cache, dev, info->compatibility_profile, binding_point, &storage);
 	}
 
 	if (storage.count > 0) {

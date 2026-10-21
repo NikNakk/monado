@@ -27,7 +27,10 @@ migrates generic-controller bindings to upstream's generated rebindings and
 adopts its factory calibration parsing fix. Per-controller LED storage preserves
 the measured corrections. The tested LED-space fusion convention is retained;
 upstream's IMU-space model migration requires a separate replay/calibration
-comparison. This review branch has not replaced `macos-upstream-clean`.
+comparison. The subsequent I/O-cache merge carries the service-selected compatibility
+mappings to clients, preserving optional Sense-to-Index bindings without client
+access to driver tables. The solver and EKF sources are unchanged by that
+follow-up. This review branch has not replaced `macos-upstream-clean`.
 
 ## Sources reviewed
 

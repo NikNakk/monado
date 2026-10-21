@@ -6,6 +6,10 @@
  */
 
 #include "catch_amalgamated.hpp"
+#include "b_io_cache.h"
+#include "xrt/xrt_system.h"
+#include "xrt/xrt_space.h"
+#include <oxr/actions/oxr_io_cache.h>
 #include <oxr/actions/oxr_binding_profile.h>
 #include <oxr/actions/oxr_binding_registry.h>
 #include <oxr/actions/oxr_input_transform.h>
@@ -26,6 +30,30 @@ struct GenericFixture
 	struct oxr_path_store store = {};
 	struct oxr_binding_registry *registry = nullptr;
 	struct oxr_session_action_context context = {};
+	struct xrt_system_devices system = {};
+	struct xrt_space_overseer overseer = {};
+
+	void
+	refresh(struct xrt_device *dev)
+	{
+		oxr_io_cache_fini(&context.io_cache);
+		system.static_xdev_count = 1;
+		system.static_xdevs[0] = dev;
+		system.static_roles.head = dev;
+		system.static_roles.eyes = dev;
+		system.get_roles = [](struct xrt_system_devices *, struct xrt_system_roles *roles) {
+			*roles = XRT_SYSTEM_ROLES_INIT;
+			roles->generation_id = 1;
+			roles->left = 0;
+			roles->right = 0;
+			return XRT_SUCCESS;
+		};
+		system.create_io_cache = b_io_cache_create;
+		if (dev->update_inputs == nullptr) {
+			dev->update_inputs = [](struct xrt_device *) { return XRT_SUCCESS; };
+		}
+		REQUIRE(oxr_io_cache_init(&context.io_cache, &system, &overseer) == XR_SUCCESS);
+	}
 
 	GenericFixture()
 	{
@@ -36,6 +64,7 @@ struct GenericFixture
 	}
 	~GenericFixture()
 	{
+		oxr_io_cache_fini(&context.io_cache);
 		oxr_priority_group_cache_fini(&context.priority_group_cache);
 		oxr_binding_registry_unref(registry);
 		oxr_path_store_fini(&store);
@@ -60,10 +89,12 @@ struct GenericFixture
 	struct oxr_profile_resolver_info
 	resolve(struct xrt_device *dev, std::vector<struct oxr_suggested_profile *> profiles)
 	{
+		refresh(dev);
 		struct oxr_suggested_profile_array array = {profiles.data(), profiles.size()};
 		struct oxr_profile_resolver_info info = {};
 		struct oxr_sink_logger slog = {};
-		oxr_resolver_populate_profile(&log, &slog, registry, &array, dev, XRT_DEVICE_INVALID, &info);
+		oxr_resolver_populate_profile(&log, &slog, registry, &array, &context.io_cache,
+		                              &context.io_cache.info.devices[0], XRT_DEVICE_INVALID, &info);
 		oxr_slog_cancel(&slog);
 		return info;
 	}
@@ -96,7 +127,7 @@ TEST_CASE("KHR generic controller fallback selection")
 		auto info = f.resolve(&dev, {&simple, &generic});
 		CHECK(info.profile == &generic);
 		CHECK(info.rebinding_profile != nullptr);
-		CHECK(info.xbp == nullptr);
+		CHECK(info.compatibility_profile == nullptr);
 	}
 	SECTION("Sense keeps more specific compatibility suggestions")
 	{
@@ -192,8 +223,9 @@ TEST_CASE("Sense generic inputs resolve through generated rebindings")
 	action.act_set_attached = &set;
 	struct oxr_action_cache cache = {};
 	struct oxr_sink_logger slog = {};
-	oxr_resolver_populate_input(&f.log, &slog, &info, &dev, f.path(left ? "/user/hand/left" : "/user/hand/right"),
-	                            &action, &cache);
+	f.refresh(&dev);
+	oxr_resolver_populate_input(&f.log, &slog, &f.context.io_cache, &info, &f.context.io_cache.info.devices[0],
+	                            f.path(left ? "/user/hand/left" : "/user/hand/right"), &action, &cache);
 	oxr_slog_cancel(&slog);
 	REQUIRE(cache.input_count == 1);
 	CHECK(cache.inputs[0].input->name == expected);
@@ -239,7 +271,153 @@ TEST_CASE("Sense generic haptics resolve on both hands")
 	struct oxr_action_cache cache = {};
 	struct oxr_sink_logger slog = {};
 	snprintf(str, sizeof(str), "/user/hand/%s", hand);
-	oxr_resolver_populate_output(&f.log, &slog, &info, &dev, f.path(str), &action, &cache);
+	oxr_resolver_populate_output(&f.log, &slog, &f.context.io_cache, &info, &f.context.io_cache.info.devices[0],
+	                             f.path(str), &action, &cache);
+	oxr_slog_cancel(&slog);
+	REQUIRE(cache.output_count == 1);
+	CHECK(cache.outputs[0].name == XRT_OUTPUT_NAME_PSSENSE_VIBRATION);
+	free(cache.outputs);
+}
+
+TEST_CASE("Unconverted profiles resolve native cached inputs without changing their types")
+{
+	struct Mapping
+	{
+		xrt_device_name device;
+		xrt_device_name profile;
+		const char *profile_path;
+		const char *user_path;
+		const char *component;
+		xrt_input_name source;
+		xrt_input_name native;
+		XrActionType type;
+	};
+	const Mapping mappings[] = {
+	    {XRT_DEVICE_HAND_CTRL_EMU, XRT_DEVICE_SIMPLE_CONTROLLER, "/interaction_profiles/khr/simple_controller",
+	     "/user/hand/left", "/input/select/click", XRT_INPUT_SIMPLE_SELECT_CLICK,
+	     XRT_INPUT_HAND_CTRL_EMU_PINCH_VALUE, XR_ACTION_TYPE_BOOLEAN_INPUT},
+	    {XRT_DEVICE_HAND_CTRL_EMU, XRT_DEVICE_SIMPLE_CONTROLLER, "/interaction_profiles/khr/simple_controller",
+	     "/user/hand/right", "/input/grip/pose", XRT_INPUT_SIMPLE_GRIP_POSE, XRT_INPUT_HAND_CTRL_EMU_GRIP_POSE,
+	     XR_ACTION_TYPE_POSE_INPUT},
+	    {XRT_DEVICE_VIVE_PRO2, XRT_DEVICE_VIVE_PRO, "/interaction_profiles/htc/vive_pro", "/user/head",
+	     "/input/system/click", XRT_INPUT_VIVE_PRO_SYSTEM_CLICK, XRT_INPUT_VIVE_PRO_SYSTEM_CLICK,
+	     XR_ACTION_TYPE_BOOLEAN_INPUT},
+	    {XRT_DEVICE_PSVR2, XRT_DEVICE_EYE_GAZE_INTERACTION, "/interaction_profiles/ext/eye_gaze_interaction",
+	     "/user/eyes_ext", "/input/gaze_ext/pose", XRT_INPUT_GENERIC_EYE_GAZE_POSE, XRT_INPUT_GENERIC_EYE_GAZE_POSE,
+	     XR_ACTION_TYPE_POSE_INPUT},
+	    {XRT_DEVICE_PSSENSE, XRT_DEVICE_INDEX_CONTROLLER, "/interaction_profiles/valve/index_controller",
+	     "/user/hand/left", "/input/a/click", XRT_INPUT_INDEX_A_CLICK, XRT_INPUT_PSSENSE_SQUARE_CLICK,
+	     XR_ACTION_TYPE_BOOLEAN_INPUT},
+	    {XRT_DEVICE_PSSENSE, XRT_DEVICE_INDEX_CONTROLLER, "/interaction_profiles/valve/index_controller",
+	     "/user/hand/right", "/input/a/click", XRT_INPUT_INDEX_A_CLICK, XRT_INPUT_PSSENSE_CROSS_CLICK,
+	     XR_ACTION_TYPE_BOOLEAN_INPUT},
+	    {XRT_DEVICE_PSSENSE, XRT_DEVICE_INDEX_CONTROLLER, "/interaction_profiles/valve/index_controller",
+	     "/user/hand/right", "/input/squeeze/value", XRT_INPUT_INDEX_SQUEEZE_VALUE,
+	     XRT_INPUT_PSSENSE_SQUEEZE_PROXIMITY_FLOAT, XR_ACTION_TYPE_FLOAT_INPUT},
+	};
+	const int index = GENERATE(0, 1, 2, 3, 4, 5, 6);
+	const auto &mapping = mappings[index];
+	CAPTURE(index);
+	GenericFixture f;
+	auto profile = f.profile(mapping.profile_path);
+	xrt_device dev = {};
+	dev.name = mapping.device;
+	xrt_input native = {};
+	native.name = mapping.native;
+	native.active = true;
+	native.timestamp = 987;
+	dev.inputs = &native;
+	dev.input_count = 1;
+	xrt_binding_input_pair pair = {mapping.source, mapping.native};
+	xrt_binding_profile fallback = {};
+	fallback.name = mapping.profile;
+	fallback.inputs = &pair;
+	fallback.input_count = 1;
+	dev.binding_profiles = &fallback;
+	dev.binding_profile_count = 1;
+	auto info = f.resolve(&dev, {&profile});
+	REQUIRE(info.profile == &profile);
+	REQUIRE(info.compatibility_profile != nullptr);
+	char str[160];
+	snprintf(str, sizeof(str), "%s%s", mapping.user_path, mapping.component);
+	const oxr_binding_point *point = nullptr;
+	REQUIRE(oxr_binding_profile_find_binding_point(info.binding_profile, f.path(str), &point));
+	oxr_suggested_binding binding = {1, point->path, point};
+	profile.bindings = &binding;
+	profile.binding_count = 1;
+	oxr_action_ref ref = {};
+	ref.action_type = mapping.type;
+	oxr_action_set_attachment set = {};
+	set.sess_context = &f.context;
+	oxr_action_attachment action = {};
+	action.act_ref = &ref;
+	action.act_key = 1;
+	action.act_set_attached = &set;
+	oxr_action_cache cache = {};
+	oxr_sink_logger slog = {};
+	oxr_resolver_populate_input(&f.log, &slog, &f.context.io_cache, &info, &f.context.io_cache.info.devices[0],
+	                            f.path(mapping.user_path), &action, &cache);
+	oxr_slog_cancel(&slog);
+	REQUIRE(cache.input_count == 1);
+	CHECK(cache.inputs[0].input->name == mapping.native);
+	CHECK(cache.inputs[0].input->timestamp == 987);
+	if (index == 0) {
+		for (float sample : {0.25f, 0.75f}) {
+			oxr_input_value_tagged raw = {};
+			raw.type = XRT_INPUT_TYPE_VEC1_ZERO_TO_ONE;
+			raw.value.vec1.x = sample;
+			oxr_input_value_tagged result = {};
+			REQUIRE(oxr_input_transform_process(cache.inputs[0].transforms, cache.inputs[0].transform_count,
+			                                    &raw, &result));
+			CHECK(result.value.boolean == (sample > 0.5f));
+		}
+	}
+	oxr_input_transform_destroy(&cache.inputs[0].transforms);
+	free(cache.inputs);
+}
+
+TEST_CASE("Sense Index haptics use the service-selected compatibility mapping")
+{
+	GenericFixture f;
+	auto index = f.profile("/interaction_profiles/valve/index_controller");
+	xrt_device dev = {};
+	dev.name = XRT_DEVICE_PSSENSE;
+	xrt_output native = {};
+	native.name = XRT_OUTPUT_NAME_PSSENSE_VIBRATION;
+	dev.outputs = &native;
+	dev.output_count = 1;
+	xrt_binding_output_pair pair = {XRT_OUTPUT_NAME_INDEX_HAPTIC, XRT_OUTPUT_NAME_PSSENSE_VIBRATION};
+	xrt_binding_profile fallback = {};
+	fallback.name = XRT_DEVICE_INDEX_CONTROLLER;
+	fallback.outputs = &pair;
+	fallback.output_count = 1;
+	const bool enabled = GENERATE(false, true);
+	dev.binding_profiles = &fallback;
+	dev.binding_profile_count = enabled ? 1 : 0;
+	auto info = f.resolve(&dev, {&index});
+	if (!enabled) {
+		CHECK(info.profile == nullptr);
+		return;
+	}
+	REQUIRE(info.compatibility_profile != nullptr);
+	const char *hand = GENERATE("left", "right");
+	char str[128];
+	snprintf(str, sizeof(str), "/user/hand/%s/output/haptic", hand);
+	const oxr_binding_point *point = nullptr;
+	REQUIRE(oxr_binding_profile_find_binding_point(info.binding_profile, f.path(str), &point));
+	oxr_suggested_binding binding = {1, point->path, point};
+	index.bindings = &binding;
+	index.binding_count = 1;
+	oxr_action_ref ref = {};
+	ref.action_type = XR_ACTION_TYPE_VIBRATION_OUTPUT;
+	oxr_action_attachment action = {};
+	action.act_key = 1;
+	action.act_ref = &ref;
+	oxr_action_cache cache = {};
+	oxr_sink_logger slog = {};
+	snprintf(str, sizeof(str), "/user/hand/%s", hand);
+	oxr_resolver_populate_output(&f.log, &slog, &f.context.io_cache, &info, &f.context.io_cache.info.devices[0],
+	                             f.path(str), &action, &cache);
 	oxr_slog_cancel(&slog);
 	REQUIRE(cache.output_count == 1);
 	CHECK(cache.outputs[0].name == XRT_OUTPUT_NAME_PSSENSE_VIBRATION);

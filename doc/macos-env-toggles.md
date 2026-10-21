@@ -792,7 +792,7 @@ Notes on classification:
 | --- | --- | --- | --- | :-: |
 | `PSSENSE_SYNTHETIC_POSITION` | off | Fixed HMD-relative controller positions for untracked controllers | `7ccfc37` / `f91755f` | a |
 | `PSSENSE_SYNTHETIC_ARM_MODEL` | off | Arm-model positions instead of fixed offsets | `f91755f` / `f91755f` | a |
-| `PSSENSE_INDEX_PROFILE` | off | Advertise the Valve Index profile for app compatibility | `737fcd4` / `737fcd4` | a |
+| `PSSENSE_INDEX_PROFILE` | off | Advertise the Valve Index profile for app compatibility; set in the service, whose cache snapshot supplies the mappings to clients | `737fcd4` / `737fcd4` | a |
 | `PSSENSE_INPUT_DIAGNOSTICS` | off | Log raw input changes | `f91755f` / `f91755f` | b |
 
 ### Compositor renderer and shared compositor code

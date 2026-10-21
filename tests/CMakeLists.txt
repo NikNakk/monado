@@ -275,7 +275,7 @@ if(XRT_FEATURE_OPENXR)
 		tests_input_transform PRIVATE st_oxr xrt-interfaces xrt-external-openxr
 		)
 	target_link_libraries(
-		tests_generic_controller PRIVATE st_oxr xrt-interfaces xrt-external-openxr
+		tests_generic_controller PRIVATE st_oxr base xrt-interfaces xrt-external-openxr
 		)
 	add_dependencies(tests_generic_controller generate_oxr_bindings)
 	if(APPLE AND TARGET ipc_client)
@@ -696,4 +696,12 @@ if(XRT_FEATURE_MACOS_PERFETTO)
 			--fixture $<TARGET_FILE:tests_macos_perfetto> --processor ${XRT_PERFETTO_TRACE_PROCESSOR})
 		set_tests_properties(tests_macos_perfetto PROPERTIES TIMEOUT 30)
 	endif()
+endif()
+
+if(UNIX AND XRT_FEATURE_OPENXR AND TARGET ipc_server AND TARGET target_instance)
+	add_executable(tests_io_cache_ipc tests_io_cache_ipc.cpp)
+	target_link_libraries(tests_io_cache_ipc PRIVATE ipc_server ipc_client target_instance target_lists
+		base st_oxr aux_util aux_os xrt-external-openxr xrt-external-catch2)
+	add_test(NAME tests_io_cache_ipc COMMAND tests_io_cache_ipc)
+	set_tests_properties(tests_io_cache_ipc PROPERTIES TIMEOUT 30)
 endif()

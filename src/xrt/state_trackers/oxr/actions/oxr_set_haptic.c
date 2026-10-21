@@ -10,6 +10,7 @@
 #include "oxr_set_haptic.h"
 #include "oxr_subaction.h"
 #include "oxr_input.h"
+#include "oxr_session_action_context.h"
 
 #include "../oxr_objects.h"
 #include "../oxr_logger.h"
@@ -32,9 +33,9 @@ set_action_output_vibration(struct oxr_logger *log,
 
 	for (uint32_t i = 0; i < cache->output_count; i++) {
 		struct oxr_action_output *output = &cache->outputs[i];
-		struct xrt_device *xdev = output->xdev;
 
-		xrt_result_t xret = xrt_device_set_output(xdev, output->name, &value);
+		xrt_result_t xret =
+		    xrt_io_cache_set_output(output->io_cache->xic, output->device_id, output->name, &value);
 		if (xret != XRT_SUCCESS) {
 			struct oxr_sink_logger slog = {0};
 			oxr_slog(&slog, "Failed to set output vibration ");
@@ -60,9 +61,9 @@ set_action_output_vibration_pcm(struct oxr_logger *log,
 
 	for (uint32_t i = 0; i < cache->output_count; i++) {
 		struct oxr_action_output *output = &cache->outputs[i];
-		struct xrt_device *xdev = output->xdev;
 
-		xrt_result_t xret = xrt_device_set_output(xdev, output->name, &value);
+		xrt_result_t xret =
+		    xrt_io_cache_set_output(output->io_cache->xic, output->device_id, output->name, &value);
 		if (xret != XRT_SUCCESS) {
 			struct oxr_sink_logger slog = {0};
 			oxr_slog(&slog, "Failed to set output vibration PCM ");

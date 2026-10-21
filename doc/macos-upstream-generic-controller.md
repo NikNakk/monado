@@ -11,11 +11,11 @@ Review branch: `codex/upstream-generic-controller`, based on
 `macos-upstream-clean` has not moved. The pre-existing untracked
 `tools/macos-present-compare/` is outside this change.
 
-GitLab `main` was fetched at `9fd3968ba`. Merge boundary: `ffe0a758c`,
-62 upstream commits after the fork's last merged upstream ancestor
-`ec188bb13`. The final eight commits introducing and adopting `xrt_io_cache`
-remain unmerged for the compatibility reasons below. The original branch and
-its ten local commits are preserved. Nothing is pushed or installed.
+GitLab `main` was fetched at `9fd3968ba`. The initial merge `7b1c728e7`
+brought in 62 commits through `ffe0a758c`. The follow-up merges the remaining
+eight I/O-cache commits with the compatibility adaptation below, bringing the
+review branch up to that upstream tip. The original branch and its ten local
+commits are preserved. Nothing is pushed or installed.
 
 ## Recommendation and implementation
 
@@ -88,22 +88,51 @@ intentionally adapted out, not claimed as adopted or hardware-validated.
 A complete coordinate migration needs a separate replay/calibration comparison.
 See [the existing integration decisions](macos-pssense-6dof-integration.md#compatibility-decisions).
 
-### Deferred I/O cache series
+### I/O-cache follow-up
 
-`2bb37b006` through `9fd3968ba` adds `xrt_io_cache` and uses it for OpenXR input,
-poses and haptics, including IPC transport. The last commit removes legacy
-`xrt_binding_profile` resolution. Its cache device metadata does not carry those
-mappings. Upstream's conversion commit itself records omissions for hand
-controller emulation, Vive Pro 2 and PS VR2 eye gaze; this fork additionally
-has optional Sense-to-Index bindings absent from upstream JSON.
+`2bb37b006` through `9fd3968ba` is now integrated. OpenXR actions, pose-space
+creation and haptics use upstream's per-session `xrt_io_cache`, including its
+IPC client/server transport. Generated rebindings remain the primary path.
+The earlier reason for deferral was that upstream's final commit removed the
+legacy driver-table fallback while several mappings still had no generated
+replacement.
 
-Merge that series after converting remaining mappings and preserving their
-runtime opt-ins across the service/client boundary. Do not mark all of latest
-`main` merged while silently discarding these compatibility paths. This merge
-uses the upstream generated resolver wherever it has mappings and retains its
-legacy fallback path for the remaining cases.
+The adaptation snapshots the remaining compatibility mappings in `get_info`:
+ordered profile names and bounded, pointer-free input/output pairs. The base
+cache copies the service-selected tables into that snapshot. The client resolves
+aliases against native cached inputs and outputs; it never reads a client-side
+environment variable to decide which service mappings are enabled.
+Physical input names, value types, timestamps and activity flags stay intact.
+Resolved poses/haptics use native device IDs and native names through upstream's
+cache methods. The live `read` arrays and their sizes are unchanged: compatibility
+metadata is transferred at layout query/recreation, not on every action sync.
 
-## Validation
+This intentionally keeps driver tables as the source of truth for mappings
+without a generated replacement; it does not create invented public interaction
+profiles or duplicate these tables in JSON. A future declarative conversion can
+retire each remaining table independently. OpenXR no longer dereferences driver
+binding tables or devices to resolve these fallback bindings.
+
+| Audited mapping | Why generated rebindings alone are insufficient | Preservation |
+| --- | --- | --- |
+| Sense to Index | Optional fork mapping is absent from upstream JSON | Only profiles present in the service's controller table enter the snapshot; `PSSENSE_INDEX_PROFILE` remains off by default. |
+| Hand-controller emulation to simple | No native target interaction profile | Snapshot aliases preserve pinch input types and native grip/aim names. |
+| Vive Pro 2 to Vive Pro | Upstream conversion omitted this device name | Snapshot preserves the existing identity button mappings. |
+| PS VR2 eye gaze | No corresponding generated rebinding | Snapshot preserves the gaze profile only when the driver supplies it. Existing lazy eye-feature activation remains in action-space handling. |
+| Other driver fallbacks | Some already have generated replacements; others are device-specific | Generated mappings win as before; the snapshot carries the complete ordered fallback set so remaining profiles are not silently lost. |
+
+There are explicit limits of 128 compatibility profiles, 1024 input pairs and
+128 output pairs across a cache. Oversized driver tables fail the layout query
+with `XRT_ERROR_INVALID_ARGUMENT`; they are never silently truncated. Duplicate
+input-pair fallbacks still try the first native input actually present. The
+snapshot contains no pointers, and arm64/x86-64 use the same protocol fields.
+Service and client must be rebuilt together for the changed IPC layout.
+
+Our generic grip-surface fallback and specific Touch/Index preference now use
+cache metadata. Our optical solver, EKF, coordinate convention and USB defaults
+are unchanged by these eight commits and their compatibility adaptation.
+
+## Initial merge validation
 
 Both configured development runtimes build: the full arm64 tree and the
 x86-64 `openxr_monado` target. Generic resolver regressions pass **622 assertions
@@ -120,3 +149,61 @@ required before integration/publication. In particular, exercise generic control
 squeeze and haptics, optical 6DoF, opt-in Index compatibility, and normal
 OpenXR action binding in the existing applications. No hardware run was made
 by the agent.
+
+## I/O-cache follow-up validation
+
+The full native arm64 build and x86-64 OpenXR runtime build succeed.
+All **91 native CTest suites pass**, with no skips, in 48.33 s. Generic and
+compatibility resolver regressions pass **849 assertions in 5 test cases**.
+The new IPC fixture, including actual OpenXR action synchronization and priority
+overrides, passes in the full native run. Linux CI results are recorded below
+when complete.
+The new `tests_io_cache_ipc` fixture uses the real generated IPC dispatcher,
+handlers and client proxy with synthetic devices, without starting the service
+or claiming hardware. It covers metadata, native samples, stale generations,
+invalid-count recovery, pose spaces and haptics. Its OpenXR fixture resolves
+service-provided compatibility bindings against that IPC-backed cache, then
+runs action synchronization and bound-source enumeration with competing action
+sets and temporary priority overrides. Resolver tests also cover hand-controller
+emulation, Vive Pro 2, gaze, and both hands' optional Index mappings.
+
+## User-operated headset gate
+
+Do not move `macos-upstream-clean` or publish this branch until the user has
+checked the matching service/native client and Wine client. Hardware runs are
+user-operated under `AGENTS.md`. The automated fixtures do not establish optical
+tracking quality, controller feel, gaze accuracy or Game Mode behavior.
+
+Prepare the existing isolated Sense launch procedure with the reviewed build:
+
+```sh
+python3 scripts/macos/prepare-pssense-6dof-runtime.py \
+  "$HOME/Code/psvr2-datasets/calibration/20260926-charuco-mode4-combined-head.json" \
+  --build build/arm64
+```
+
+The isolated LaunchAgent has been prepared at
+`build/arm64/pssense-6dof.plist`, with the native presenter and Index compatibility
+off. Reproduction commands are saved in `/tmp/monado-io-cache-headset-instructions.txt`.
+Preparation writes the LaunchAgent and prints launch/unload instructions;
+it does not start hardware.
+Use the printed commands after stopping any existing service that owns the USB
+interfaces. Keep the current native presenter, optical calibration and solver
+settings. Test in this order and record the exact commit/settings/results:
+
+1. With Index compatibility off, run the printed `--generic-controller` trial.
+   Check each hand's buttons, stick, trigger, squeeze, grip/aim rays and haptics.
+   Also check grip-surface behavior in a client that uses it.
+2. Run Open Brush or the previously validated application with optical 6DoF.
+   Check normal movement, occlusion/reacquisition and reconnect without changing
+   the solver or calibration. Repeat the normal client-hosted/Game Mode route.
+3. Set `PSSENSE_INDEX_PROFILE=1` in the **service** environment before preparing
+   the isolated launch, restart that service and test an Index-bound client.
+   Confirm grip/aim, analog squeeze and haptics; remove the opt-in afterwards.
+4. Check gaze with `psvr2-openxr-test --gaze`, then close/relaunch a normal
+   application. Verify the native and Wine clients can each create a session,
+   bind controls and stop cleanly against the matching service.
+
+After user confirmation, check the current local and remote integration tips,
+then integrate this branch without overwriting intervening work. Publication and
+installed-runtime replacement remain separate from this local review merge.

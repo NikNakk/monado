@@ -861,9 +861,10 @@ branch-oriented companion to this document.
 The 2026-10-21 [generic-controller comparison and upstream merge](macos-upstream-generic-controller.md)
 is prepared on `codex/upstream-generic-controller`, based on the current WSI
 fragment-output branch. It adopts upstream's generated action/rebinding system
-and 62 commits through `ffe0a758c`, preserving two generic fallback behaviors,
-Sense LED-space tracking and opt-in defaults. The latest eight I/O-cache commits
-are deferred until remaining driver mappings and opt-ins are migrated.
+through `9fd3968ba`, preserving two generic fallback behaviors, Sense LED-space
+tracking and opt-in defaults. The eight I/O-cache commits now carry remaining
+compatibility mappings in a service-selected, pointer-free cache snapshot.
+Automated validation and the user-operated headset gate are recorded in the review.
 This does not move `macos-upstream-clean` or install/push a runtime.
 
 
