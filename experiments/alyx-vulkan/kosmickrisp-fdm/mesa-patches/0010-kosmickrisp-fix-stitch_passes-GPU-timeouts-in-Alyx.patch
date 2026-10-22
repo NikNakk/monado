@@ -1,0 +1,628 @@
+From cfda5f5f3d84d6c24d941ef22880dfa7d5eb1974 Mon Sep 17 00:00:00 2001
+From: Nick Kennedy <nick@nick-kennedy.com>
+Date: Thu, 22 Oct 2026 08:30:41 +0100
+Subject: [PATCH] kosmickrisp: fix stitch_passes GPU timeouts in Alyx
+
+Metal command allocators of command buffers that take part in a stitched
+render pass are no longer returned to the pool when recording ends.
+They are held until the commit containing them completes and then go to
+a device-wide list that new command buffers draw from. Reusing them
+early let later recordings append to an allocator whose suspended render
+encoder Metal had not yet merged, which caused intermittent
+MTL_COMMAND_QUEUE_ERROR_TIMEOUT in Alyx; a 30 ms sleep after each
+stitched commit also hid it.
+
+Submission now gathers each chain of suspended and resumed command
+buffers before committing. A chain that breaks the stitching rules, for
+example a barrier split inside a middle segment, or one left open at
+the end of a submission, is re-recorded without stitching and committed
+in submission order. Re-recorded command buffers in a split final
+segment are released only after both of their commits complete.
+Stitching statistics are reported through KK_ENCODER_STATS.
+
+AI-written commit text (biblioklept).
+
+Generated-by: LLM
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ src/kosmickrisp/vulkan/kk_cmd_buffer.c |  21 +-
+ src/kosmickrisp/vulkan/kk_cmd_buffer.h |   5 +
+ src/kosmickrisp/vulkan/kk_cmd_draw.c   |   7 +-
+ src/kosmickrisp/vulkan/kk_cmd_pool.c   |  10 +
+ src/kosmickrisp/vulkan/kk_device.c     |   8 +
+ src/kosmickrisp/vulkan/kk_device.h     |   5 +
+ src/kosmickrisp/vulkan/kk_queue.c      | 299 +++++++++++++++++++------
+ 7 files changed, 285 insertions(+), 70 deletions(-)
+
+diff --git a/src/kosmickrisp/vulkan/kk_cmd_buffer.c b/src/kosmickrisp/vulkan/kk_cmd_buffer.c
+index 144c5a4..d45db3d 100644
+--- a/src/kosmickrisp/vulkan/kk_cmd_buffer.c
++++ b/src/kosmickrisp/vulkan/kk_cmd_buffer.c
+@@ -73,7 +73,11 @@ end_recording(struct kk_cmd_buffer *cmd)
+ 
+    cs_end(cmd);
+    mtl_end_command_buffer(cmd->metal.cmd_buf);
+-   kk_cmd_pool_return_allocator(kk_cmd_buffer_pool(cmd), cmd->metal.allocator);
++   if (cmd->state.gfx.stitch.starts_resumed ||
++       cmd->state.gfx.stitch.ends_suspended)
++      cmd->metal.held_allocator = cmd->metal.allocator;
++   else
++      kk_cmd_pool_return_allocator(kk_cmd_buffer_pool(cmd), cmd->metal.allocator);
+    cmd->metal.allocator = NULL;
+ }
+ 
+@@ -89,6 +93,9 @@ kk_destroy_cmd_buffer(struct vk_command_buffer *vk_cmd_buffer)
+ 
+    /* Ensure closed command buffer for safe returns to pool */
+    end_recording(cmd);
++   if (cmd->metal.held_allocator)
++      kk_cmd_pool_return_allocator(pool, cmd->metal.held_allocator);
++   cmd->metal.held_allocator = NULL;
+    if (cmd->metal.cmd_buf)
+       kk_cmd_pool_return_cmd_buf(pool, cmd->metal.cmd_buf);
+    cmd->metal.cmd_buf = NULL;
+@@ -172,6 +179,10 @@ kk_reset_cmd_buffer_internal(struct kk_cmd_buffer *cmd)
+ 
+    /* Ensure closed command buffer so we can start it again */
+    end_recording(cmd);
++   if (cmd->metal.held_allocator)
++      kk_cmd_pool_return_allocator(kk_cmd_buffer_pool(cmd),
++                                   cmd->metal.held_allocator);
++   cmd->metal.held_allocator = NULL;
+    kk_cmd_release_resources(dev, cmd);
+ 
+    cmd->uploader.bo = NULL;
+@@ -272,7 +283,6 @@ kk_encoder_update_debug(struct kk_cmd_buffer *cmd, mtl_command_encoder *encoder)
+       mtl_encoder_push_debug_group(encoder, label->pLabelName);
+ }
+ 
+-static void kk_encoder_stat(const char *what, bool broke_render);
+ 
+ static void
+ kk_stitch_violation(struct kk_cmd_buffer *cmd, const char *why)
+@@ -357,15 +367,16 @@ cs_start_render(struct kk_cmd_buffer *cmd)
+    cs_end(cmd);
+ 
+    uint32_t options = 0;
+-   if (KK_EXPERIMENTAL(STITCH_PASSES)) {
++   if (state->render.stitch) {
+       if ((state->render.flags & VK_RENDERING_RESUMING_BIT) &&
+           state->render.encoders == 0 && !state->in_custom_resolve)
+          options |= MTL_RENDER_ENCODER_RESUMING;
+       if ((state->render.flags & VK_RENDERING_SUSPENDING_BIT) &&
+           !state->in_custom_resolve)
+          options |= MTL_RENDER_ENCODER_SUSPENDING;
+-      kk_stitch_note_encoder(cmd, options);
+    }
++   if (KK_EXPERIMENTAL(STITCH_PASSES))
++      kk_stitch_note_encoder(cmd, options);
+    state->render.encoders++;
+    state->render.suspending_encoder = options & MTL_RENDER_ENCODER_SUSPENDING;
+    state->render.resuming_encoder = options & MTL_RENDER_ENCODER_RESUMING;
+@@ -437,7 +448,7 @@ cs_get_render(struct kk_cmd_buffer *cmd)
+    return cmd->metal.render;
+ }
+ 
+-static void
++void
+ kk_encoder_stat(const char *what, bool broke_render)
+ {
+    static int enabled = -1;
+diff --git a/src/kosmickrisp/vulkan/kk_cmd_buffer.h b/src/kosmickrisp/vulkan/kk_cmd_buffer.h
+index 9720ec4..e8b8e26 100644
+--- a/src/kosmickrisp/vulkan/kk_cmd_buffer.h
++++ b/src/kosmickrisp/vulkan/kk_cmd_buffer.h
+@@ -131,6 +131,7 @@ struct kk_rendering_state {
+    uint32_t sample_locations_count;
+    VkSampleLocationEXT sample_locations[KK_MAX_SAMPLES];
+    bool force_attachment_store;
++   bool stitch;
+    uint32_t encoders;
+    bool suspending_encoder;
+    bool resuming_encoder;
+@@ -270,6 +271,7 @@ struct kk_cmd_buffer {
+       mtl_render_encoder *render;
+       mtl_compute_encoder *compute;
+       mtl_command_buffer *head;
++      mtl_command_allocator *held_allocator;
+       bool tail_used;
+    } metal;
+    /* Pending timestamp resolves (struct kk_ts_resolve), flushed at cs_end. */
+@@ -282,6 +284,7 @@ struct kk_cmd_buffer {
+ 
+    void *drawable;
+    mtl_argument_table *argument_table;
++   bool no_stitch;
+ 
+    struct {
+       struct kk_graphics_state gfx;
+@@ -346,6 +349,8 @@ mtl_render_encoder *cs_get_render(struct kk_cmd_buffer *cmd);
+ mtl_compute_encoder *cs_get_compute_from(struct kk_cmd_buffer *cmd, const char *caller);
+ #define cs_get_compute(cmd) cs_get_compute_from(cmd, __func__)
+ void kk_cmd_barrier(struct kk_cmd_buffer *cmd, const VkDependencyInfo *dep);
++
++void kk_encoder_stat(const char *what, bool broke_render);
+ void cs_end(struct kk_cmd_buffer *cmd);
+ void kk_cmd_bind_root_to_argument_table(struct kk_cmd_buffer *cmd,
+                                         uint64_t addr);
+diff --git a/src/kosmickrisp/vulkan/kk_cmd_draw.c b/src/kosmickrisp/vulkan/kk_cmd_draw.c
+index 127aaf5..a6fa66f 100644
+--- a/src/kosmickrisp/vulkan/kk_cmd_draw.c
++++ b/src/kosmickrisp/vulkan/kk_cmd_draw.c
+@@ -386,9 +386,12 @@ kk_CmdBeginRendering(VkCommandBuffer commandBuffer,
+    /* renderTargetWidth/Height doesn't seem to guarantee
+     * that the attachments won't get touched outside the area
+     * so just checking for offset = 0 doesn't cut it. */
++   render->stitch = KK_EXPERIMENTAL(STITCH_PASSES) && !cmd->no_stitch &&
++                    (render->flags & (VK_RENDERING_RESUMING_BIT |
++                                      VK_RENDERING_SUSPENDING_BIT));
+    bool force_attachment_load =
+-      !is_whole_framebuffer || ((render->flags & VK_RENDERING_RESUMING_BIT) &&
+-                                !KK_EXPERIMENTAL(STITCH_PASSES));
++      !is_whole_framebuffer ||
++      ((render->flags & VK_RENDERING_RESUMING_BIT) && !render->stitch);
+ 
+    render->force_attachment_store =
+       !is_whole_framebuffer || (render->flags & VK_RENDERING_SUSPENDING_BIT);
+diff --git a/src/kosmickrisp/vulkan/kk_cmd_pool.c b/src/kosmickrisp/vulkan/kk_cmd_pool.c
+index e2c2fc8..87036c0 100644
+--- a/src/kosmickrisp/vulkan/kk_cmd_pool.c
++++ b/src/kosmickrisp/vulkan/kk_cmd_pool.c
+@@ -94,6 +94,16 @@ kk_cmd_pool_get_allocator(struct kk_cmd_pool *pool)
+                                mtl_command_allocator *);
+ 
+    struct kk_device *dev = kk_cmd_pool_device(pool);
++   mtl_command_allocator *allocator = NULL;
++   simple_mtx_lock(&dev->stitch_allocators.mutex);
++   if (util_dynarray_num_elements(&dev->stitch_allocators.free,
++                                  mtl_command_allocator *) > 0u)
++      allocator = util_dynarray_pop(&dev->stitch_allocators.free,
++                                    mtl_command_allocator *);
++   simple_mtx_unlock(&dev->stitch_allocators.mutex);
++   if (allocator)
++      return allocator;
++
+    return mtl_new_command_allocator(dev->mtl_handle);
+ }
+ 
+diff --git a/src/kosmickrisp/vulkan/kk_device.c b/src/kosmickrisp/vulkan/kk_device.c
+index 9950b19..54e2ab4 100644
+--- a/src/kosmickrisp/vulkan/kk_device.c
++++ b/src/kosmickrisp/vulkan/kk_device.c
+@@ -302,6 +302,8 @@ kk_CreateDevice(VkPhysicalDevice physicalDevice,
+ 
+    /* We need to initialize the device residency set before any bo is created. */
+    simple_mtx_init(&dev->residency_set.mutex, mtx_plain);
++   simple_mtx_init(&dev->stitch_allocators.mutex, mtx_plain);
++   util_dynarray_init(&dev->stitch_allocators.free, NULL);
+    dev->residency_set.handle = mtl_new_residency_set(dev->mtl_handle);
+    if (dev->residency_set.handle == NULL)
+       goto fail_compiler;
+@@ -394,6 +396,12 @@ kk_DestroyDevice(VkDevice _device, const VkAllocationCallbacks *pAllocator)
+       dev->has_queue = false;
+    }
+ 
++   util_dynarray_foreach(&dev->stitch_allocators.free, mtl_command_allocator *,
++                         allocator)
++      mtl_release(*allocator);
++   util_dynarray_fini(&dev->stitch_allocators.free);
++   simple_mtx_destroy(&dev->stitch_allocators.mutex);
++
+    /* Release the residency set last once all BOs are released. */
+    mtl_release(dev->residency_set.handle);
+    simple_mtx_destroy(&dev->residency_set.mutex);
+diff --git a/src/kosmickrisp/vulkan/kk_device.h b/src/kosmickrisp/vulkan/kk_device.h
+index e3795ba..449bde8 100644
+--- a/src/kosmickrisp/vulkan/kk_device.h
++++ b/src/kosmickrisp/vulkan/kk_device.h
+@@ -93,6 +93,11 @@ struct kk_device {
+     * recording as required by Metal. */
+    struct kk_residency_set residency_set;
+ 
++   struct {
++      simple_mtx_t mutex;
++      struct util_dynarray free;
++   } stitch_allocators;
++
+    struct kk_precompiled_cache precompiled_cache;
+ 
+    bool has_queue;
+diff --git a/src/kosmickrisp/vulkan/kk_queue.c b/src/kosmickrisp/vulkan/kk_queue.c
+index e82d09f..7477c3d 100644
+--- a/src/kosmickrisp/vulkan/kk_queue.c
++++ b/src/kosmickrisp/vulkan/kk_queue.c
+@@ -23,6 +23,7 @@
+ struct kk_commit_data {
+    struct kk_queue *queue;
+    struct kk_cmd_buffer *cmd;
++   uint32_t refs;
+ };
+ 
+ static void
+@@ -70,6 +71,9 @@ rerecord_commit_callback(struct mtl_feedback_data *data)
+ 
+    check_device_lost(dev, data);
+ 
++   if (p_atomic_dec_return(&commit->refs) > 0)
++      return;
++
+    /* Completion callbacks are called from multiple threads, so we need to
+     * ensure the access to queue resources is safe. */
+    mtx_lock(&queue->mutex);
+@@ -110,7 +114,7 @@ kk_queue_commit(struct kk_queue *queue, struct kk_cmd_buffer *cmd,
+ 
+ static VkResult
+ rerecord_cmd_buffer(struct kk_queue *queue, struct kk_cmd_buffer *cmd,
+-                    struct kk_commit_data **out);
++                    bool no_stitch, struct kk_commit_data **out);
+ 
+ static VkResult
+ rerecord_and_commit_cmd_buffer(struct kk_queue *queue,
+@@ -164,6 +168,7 @@ rerecord_and_commit_cmd_buffer(struct kk_queue *queue,
+    }
+    commit->queue = queue;
+    commit->cmd = rerecord;
++   commit->refs = 1;
+ 
+    /* Need to ensure the new buffers allocated at record are resident. */
+    kk_device_make_resources_resident(dev);
+@@ -183,7 +188,7 @@ unlock:
+ 
+ static VkResult
+ rerecord_cmd_buffer(struct kk_queue *queue, struct kk_cmd_buffer *cmd,
+-                    struct kk_commit_data **out)
++                    bool no_stitch, struct kk_commit_data **out)
+ {
+    struct kk_device *dev = kk_queue_device(queue);
+    struct vk_command_buffer *vk_cmd = NULL;
+@@ -210,6 +215,7 @@ rerecord_cmd_buffer(struct kk_queue *queue, struct kk_cmd_buffer *cmd,
+       .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
+       .flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT,
+    };
++   rerecord->no_stitch = no_stitch;
+    result = kk_BeginCommandBuffer(rerecord_handle, &begin_info);
+    if (result != VK_SUCCESS)
+       goto release;
+@@ -232,6 +238,7 @@ rerecord_cmd_buffer(struct kk_queue *queue, struct kk_cmd_buffer *cmd,
+    }
+    commit->queue = queue;
+    commit->cmd = rerecord;
++   commit->refs = 1;
+    kk_device_make_resources_resident(dev);
+    queue->commits_in_flight++;
+    *out = commit;
+@@ -248,9 +255,29 @@ unlock:
+ struct kk_commit_group {
+    mtl_command_buffer *bufs[32];
+    struct kk_commit_data *commits[32];
++   mtl_command_allocator *held[32];
++   uint32_t count;
++   uint32_t held_count;
++};
++
++struct kk_held_allocators {
++   struct kk_device *dev;
+    uint32_t count;
++   mtl_command_allocator *allocators[32];
+ };
+ 
++static void
++kk_held_allocators_callback(struct mtl_feedback_data *data)
++{
++   struct kk_held_allocators *held = data->user_data;
++   simple_mtx_lock(&held->dev->stitch_allocators.mutex);
++   for (uint32_t i = 0; i < held->count; i++)
++      util_dynarray_append(&held->dev->stitch_allocators.free,
++                           held->allocators[i]);
++   simple_mtx_unlock(&held->dev->stitch_allocators.mutex);
++   free(held);
++}
++
+ static void
+ kk_commit_group_flush(struct kk_queue *queue, struct kk_commit_group *group)
+ {
+@@ -264,94 +291,240 @@ kk_commit_group_flush(struct kk_queue *queue, struct kk_commit_group *group)
+          mtl_commit_options_add_feedback_handler(options, rerecord_commit_callback,
+                                                  group->commits[i]);
+    }
++   if (group->held_count) {
++      struct kk_held_allocators *held = calloc(1, sizeof(*held));
++      if (held) {
++         held->dev = dev;
++         held->count = group->held_count;
++         memcpy(held->allocators, group->held,
++                group->held_count * sizeof(group->held[0]));
++         mtl_commit_options_add_feedback_handler(
++            options, kk_held_allocators_callback, held);
++      }
++   }
+    mtl_command_queue_commit(queue->mtl_handle, group->bufs, group->count,
+                             options);
+    mtl_release(options);
+    group->count = 0;
++   group->held_count = 0;
++}
++
++static void
++kk_commit_group_add(struct kk_queue *queue, struct kk_commit_group *group,
++                    mtl_command_buffer *buf, struct kk_commit_data *commit,
++                    struct kk_cmd_buffer *owner)
++{
++   if (group->count == ARRAY_SIZE(group->bufs) ||
++       (owner && owner->metal.held_allocator &&
++        group->held_count == ARRAY_SIZE(group->held)))
++      kk_commit_group_flush(queue, group);
++   group->bufs[group->count] = buf;
++   group->commits[group->count] = commit;
++   group->count++;
++   if (owner && owner->metal.held_allocator) {
++      group->held[group->held_count++] = owner->metal.held_allocator;
++      owner->metal.held_allocator = NULL;
++   }
++}
++
++static bool
++kk_cmd_buffer_is_stitched(const struct kk_cmd_buffer *cmd)
++{
++   return cmd->state.gfx.stitch.starts_resumed ||
++          cmd->state.gfx.stitch.ends_suspended;
+ }
+ 
+ static VkResult
+-kk_queue_submit_stitched(struct kk_queue *queue, struct vk_queue_submit *submit)
++kk_submit_unstitched(struct kk_queue *queue, struct kk_cmd_buffer *cmd,
++                     bool rerecord)
++{
++   if (cmd->drawable)
++      mtl_command_queue_wait_for_drawable(queue->mtl_handle, cmd->drawable);
++
++   struct kk_cmd_buffer *committed = cmd;
++   struct kk_commit_data *commit = NULL;
++   if (cmd->submitted || rerecord) {
++      VkResult result = rerecord_cmd_buffer(queue, cmd, rerecord, &commit);
++      if (result != VK_SUCCESS)
++         return result;
++      committed = commit ? commit->cmd : NULL;
++   } else if (!kk_cmd_buffer_has_work(cmd)) {
++      committed = NULL;
++   }
++   cmd->submitted = true;
++
++   if (committed) {
++      struct kk_commit_group group = {0};
++      kk_commit_group_add(queue, &group, committed->metal.cmd_buf, commit,
++                          committed);
++      kk_commit_group_flush(queue, &group);
++   }
++
++   if (cmd->drawable) {
++      mtl_command_queue_signal_drawable(queue->mtl_handle, cmd->drawable);
++      mtl_release(cmd->drawable);
++      cmd->drawable = NULL;
++   }
++   return VK_SUCCESS;
++}
++
++static bool
++kk_chain_can_stitch(struct kk_cmd_buffer **chain, uint32_t count)
++{
++   if (count < 2 || count > 32)
++      return false;
++   for (uint32_t i = 0; i < count; i++) {
++      const struct kk_cmd_buffer *cmd = chain[i];
++      bool first = i == 0, last = i == count - 1;
++      if (cmd->state.gfx.stitch.violation || cmd->drawable)
++         return false;
++      if (cmd->state.gfx.stitch.starts_resumed == first)
++         return false;
++      if (cmd->state.gfx.stitch.ends_suspended == last)
++         return false;
++      if (cmd->metal.head && !last)
++         return false;
++   }
++   return true;
++}
++
++struct kk_pending {
++   struct kk_cmd_buffer *cmds[48];
++   bool in_chain[48];
++   uint32_t count;
++   uint32_t chain_count;
++   bool broken;
++};
++
++static VkResult
++kk_submit_pending(struct kk_queue *queue, struct kk_pending *pending)
+ {
++   struct kk_cmd_buffer *chain[48];
++   uint32_t n = 0;
++   for (uint32_t i = 0; i < pending->count; i++) {
++      if (pending->in_chain[i])
++         chain[n++] = pending->cmds[i];
++   }
++
++   VkResult result = VK_SUCCESS;
++   if (pending->broken || !kk_chain_can_stitch(chain, n)) {
++      static uint32_t logged;
++      if (logged++ < 4)
++         mesa_logw("kk: re-recording %u command buffers without render pass "
++                   "stitching",
++                   n);
++      kk_encoder_stat("stitch fallback", false);
++      for (uint32_t i = 0; i < pending->count && result == VK_SUCCESS; i++)
++         result = kk_submit_unstitched(queue, pending->cmds[i],
++                                       pending->in_chain[i]);
++      goto done;
++   }
++
++   kk_encoder_stat("stitched chain", false);
+    struct kk_commit_group group = {0};
+-   struct kk_commit_group deferred = {0};
+-   bool chain_open = false;
++   for (uint32_t i = 0; i < n; i++) {
++      struct kk_cmd_buffer *cmd = chain[i];
++      struct kk_cmd_buffer *committed = cmd;
++      struct kk_commit_data *commit = NULL;
++      if (cmd->submitted) {
++         result = rerecord_cmd_buffer(queue, cmd, false, &commit);
++         if (result != VK_SUCCESS)
++            goto done;
++         committed = commit ? commit->cmd : NULL;
++      }
++      cmd->submitted = true;
++      if (!committed)
++         continue;
++
++      if (!committed->metal.head) {
++         kk_commit_group_add(queue, &group, committed->metal.cmd_buf, commit,
++                             committed);
++         continue;
++      }
++
++      bool tail = committed->metal.tail_used || commit;
++      if (commit)
++         commit->refs++;
++      kk_commit_group_add(queue, &group, committed->metal.head, commit,
++                          tail ? NULL : committed);
++      kk_commit_group_flush(queue, &group);
++      if (tail)
++         kk_commit_group_add(queue, &group, committed->metal.cmd_buf, commit,
++                             committed);
++   }
++   kk_commit_group_flush(queue, &group);
++
++   for (uint32_t i = 0; i < pending->count && result == VK_SUCCESS; i++) {
++      if (!pending->in_chain[i])
++         result = kk_submit_unstitched(queue, pending->cmds[i], false);
++   }
++
++done:
++   pending->count = 0;
++   pending->chain_count = 0;
++   pending->broken = false;
++   return result;
++}
++
++static VkResult
++kk_queue_submit_stitched(struct kk_queue *queue, struct vk_queue_submit *submit)
++{
++   struct kk_pending pending = {0};
++   VkResult result;
+ 
+    for (uint32_t i = 0; i < submit->command_buffer_count; ++i) {
+-      struct kk_cmd_buffer *cmd_buffer =
++      struct kk_cmd_buffer *cmd =
+          container_of(submit->command_buffers[i], struct kk_cmd_buffer, vk);
++      bool stitched = kk_cmd_buffer_is_stitched(cmd);
++      bool resumes = cmd->state.gfx.stitch.starts_resumed;
+ 
+-      if (cmd_buffer->drawable) {
+-         kk_commit_group_flush(queue, &group);
+-         mtl_command_queue_wait_for_drawable(queue->mtl_handle,
+-                                             cmd_buffer->drawable);
++      if (pending.chain_count && !resumes && !stitched && !cmd->drawable &&
++          pending.count < ARRAY_SIZE(pending.cmds)) {
++         pending.cmds[pending.count] = cmd;
++         pending.in_chain[pending.count++] = false;
++         continue;
+       }
+ 
+-      struct kk_cmd_buffer *committed = cmd_buffer;
+-      struct kk_commit_data *commit = NULL;
+-      if (cmd_buffer->submitted) {
+-         VkResult result = rerecord_cmd_buffer(queue, cmd_buffer, &commit);
++      if (pending.chain_count && !resumes) {
++         pending.broken = true;
++         result = kk_submit_pending(queue, &pending);
+          if (result != VK_SUCCESS)
+             return result;
+-         committed = commit ? commit->cmd : NULL;
+-      } else if (!kk_cmd_buffer_has_work(cmd_buffer)) {
+-         committed = NULL;
+       }
+-      cmd_buffer->submitted = true;
+ 
+-      if (committed && chain_open && !committed->state.gfx.stitch.starts_resumed &&
+-          !cmd_buffer->drawable) {
+-         static uint32_t logged;
+-         if (logged++ < 4)
+-            mesa_logi("kk: deferring a command buffer submitted inside a stitched render pass");
+-         if (deferred.count == ARRAY_SIZE(deferred.bufs))
+-            kk_commit_group_flush(queue, &deferred);
+-         deferred.bufs[deferred.count] = committed->metal.cmd_buf;
+-         deferred.commits[deferred.count] = commit;
+-         deferred.count++;
++      if (!pending.chain_count && !stitched) {
++         result = kk_submit_unstitched(queue, cmd, false);
++         if (result != VK_SUCCESS)
++            return result;
+          continue;
+       }
+ 
+-      if (committed) {
+-         if (group.count + 1 >= ARRAY_SIZE(group.bufs))
+-            kk_commit_group_flush(queue, &group);
+-         if (committed->metal.head) {
+-            group.bufs[group.count] = committed->metal.head;
+-            group.commits[group.count] = NULL;
+-            group.count++;
+-            kk_commit_group_flush(queue, &group);
+-            if (committed->metal.tail_used) {
+-               group.bufs[group.count] = committed->metal.cmd_buf;
+-               group.commits[group.count] = commit;
+-               group.count++;
+-            } else if (commit) {
+-               group.bufs[group.count] = committed->metal.cmd_buf;
+-               group.commits[group.count] = commit;
+-               group.count++;
+-            }
+-         } else {
+-            group.bufs[group.count] = committed->metal.cmd_buf;
+-            group.commits[group.count] = commit;
+-            group.count++;
+-         }
++      if (pending.count == ARRAY_SIZE(pending.cmds)) {
++         pending.broken = true;
++         result = kk_submit_pending(queue, &pending);
++         if (result != VK_SUCCESS)
++            return result;
++         result = kk_submit_unstitched(queue, cmd, true);
++         if (result != VK_SUCCESS)
++            return result;
++         continue;
+       }
+ 
+-      if (cmd_buffer->drawable) {
+-         kk_commit_group_flush(queue, &group);
+-         mtl_command_queue_signal_drawable(queue->mtl_handle,
+-                                           cmd_buffer->drawable);
+-         mtl_release(cmd_buffer->drawable);
+-         cmd_buffer->drawable = NULL;
+-      }
++      pending.cmds[pending.count] = cmd;
++      pending.in_chain[pending.count++] = true;
++      pending.chain_count++;
+ 
+-      chain_open = committed && committed->state.gfx.stitch.ends_suspended;
+-      if (!chain_open) {
+-         kk_commit_group_flush(queue, &group);
+-         kk_commit_group_flush(queue, &deferred);
++      if (!cmd->state.gfx.stitch.ends_suspended) {
++         result = kk_submit_pending(queue, &pending);
++         if (result != VK_SUCCESS)
++            return result;
+       }
+    }
+-   kk_commit_group_flush(queue, &group);
+-   kk_commit_group_flush(queue, &deferred);
++
++   if (pending.count) {
++      pending.broken = true;
++      return kk_submit_pending(queue, &pending);
++   }
+    return VK_SUCCESS;
+ }
+ 
+-- 
+2.54.0 (Apple Git-157)
+

@@ -309,14 +309,75 @@ The custom resolve probe passes in all variants, with and without `tile_resolve`
 and `light_barriers`. The fill drawn in segment 0 reaches the resolve only
 through tile memory.
 
-In Alyx it is not working yet. Without the deferral, Apple's driver crashed in
-`mergeRenderEncoders` when an unrelated command buffer fell inside a chain. With
-it, Alyx hits `MTL_COMMAND_QUEUE_ERROR_TIMEOUT` and renders no frames. The cause
-is not known yet.
+Without the deferral, Apple's driver crashed in `mergeRenderEncoders` when an
+unrelated command buffer fell inside a chain.
+
+### The `stitch_passes` GPU timeout (Mesa `cfda5f5`, patch 0010)
+
+With the deferral, Alyx hit `MTL_COMMAND_QUEUE_ERROR_TIMEOUT` on its first
+stitched chain. Metal validation reported nothing. Bisecting inside KK, with the
+probes in
+[`tile-resolve/`](../experiments/alyx-vulkan/kosmickrisp-fdm/tile-resolve/):
+
+| Change | Timeout? |
+| --- | --- |
+| Stitch only the shadow-atlas passes (depth-only, 1×) | yes |
+| Stitch only the MSAA eye pass | yes |
+| Drop all draws in stitched passes | no |
+| Drop only indexed draws | no |
+| Drop only indexed draws in the first segment | later, after ~180 commits |
+| Queue drains on the CPU before each stitched commit | yes |
+| GPU-side queue wait after each stitched commit | yes |
+| CPU waits for each stitched commit to finish | no |
+| 30 ms CPU sleep after each stitched commit | no |
+| Stitched command allocators kept out of the pool | no |
+
+KK returns a command buffer's `MTL4CommandAllocator` to the pool when recording
+ends, before the buffer is committed. The next recording then appends to the
+same allocator. For ordinary buffers that is fine. For a suspended render
+encoder, it races with the driver's merge of the stitched pass, and the GPU
+hangs. Anything that slows the CPU after the commit hides it, and fewer commands
+make it rarer.
+
+The fix holds the allocators of stitched command buffers until their commit
+completes, then returns them to a device-wide list. That alone ran to commit
+~27,900. The one remaining timeout was a chain with a barrier split inside a
+middle segment, which Metal cannot express. KK now gathers each chain at submit
+and re-records chains that break the rules, or are left open at the end of a
+submission, without stitching.
+
+Result, desktop, fidelity 5, FDM off, 60 s runs: no timeouts. 5,868 chains were
+stitched and 15 re-recorded. GPU time per frame, median of three runs each:
+
+| Configuration | GPU median | p90 |
+| --- | --- | --- |
+| Stitching off | 13.53 ms | 16.40 ms |
+| `stitch_passes` | 13.89 ms | 16.48 ms |
+
+Stitching alone costs about 3%. It is only the enabler for memoryless MSAA.
+
+The shadow probe, `shadow_stitch.m`, did not reproduce the hang. It has no
+concurrent recording. Rendering with stitching has not been checked visually
+yet.
+
+### Memoryless targets and stitching
+
+`stitch_resolve.m` with `HEAVY=` draws many small triangles in each segment:
+
+| Target | Triangles | Result |
+| --- | --- | --- |
+| Memoryless, not stitched | 60M in one pass | OK |
+| Memoryless, stitched, 3 segments | 12M per segment | OK |
+| Memoryless, stitched, 3 segments | 15M per segment | queue error 1 after ~290 ms |
+| Private with load and store, stitched | 60M per segment | OK |
+
+A stitched pass on a memoryless target fails once it has enough geometry. A
+single pass doesn't. Alyx's passes are far below that, but the limit needs
+watching once MSAA is memoryless.
 
 ### Remaining for memoryless MSAA
 
-- **Stitching in Alyx:** the GPU timeout above.
+- **Visual check:** stitching in Alyx, on the desktop and then the headset.
 - **Input-attachment read:** the final segment's read of the MSAA colour must
   come from tile memory instead of a split.
 - **Depth and stencil:** the `SAMPLE_ZERO` resolve must be done in the pass. KK
