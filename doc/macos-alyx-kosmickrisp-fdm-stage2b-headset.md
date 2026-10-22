@@ -791,5 +791,41 @@ resets within 20 ms. No pass in any process ran longer than 28 ms.
 
 `XRT_MACOS_FORCE_CPU_RENDER_WAIT=1` (present worker waits on the CPU instead
 of a GPU event wait) still resets, so the GPU event wait is not the trigger.
-Next: find which service command buffer faults after a stall, probably in the
-macOS present path or the swapchain GPU-reuse lifetime tracking.
+
+**Update: the trigger is KK, not the service.** Alyx on MoltenVK
+(`ALYX_DRIVER=moltenvk` in `kk-tests/run-alyx-kk-desktop`) ran 4 of 4 turning
+runs without a reset; KK reset in 7 of 7 runs that evening, each about 45 s
+into the turning. The blamed process varies because the whole GPU stops:
+a Metal System Trace shows every process's GPU work stop completing at the
+same instant. Five seconds later Monado's client code in Alyx fails the frame
+(`Client GPU obligation failed ... result=2`) and xrizer panics; five seconds
+after that the firmware restarts the GPU ("progress timeout"). GPU fault
+reports are in `/Library/Logs/DiagnosticReports/gpuEvent-*.ips`; macOS keeps
+at most 25.
+
+Alyx's last GPU work alternates heavy vertex and fragment phases, the shape of
+a partial render, and the final fragment phase never completes.
+
+Ruled out, each by a run that still reset:
+
+| Change | Runs that reset |
+| --- | --- |
+| Metal API and shader validation in the service | 1 / 1, no reports |
+| Service queue priority unset, drawable slot off | 2 / 2 each |
+| `XRT_MACOS_FORCE_CPU_RENDER_WAIT=1` | 2 / 2 |
+| `XRT_MACOS_VK_CLIENT_SHARED_EVENT=0` (CPU frame handoff) | 2 / 2 |
+| Full-size Metal render targets for partial render areas | 1 / 1 |
+| `+r_shadows 0` | 3 / 4 |
+| `VK_EXT_custom_resolve` hidden from Alyx | 3 / 3 |
+| KK reporting the full 18 GB memory budget (MoltenVK's figure) | 3 / 3 |
+
+KK's internal compute kernels (only query reset and single writes run) and
+its copies (largest 128 MB) showed nothing unusual, and a log of KK's
+semaphore waits at the failure showed only waits queued behind the hang.
+With custom resolve hidden, Alyx enables the same Vulkan extensions on both
+drivers.
+
+**Mac restarts.** Four watchdog restarts today ("SOCD report detected: (iBoot
+panic)", `Boot faults: wdog`). One froze about a minute after a forced GPU
+reset; another 20 s after xctrace spent 14 minutes saving a trace, writing
+137 GB. Avoid long xctrace recordings of Alyx.
