@@ -357,8 +357,33 @@ stitched and 15 re-recorded. GPU time per frame, median of three runs each:
 Stitching alone costs about 3%. It is only the enabler for memoryless MSAA.
 
 The shadow probe, `shadow_stitch.m`, did not reproduce the hang. It has no
-concurrent recording. Rendering with stitching has not been checked visually
-yet.
+concurrent recording.
+
+### Left eye losing later segments (Mesa `5476876`, patch 0011)
+
+On the headset, the menu and hands flickered out of the left eye while the
+background stayed. The right eye was correct. The background is drawn in the
+first segment of the 4-segment eye pass. The menu and hands are drawn in later
+segments. There were no queue errors.
+
+The final segment ends in a split. The rest of that Vulkan command buffer,
+including the custom resolve and the per-layer depth resolves, is committed after
+the stitched group. Metal could start it before the merged pass had stored its
+attachments, so the resolve read a stale copy. The queue now signals a shared
+event after the stitched group and waits on it before the tail commit. With
+that, the user saw the left eye steady in the desktop preview.
+`KK_STITCH_LOG=N` logs the encoders of the first N stitched chains.
+
+Desktop timing with the wait, same settings, three runs each, after the laptop
+went on a fan stand:
+
+| Configuration | GPU median | p90 |
+| --- | --- | --- |
+| Stitching off | 11.74 ms | 13.39 ms |
+| `stitch_passes` | 11.58 ms | 12.53 ms |
+
+All six runs held 60 fps. The difference is within noise. The fan stand
+explains the lower times than the earlier table.
 
 ### Memoryless targets and stitching
 
@@ -377,7 +402,7 @@ watching once MSAA is memoryless.
 
 ### Remaining for memoryless MSAA
 
-- **Visual check:** stitching in Alyx, on the desktop and then the headset.
+- **Headset check:** stitching with the tail wait, on the headset.
 - **Input-attachment read:** the final segment's read of the MSAA colour must
   come from tile memory instead of a split.
 - **Depth and stencil:** the `SAMPLE_ZERO` resolve must be done in the pass. KK

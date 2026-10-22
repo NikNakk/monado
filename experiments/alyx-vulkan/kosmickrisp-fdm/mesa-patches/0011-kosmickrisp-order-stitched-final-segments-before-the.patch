@@ -1,0 +1,177 @@
+From 5476876f0f06544f28322d9e5f82073c2c89a4d7 Mon Sep 17 00:00:00 2001
+From: Nick Kennedy <nick@nick-kennedy.com>
+Date: Thu, 22 Oct 2026 10:05:02 +0100
+Subject: [PATCH] kosmickrisp: order stitched final segments before their tail
+ commit
+
+When the final segment of a stitched render pass ends in a split, the
+rest of that command buffer, including the custom resolve that reads the
+multisampled attachments, is committed after the stitched group. Metal
+could start it before the merged pass had stored its attachments, so the
+resolve read a stale copy: in Alyx the menu and hands, drawn in later
+segments, flickered out of the left eye. The queue now signals a shared
+event after the stitched group and waits on it before the tail commit.
+
+KK_STITCH_LOG=N logs the encoders of the first N stitched chains.
+
+AI-written commit text (biblioklept).
+
+Generated-by: LLM
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ src/kosmickrisp/vulkan/kk_cmd_buffer.c | 30 +++++++++++++++++++++++---
+ src/kosmickrisp/vulkan/kk_cmd_buffer.h |  1 +
+ src/kosmickrisp/vulkan/kk_queue.c      | 27 +++++++++++++++++++++++
+ src/kosmickrisp/vulkan/kk_queue.h      |  3 +++
+ 4 files changed, 58 insertions(+), 3 deletions(-)
+
+diff --git a/src/kosmickrisp/vulkan/kk_cmd_buffer.c b/src/kosmickrisp/vulkan/kk_cmd_buffer.c
+index d45db3d..12c6dbc 100644
+--- a/src/kosmickrisp/vulkan/kk_cmd_buffer.c
++++ b/src/kosmickrisp/vulkan/kk_cmd_buffer.c
+@@ -294,7 +294,7 @@ kk_stitch_violation(struct kk_cmd_buffer *cmd, const char *why)
+ }
+ 
+ static void
+-kk_stitch_note_encoder(struct kk_cmd_buffer *cmd, uint32_t options)
++kk_stitch_note_encoder(struct kk_cmd_buffer *cmd, uint32_t options, bool render)
+ {
+    struct kk_graphics_state *gfx = &cmd->state.gfx;
+    if (gfx->stitch.suspended_open)
+@@ -312,6 +312,30 @@ kk_stitch_note_encoder(struct kk_cmd_buffer *cmd, uint32_t options)
+       gfx->stitch.ends_suspended = true;
+    }
+    gfx->stitch.encoders++;
++
++   static int log = -1;
++   if (log < 0)
++      log = debug_get_num_option("KK_STITCH_LOG", 0) > 0;
++   size_t len = strlen(gfx->stitch.trace);
++   if (!log || len > sizeof(gfx->stitch.trace) - 96)
++      return;
++   if (!render) {
++      snprintf(gfx->stitch.trace + len, sizeof(gfx->stitch.trace) - len, " C");
++      return;
++   }
++   const struct kk_rendering_state *r = &gfx->render;
++   const struct kk_image_view *v =
++      r->color_att_count && r->color_att[0].iview ? r->color_att[0].iview
++                                                   : r->depth_att.iview;
++   snprintf(gfx->stitch.trace + len, sizeof(gfx->stitch.trace) - len,
++            " R%s%s[%ux%ux%u s%u f%d c%u d%d vm%x L%u base%u a%ux%u+%d,%d f%x]",
++            options & MTL_RENDER_ENCODER_RESUMING ? "r" : "",
++            options & MTL_RENDER_ENCODER_SUSPENDING ? "s" : "",
++            v ? v->vk.image->extent.width : 0, v ? v->vk.image->extent.height : 0,
++            v ? v->vk.image->array_layers : 0, r->samples, v ? v->vk.format : 0,
++            r->color_att_count, r->depth_att.iview != NULL, r->view_mask,
++            r->layer_count, v ? v->vk.base_array_layer : 0, r->area.extent.width,
++            r->area.extent.height, r->area.offset.x, r->area.offset.y, r->flags);
+ }
+ 
+ static bool
+@@ -376,7 +400,7 @@ cs_start_render(struct kk_cmd_buffer *cmd)
+          options |= MTL_RENDER_ENCODER_SUSPENDING;
+    }
+    if (KK_EXPERIMENTAL(STITCH_PASSES))
+-      kk_stitch_note_encoder(cmd, options);
++      kk_stitch_note_encoder(cmd, options, true);
+    state->render.encoders++;
+    state->render.suspending_encoder = options & MTL_RENDER_ENCODER_SUSPENDING;
+    state->render.resuming_encoder = options & MTL_RENDER_ENCODER_RESUMING;
+@@ -498,7 +522,7 @@ cs_get_compute_from(struct kk_cmd_buffer *cmd, const char *caller)
+ 
+    if (cmd->metal.compute == NULL) {
+       if (KK_EXPERIMENTAL(STITCH_PASSES))
+-         kk_stitch_note_encoder(cmd, 0);
++         kk_stitch_note_encoder(cmd, 0, false);
+       if (cmd->metal.head)
+          cmd->metal.tail_used = true;
+       cmd->metal.compute = mtl_new_compute_command_encoder(cmd->metal.cmd_buf);
+diff --git a/src/kosmickrisp/vulkan/kk_cmd_buffer.h b/src/kosmickrisp/vulkan/kk_cmd_buffer.h
+index e8b8e26..630bc20 100644
+--- a/src/kosmickrisp/vulkan/kk_cmd_buffer.h
++++ b/src/kosmickrisp/vulkan/kk_cmd_buffer.h
+@@ -184,6 +184,7 @@ struct kk_graphics_state {
+       bool ends_suspended;
+       bool suspended_open;
+       bool violation;
++      char trace[384];
+    } stitch;
+    struct {
+       bool possible;
+diff --git a/src/kosmickrisp/vulkan/kk_queue.c b/src/kosmickrisp/vulkan/kk_queue.c
+index 7477c3d..1c781c0 100644
+--- a/src/kosmickrisp/vulkan/kk_queue.c
++++ b/src/kosmickrisp/vulkan/kk_queue.c
+@@ -396,6 +396,18 @@ struct kk_pending {
+    bool broken;
+ };
+ 
++static void
++kk_stitch_wait(struct kk_queue *queue)
++{
++   if (!queue->stitch_event)
++      queue->stitch_event =
++         mtl_new_shared_event(kk_queue_device(queue)->mtl_handle);
++   mtl_signal_event(queue->mtl_handle, queue->stitch_event,
++                    ++queue->stitch_value);
++   mtl_wait_for_event(queue->mtl_handle, queue->stitch_event,
++                      queue->stitch_value);
++}
++
+ static VkResult
+ kk_submit_pending(struct kk_queue *queue, struct kk_pending *pending)
+ {
+@@ -421,6 +433,18 @@ kk_submit_pending(struct kk_queue *queue, struct kk_pending *pending)
+    }
+ 
+    kk_encoder_stat("stitched chain", false);
++   static uint32_t logged;
++   static int64_t log_limit = -1;
++   if (log_limit < 0)
++      log_limit = debug_get_num_option("KK_STITCH_LOG", 0);
++   if (logged < log_limit) {
++      logged++;
++      for (uint32_t i = 0; i < pending->count; i++)
++         mesa_logi("kk-stitch-log %u.%u %s:%s%s", logged, i,
++                   pending->in_chain[i] ? "seg" : "deferred",
++                   pending->cmds[i]->state.gfx.stitch.trace,
++                   pending->cmds[i]->metal.head ? " (split)" : "");
++   }
+    struct kk_commit_group group = {0};
+    for (uint32_t i = 0; i < n; i++) {
+       struct kk_cmd_buffer *cmd = chain[i];
+@@ -448,6 +472,7 @@ kk_submit_pending(struct kk_queue *queue, struct kk_pending *pending)
+       kk_commit_group_add(queue, &group, committed->metal.head, commit,
+                           tail ? NULL : committed);
+       kk_commit_group_flush(queue, &group);
++      kk_stitch_wait(queue);
+       if (tail)
+          kk_commit_group_add(queue, &group, committed->metal.cmd_buf, commit,
+                              committed);
+@@ -667,6 +692,8 @@ kk_queue_finish(struct kk_device *dev, struct kk_queue *queue)
+ 
+    mtl_command_queue_remove_residency_set(queue->mtl_handle,
+                                           dev->residency_set.handle);
++   if (queue->stitch_event)
++      mtl_release(queue->stitch_event);
+    mtl_release(queue->mtl_handle);
+ 
+    kk_DestroyCommandPool(kk_device_to_handle(dev),
+diff --git a/src/kosmickrisp/vulkan/kk_queue.h b/src/kosmickrisp/vulkan/kk_queue.h
+index ddc9a3c..beaa673 100644
+--- a/src/kosmickrisp/vulkan/kk_queue.h
++++ b/src/kosmickrisp/vulkan/kk_queue.h
+@@ -31,6 +31,9 @@ struct kk_queue {
+    uint32_t commits_in_flight;
+    mtx_t mutex;
+    cnd_t cond;
++
++   mtl_shared_event *stitch_event;
++   uint64_t stitch_value;
+ };
+ 
+ static inline struct kk_device *
+-- 
+2.54.0 (Apple Git-157)
+
