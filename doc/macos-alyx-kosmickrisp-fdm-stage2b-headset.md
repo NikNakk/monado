@@ -385,6 +385,23 @@ went on a fan stand:
 All six runs held 60 fps. The difference is within noise. The fan stand
 explains the lower times than the earlier table.
 
+On the headset the user saw both eyes steady. That attended run ran at 2.6 fps,
+with frames 383 ms apart, but the cause was not found. Unattended runs straight
+after did not repeat it. FDM off, fidelity 5, `+vr_render_subsampled_depth 1`,
+150 s each:
+
+| Configuration | fps | GPU median | Frame interval |
+| --- | --- | --- | --- |
+| Stitching off | 23.7 | 31.7 ms | 42.6 ms |
+| `stitch_passes`, no tail wait | 20.5 | 39.9 ms | 47.1 ms |
+| `stitch_passes`, tail wait on a plain `MTLEvent` | 17.2 | 47.0 ms | 57.5 ms |
+| `stitch_passes`, tail wait on a shared event (as committed) | 22.9 | 32.2 ms | 46.9 ms |
+| `stitch_passes`, tail wait on a shared event, rerun | 25.3 | 30.8 ms | 37.7 ms |
+
+Stitching does not cost frame rate on the headset. These runs are below the
+earlier 30–33 fps without FDM, which did not use
+`+vr_render_subsampled_depth 1`.
+
 ### Memoryless targets and stitching
 
 `stitch_resolve.m` with `HEAVY=` draws many small triangles in each segment:
