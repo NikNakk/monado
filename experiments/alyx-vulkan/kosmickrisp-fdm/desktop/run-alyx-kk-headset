@@ -5,6 +5,9 @@
 # the PSVR2's asymmetric FOV through xrizer (cut and misaligned eyes).
 set -eu
 # XRIZER_LIBRARY overrides the xrizer build (for example build/xrizer-gaze).
+# Alyx can stall for over 5 s while compiling pipelines in a new area, and the
+# in-process compositor then declares the client GPU hung and loses the session.
+export XRT_MACOS_CLIENT_GPU_HUNG_MS=${XRT_MACOS_CLIENT_GPU_HUNG_MS:-30000}
 if [ -n "${XRIZER_LIBRARY:-}" ]; then set -- --xrizer-library "$XRIZER_LIBRARY" "$@"; fi
 has_separator=0
 for argument do

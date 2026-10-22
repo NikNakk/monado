@@ -624,7 +624,32 @@ With faked gaze, the final image is sharp on the left and blocky on the right in
 both eyes. Monado reports `ext_eye_gaze_interaction_enabled: true`, and the
 scripted controller input still works with the extra action.
 
+### Headset run with real gaze
+
+`fdm,fdm_rate`, `XRIZER_FDM_GAZE=1`, fidelity 5, attended. The user reported that
+foveation followed gaze well.
+
+- **Gaze:** invalid for the first few seconds, then valid. Looking ahead gives
+  about (0.65, 0.5) in the left eye and (0.33, 0.5) in the right, the optical
+  centres of the PS VR2's asymmetric views. Both maps followed.
+- **Alyx's own map:** it is centred on the middle of each image, not the lens
+  axis, so gaze centring also moves full rate to where the user is looking when
+  they look ahead.
+- **Calibration:** the user calibration in `~/Library/Application
+  Support/monado/psvr2/gaze_user_calibration.txt` is read by the driver and only
+  logged at debug level. The "No PS VR2 eye calibration blob found" warning
+  concerns Sony's factory blob.
+
+The game froze for 5.3 s just after teleporting in the van, then crashed. The
+in-process compositor waits at most `XRT_MACOS_CLIENT_GPU_HUNG_MS` (5000 ms) for
+a submitted frame's GPU work. It logged `Client GPU obligation failed`, lost the
+session, and xrizer panicked on `XR_ERROR_INSTANCE_LOST` from `xrEndFrame`. The
+earlier combined run's longest freeze, 4.8 s, was just under the limit. Both
+came on entering a new area, which points to pipeline compilation, not gaze.
+`run-alyx-kk-headset` now sets `XRT_MACOS_CLIENT_GPU_HUNG_MS=30000`.
+
 ### Still to do
 
-- **Headset:** run with `XRIZER_FDM_GAZE=1`, and judge latency, filtering and how
-  visible the foveation boundary is. Real PS VR2 gaze has not been tried.
+- **Freezes:** find where the multi-second stalls on entering new areas come
+  from. Pipeline compilation in KK is the main suspect.
+- **xrizer:** exit cleanly instead of panicking when the session is lost.
