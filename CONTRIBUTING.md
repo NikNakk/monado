@@ -38,13 +38,26 @@ Let us know and we'll figure out a way to help you get involved successfully.
 
 ### Large Scale Contributions
 
-For large scale contributions, such as those involving extensive scope, numerous commits, cross-cutting impact, or changes to architecture and APIs, we recommend a structured but collaborative approach to ensure a smooth review process:
+For large scale contributions, such as those involving extensive scope,
+numerous commits, cross-cutting impact, or changes to architecture and APIs,
+we recommend a structured but collaborative approach to ensure a smooth review
+process:
 
-- **Align on Design Early**: To minimize back-and-forth during MR reviews, we kindly ask that you open an 'RFC' GitLab Work Item (Issue) or a Draft Merge Request early in your process. Discussing your intended approach beforehand ensures you are aligned with Monado reviewers before investing heavily in writing code. You can begin implementation once at least one core maintainer gives explicit approval, for example, a "thumbs-up" or explicit comment on the thread.
+- **Align on Design Early**: To minimize back-and-forth during MR reviews, we
+kindly ask that you open an 'RFC' GitLab Work Item (Issue) or a Draft Merge
+Request early in your process. Discussing your intended approach beforehand
+ensures you are aligned with Monado reviewers before investing heavily in
+writing code. You can begin implementation once at least one core maintainer
+gives explicit approval, for example, a "thumbs-up" or explicit comment on the
+thread.
 
-- **Phase Your Work**: Whenever possible, please try to break down large contributions into smaller, phased Merge Requests with focused commits, rather than submitting a single massive update.
+- **Phase Your Work**: Whenever possible, please try to break down large
+contributions into smaller, phased Merge Requests with focused commits, rather
+than submitting a single massive update.
 
-- **Keep Discussions Public**: To help build a shared history and context for the whole community, try to keep design and review conversations on public GitLab Issues and Merge Requests.
+- **Keep Discussions Public**: To help build a shared history and context for
+the whole community, try to keep design and review conversations on public
+GitLab Issues and Merge Requests.
 
 ### Pull/Merge Requests
 
