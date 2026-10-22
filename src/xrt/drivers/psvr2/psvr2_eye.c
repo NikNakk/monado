@@ -356,10 +356,31 @@ psvr2_free_et_data(struct psvr2_hmd *hmd)
 	// so we don't do that here, even if we init it in this file
 }
 
+static void
+psvr2_abort_gaze_start(struct psvr2_hmd *hmd)
+{
+	if (hmd->gaze_xfer != NULL) {
+		libusb_free_transfer(hmd->gaze_xfer);
+		hmd->gaze_xfer = NULL;
+	}
+	if (hmd->et_data.data_mutex_created) {
+		os_mutex_destroy(&hmd->et_data.data_mutex);
+		hmd->et_data.data_mutex_created = false;
+	}
+}
+
 int
 psvr2_start_gaze_tracking(struct psvr2_hmd *hmd)
 {
 	int ret;
+
+	if (hmd->et_data.gaze_relation_history == NULL) {
+		m_relation_history_create(&hmd->et_data.gaze_relation_history);
+		if (hmd->et_data.gaze_relation_history == NULL) {
+			PSVR2_ERROR(hmd, "Could not create relation history");
+			return -1;
+		}
+	}
 
 	ret = os_mutex_init(&hmd->et_data.data_mutex);
 	if (ret < 0) {
@@ -372,12 +393,14 @@ psvr2_start_gaze_tracking(struct psvr2_hmd *hmd)
 	hmd->gaze_xfer = libusb_alloc_transfer(0);
 	if (hmd->gaze_xfer == NULL) {
 		PSVR2_ERROR(hmd, "Could not alloc USB transfer for gaze data");
+		psvr2_abort_gaze_start(hmd);
 		return -1;
 	}
 
 	uint8_t *gaze_buf = U_TYPED_ARRAY_CALLOC(uint8_t, USB_GAZE_XFER_SIZE);
 	if (gaze_buf == NULL) {
 		PSVR2_ERROR(hmd, "Could not alloc buffer for gaze USB transfer");
+		psvr2_abort_gaze_start(hmd);
 		return -1;
 	}
 
@@ -387,16 +410,11 @@ psvr2_start_gaze_tracking(struct psvr2_hmd *hmd)
 
 	ret = libusb_submit_transfer(hmd->gaze_xfer);
 	if (ret < 0) {
-		PSVR2_ERROR(hmd, "Could not submit USB transfer for gaze data");
+		PSVR2_ERROR(hmd, "Could not submit USB transfer for gaze data: %s", libusb_error_name(ret));
+		psvr2_abort_gaze_start(hmd);
 		return ret;
 	}
 	hmd->usb_active_xfers++;
-
-	m_relation_history_create(&hmd->et_data.gaze_relation_history);
-	if (hmd->et_data.gaze_relation_history == NULL) {
-		PSVR2_ERROR(hmd, "Could not create relation history");
-		return -1;
-	}
 
 	ret = os_thread_helper_init(&hmd->et_data.eye_tracking_thread);
 	if (ret < 0) {
