@@ -226,3 +226,99 @@ reloaded at every boundary.
 Memoryless MSAA would need suspended and resumed passes merged across command
 buffers. A tile resolve in the last segment alone would save one MSAA store and
 reload per frame, about 0.4 ms at the current settings, but no memory.
+
+## Custom resolve in tile memory and stitched passes — 22 October 2026
+
+Mesa `4cc6e6a` ([patch 0009](../experiments/alyx-vulkan/kosmickrisp-fdm/mesa-patches)),
+both opt-in and work in progress.
+
+### Alyx's multisampled FDM pass
+
+`KK_SEQ_LOG` shows each stereo pass as three command buffers joined with suspend
+and resume. The rendering flags include custom resolve: `0x82`, `0x86`, then
+`0x84`. The colour target and depth are 2× MSAA, transient, cleared on load and
+don't-care on store. The colour resolve is custom; depth and stencil use
+`SAMPLE_ZERO`, which KK does with a meta pass after the render pass. Alyx's colour
+resolve shader is brightness-weighted: each sample is weighted by 1/(1+max(rgb)).
+
+The final segment contains:
+
+- a by-region barrier
+- a 4-vertex draw that reads the MSAA colour as an input attachment
+- a second by-region barrier
+- the custom resolve
+
+KK splits the pass at the first barrier. KK also forces stores and loads at every
+segment boundary. With multiview it treats even full-area passes as partial: it
+compares the view mask with `layerCount`, which Vulkan ignores for multiview.
+
+### `tile_resolve`
+
+Custom-resolve fragment shaders that read only colour input attachments get a
+Metal tile-function variant:
+
+- Input attachment reads become imageblock sample reads.
+- Colour outputs become texture writes to the resolve images. Their storage
+  handles are in a new root-table field, `custom_resolve_outputs`.
+- The layer comes from `[[render_target_array_index]]`.
+
+Tile pipelines are built per pass sample count on first use, because a resolve
+pipeline doesn't know the MSAA sample count. In the final segment, the custom
+resolve becomes a tile dispatch in the same render pass, using 32×32 tiles at 2×
+and 16×16 at 4×. A by-region fragment barrier there is deferred, then split if a
+draw follows, or dropped if the resolve follows. Alyx's resolve shader qualifies,
+and Alyx renders correctly with it.
+
+On the desktop, ten alternating runs show no measurable change in GPU time
+(12.25 against 12.35 ms on average). MSAA is still stored and reloaded at the
+segment boundaries.
+
+### Metal 4 suspend and resume
+
+[`stitch_resolve.m`](../experiments/alyx-vulkan/kosmickrisp-fdm/tile-resolve/stitch_resolve.m)
+shows that a pass split across three MTL4 command buffers can keep a memoryless
+MSAA target in tile memory. It uses `MTL4RenderEncoderOptionSuspending` and
+`MTL4RenderEncoderOptionResuming`, and one `commit:count:`. The tile resolve in
+the last command buffer then sees all three segments. This holds at 2× and 4×,
+at up to 3360×3427 per eye, and with a rate map.
+
+Undocumented constraints found:
+
+- The segments' render pass descriptors must be equal, including load actions
+  and tile size.
+- Passes with a visibility buffer must use `MTLVisibilityResultTypeAccumulate`.
+- Any encoder after the resumed pass in the last command buffer silently breaks
+  the result. Encoders before the suspending pass, and separate commits after,
+  are fine.
+
+### `stitch_passes`
+
+KK creates suspending and resuming render encoders from the Vulkan flags and
+uses accumulating visibility. Equal descriptors are kept by not forcing load on
+resumed segments. Suspending encoders don't store.
+
+Submission changes too:
+
+- The joined command buffers are committed together.
+- The Metal command buffer is ended after a final resumed pass, and the rest of
+  that Vulkan command buffer is committed separately.
+- Command buffers submitted between segments, which Vulkan allows when they
+  contain no action commands, are committed after the chain.
+
+The custom resolve probe passes in all variants, with and without `tile_resolve`
+and `light_barriers`. The fill drawn in segment 0 reaches the resolve only
+through tile memory.
+
+In Alyx it is not working yet. Without the deferral, Apple's driver crashed in
+`mergeRenderEncoders` when an unrelated command buffer fell inside a chain. With
+it, Alyx hits `MTL_COMMAND_QUEUE_ERROR_TIMEOUT` and renders no frames. The cause
+is not known yet.
+
+### Remaining for memoryless MSAA
+
+- **Stitching in Alyx:** the GPU timeout above.
+- **Input-attachment read:** the final segment's read of the MSAA colour must
+  come from tile memory instead of a split.
+- **Depth and stencil:** the `SAMPLE_ZERO` resolve must be done in the pass. KK
+  avoids that because of a Metal synchronisation bug noted in its source, and
+  because Alyx's render area is partial.

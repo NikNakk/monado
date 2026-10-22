@@ -6,7 +6,7 @@
 // depth input attachments and writes FragDepth.
 //
 // usage: probe SHADER_DIR [--segments 1|3] [--fill-segment N]
-//              [--format b10g11r11|rgba8] [--no-depth-input]
+//              [--format b10g11r11|rgba8] [--no-depth-input] [--storage]
 // Select the driver with VK_DRIVER_FILES.
 
 #include <vulkan/vulkan.h>
@@ -168,7 +168,7 @@ main(int argc, char **argv)
       return 2;
    }
    const char *dir = argv[1];
-   int segments = 3, fill_segment = 0, depth_input = 1, restricted = 0, state_before = 0, dummy = 0;
+   int segments = 3, fill_segment = 0, depth_input = 1, restricted = 0, state_before = 0, dummy = 0, storage = 0;
    VkFormat cfmt = VK_FORMAT_B10G11R11_UFLOAT_PACK32;
    for (int i = 2; i < argc; i++) {
       if (!strcmp(argv[i], "--segments") && i + 1 < argc)
@@ -186,6 +186,8 @@ main(int argc, char **argv)
          state_before = 1;
       else if (!strcmp(argv[i], "--dummy-descriptors"))
          dummy = 1;
+      else if (!strcmp(argv[i], "--storage"))
+         storage = 1;
    }
    if (segments != 1 && segments != 3)
       segments = 3;
@@ -275,7 +277,8 @@ main(int argc, char **argv)
                                   VK_IMAGE_USAGE_INPUT_ATTACHMENT_BIT);
    Image rs_color = make_image(cfmt, VK_SAMPLE_COUNT_1_BIT,
                                VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT |
-                                  VK_IMAGE_USAGE_TRANSFER_SRC_BIT);
+                                  VK_IMAGE_USAGE_TRANSFER_SRC_BIT |
+                                  (storage ? VK_IMAGE_USAGE_STORAGE_BIT : 0));
    Image ms_depth = make_image(dfmt, VK_SAMPLE_COUNT_2_BIT,
                                VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT |
                                   VK_IMAGE_USAGE_INPUT_ATTACHMENT_BIT);

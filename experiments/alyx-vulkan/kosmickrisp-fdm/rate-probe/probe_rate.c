@@ -349,7 +349,8 @@ main(int argc, char **argv)
                                 VK_IMAGE_USAGE_TRANSFER_DST_BIT, 0);
    VkImageView map2_v = make_view(map2, VK_FORMAT_R8G8_UNORM);
    VkImage target = make_image(cfmt, W, H,
-                               VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
+                               VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT |
+                                  (cr ? VK_IMAGE_USAGE_STORAGE_BIT : 0),
                                VK_IMAGE_CREATE_SUBSAMPLED_BIT_EXT);
    VkImageView target_v = make_view(target, cfmt);
    VkImageView big_v = VK_NULL_HANDLE;
@@ -364,7 +365,8 @@ main(int argc, char **argv)
    if (cr) {
       ms = make_image_ms(cfmt, W, H,
                          VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT |
-                            VK_IMAGE_USAGE_INPUT_ATTACHMENT_BIT,
+                            VK_IMAGE_USAGE_INPUT_ATTACHMENT_BIT |
+                            VK_IMAGE_USAGE_TRANSIENT_ATTACHMENT_BIT,
                          VK_IMAGE_CREATE_SUBSAMPLED_BIT_EXT, ms_samples);
       ms_v = make_view(ms, cfmt);
    }
