@@ -650,6 +650,35 @@ came on entering a new area, which points to pipeline compilation, not gaze.
 
 ### Still to do
 
-- **Freezes:** find where the multi-second stalls on entering new areas come
-  from. Pipeline compilation in KK is the main suspect.
+- **Freezes:** see below.
 - **xrizer:** exit cleanly instead of panicking when the session is lost.
+
+## Freezes on entering new areas — 22 October 2026
+
+Mesa `KK_COMPILE_LOG` times compiles per thread. Two identical desktop gameplay
+runs (`a1_intro_world_2`, FDM and the full experiment set), straight after
+each other:
+
+| | Metal render pipelines over 5 ms | Their total | Frame gaps over 0.4 s after the first frame |
+| --- | --- | --- | --- |
+| First run | 170 | 32.8 s (up to 0.55 s each) | 2.1, 1.7, 1.4, 1.1, 0.9 s and more |
+| Second run | 5 | 0.03 s | one, 0.45 s |
+
+KK's NIR-to-MSL step takes about 1 s in total either way. The cost is Metal
+compiling MSL source into a library and pipeline. Alyx creates many pipelines
+on worker threads, but some also on the threads that submit frames, and those
+compiles freeze the game.
+
+The system Metal shader cache makes the second encounter almost free, and it
+survives runs and reboots. It is keyed on the MSL text, so any KK change that
+alters generated code, or a different experiment set, makes those shaders cold
+again. Today's headset freezes came after such changes.
+
+Options:
+
+- **Warm the cache:** after a KK change, play through with the experiment set
+  to be used. A desktop run covers only the start of a map.
+- **Binary archives:** store compiled pipelines in an `MTLBinaryArchive`
+  controlled by KK, which does not depend on the OS cache.
+- **Raised limit:** keep `XRT_MACOS_CLIENT_GPU_HUNG_MS=30000` so a freeze no
+  longer ends the session.
