@@ -594,9 +594,37 @@ reverse.
 
 All runs held 60 fps. Frames from the sweep show no seams or corruption.
 
+### xrizer side (branch `claude/xrizer-gaze`, `a0677f6`)
+
+The worktree is `workspace/xrizer-claude-gaze`, branched from the
+`xrizer-performance` commit the launcher builds (`34cad59`). Build it into
+`build/xrizer-gaze`.
+
+- With `XRIZER_FDM_GAZE=1`, xrizer enables `XR_EXT_eye_gaze_interaction` if the
+  runtime offers it, and adds an eye gaze pose action to its pose action set.
+  That set is attached and synced with Alyx's action sets.
+- After each `xrWaitFrame`, xrizer locates the gaze relative to the head and
+  projects its direction into each view's field of view, which handles the PS
+  VR2's asymmetric FOV. It then calls `kk_fdm_set_gaze`. The Vulkan loader opens
+  KK privately, so xrizer finds it by image name among the loaded libraries.
+- Untracked gaze turns the shift off.
+- `XRIZER_FAKE_GAZE=yaw,pitch` fakes the direction, and `XRIZER_FDM_GAZE_LOG`
+  logs the points.
+- `XRIZER_LIBRARY` makes `run-alyx-kk-headset` and `run-alyx-desktop-game` use
+  this build.
+
+Desktop results, simulated headset:
+
+| Run | Gaze points | Map shift | Queue errors |
+| --- | --- | --- | --- |
+| `XRIZER_FAKE_GAZE=-20,0` | (0.30, 0.5) both eyes | −5 half-texels both eyes | 0 |
+| `XRIZER_FDM_GAZE=1`, no eye tracker | none | 0 | 0 |
+
+With faked gaze, the final image is sharp on the left and blocky on the right in
+both eyes. Monado reports `ext_eye_gaze_interaction_enabled: true`, and the
+scripted controller input still works with the extra action.
+
 ### Still to do
 
-- **xrizer:** read gaze through `XR_EXT_eye_gaze_interaction`, project it into
-  each eye's field of view, and call `kk_fdm_set_gaze`.
-- **Headset:** judge latency, filtering and how visible the foveation boundary
-  is.
+- **Headset:** run with `XRIZER_FDM_GAZE=1`, and judge latency, filtering and how
+  visible the foveation boundary is. Real PS VR2 gaze has not been tried.

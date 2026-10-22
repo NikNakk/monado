@@ -4,7 +4,8 @@
 # as Left Ctrl + click in the qwerty window) to get past the start prompt.
 #
 # usage: run-alyx-desktop-game OUTPUT_DIR [TIMEOUT_S] [extra game args...]
-# Set MESA_KK_EXPERIMENTAL, KK_* and KK_ICD in the environment as usual.
+# Set MESA_KK_EXPERIMENTAL, KK_* and KK_ICD in the environment as usual;
+# XRIZER_LIBRARY overrides the xrizer build.
 set -eu
 base=${ALYX_NATIVE_ROOT:-"$HOME/Code/alyx-native"}
 out=$1
@@ -17,5 +18,8 @@ export ALYX_GAME_TMPDIR="$tmp"
 export QWERTY_SCRIPT=${QWERTY_SCRIPT:-"45+lctrl,45.1+left,45.6-left,45.7-lctrl"}
 export QWERTY_SCRIPT_REPEAT=${QWERTY_SCRIPT_REPEAT:-15}
 export KK_ICD=${KK_ICD:-"$base/build/kk-fdm/src/kosmickrisp/vulkan/kosmickrisp_mesa_devenv_icd.aarch64.json"}
-exec "$base/kk-tests/run-alyx-kk-desktop" --output "$out" --timeout "$timeout" -- \
+set --  "$@"
+xrizer=""
+[ -n "${XRIZER_LIBRARY:-}" ] && xrizer="--xrizer-library $XRIZER_LIBRARY"
+exec "$base/kk-tests/run-alyx-kk-desktop" --output "$out" --timeout "$timeout" $xrizer -- \
  -novid +vr_fidelity_level_auto 0 +vr_fidelity_level 5 +map a1_intro_world_2 "$@"
