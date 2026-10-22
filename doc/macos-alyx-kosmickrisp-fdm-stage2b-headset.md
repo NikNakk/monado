@@ -751,3 +751,45 @@ and objects as the synchronous run.
 
 With a warm cache nothing changes: builds finish within the wait. Untested on
 the headset.
+
+## GPU resets when turning (2026-10-22)
+
+Headset runs died soon after the user turned their head: KK reported
+`MTL_COMMAND_QUEUE_ERROR_TIMEOUT` and the Monado service lost its Vulkan
+device at the same moment.
+
+**Desktop repro.** The qwerty HMD turns with the arrow keys, which
+`QWERTY_SCRIPT` can press by HID usage (left 80, right 79):
+`QWERTY_SCRIPT="45+lctrl,45.1+left,45.6-left,45.7-lctrl,47+80,51-80,52+79,59.5-79"`
+with `QWERTY_SCRIPT_REPEAT=15`. The GPU resets 50–90 s in on almost every run.
+Without the turning the same build runs to its timeout.
+
+**Not the KK experiments.** It reproduces with `MESA_KK_EXPERIMENTAL` empty,
+without `+vr_fdm`, and on the Codex baseline KK (`c8e17c9`, 2 of 3 runs). The
+baseline only lacks the error log line.
+
+**The guilty process is the Monado service.** macOS logs each GPU reset with
+the process whose command buffer caused it:
+
+```sh
+/usr/bin/log show --last 1h --style compact --predicate \
+  'eventMessage CONTAINS "kIOGPUCommandBufferCallbackErrorHang" OR eventMessage CONTAINS "GPURestartBegin"'
+```
+
+Of 17 resets today, 15 name `monado-service` (MoltenVK) with
+`kIOGPUCommandBufferCallbackErrorHang`, and two name WindowServer. Alyx's KK
+queue and WindowServer otherwise only report innocent-victim errors. The
+kernel logs `IOGPUScheduler::hardware_error_interrupt`, an immediate hardware
+error rather than a slow timeout. In the headset run the failing buffer was the
+present worker's (`Asynchronous Metal presentation failed: Caused GPU Hang
+Error`).
+
+A Metal System Trace across one reset shows normal compositor work until the
+compositor stalls for about 120 ms (Alyx's frames are late while it loads what
+the turn reveals). One compositor dispatch and blit then complete, and the GPU
+resets within 20 ms. No pass in any process ran longer than 28 ms.
+
+`XRT_MACOS_FORCE_CPU_RENDER_WAIT=1` (present worker waits on the CPU instead
+of a GPU event wait) still resets, so the GPU event wait is not the trigger.
+Next: find which service command buffer faults after a stall, probably in the
+macOS present path or the swapchain GPU-reuse lifetime tracking.
