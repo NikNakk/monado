@@ -1,0 +1,294 @@
+From cd25a618184c2b176a016712393f6b1c1315f198 Mon Sep 17 00:00:00 2001
+From: Nick Kennedy <nick@nick-kennedy.com>
+Date: Thu, 22 Oct 2026 12:53:03 +0100
+Subject: [PATCH] kosmickrisp: add ds_resolve to resolve depth/stencil inside
+ stitched passes
+
+MESA_KK_EXPERIMENTAL=ds_resolve resolves depth and stencil attachments of
+stitched render passes with the render pass itself, instead of with meta
+passes afterwards, also when the render area is smaller than the
+framebuffer but starts at the origin. The queue wait after stitched
+passes orders the resolve before later work. The resolve texture is set
+in every segment so their descriptors stay equal, and the legacy custom
+resolve path, which reads the multisampled depth, still stores it and
+resolves afterwards.
+
+When a partial render target is both stored and resolved, Metal does not
+resolve layers after the first, so a don't-care depth or stencil
+attachment resolved in the pass is not force-stored at the end of the
+pass. Metal then also writes the resolve texture outside the render area.
+
+KK_DUMP_RESOLVE_DIR also writes the resolved depth.
+
+AI-written commit text (biblioklept).
+
+Generated-by: LLM
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ src/kosmickrisp/vulkan/kk_cmd_buffer.c | 20 ++++--
+ src/kosmickrisp/vulkan/kk_cmd_buffer.h |  5 ++
+ src/kosmickrisp/vulkan/kk_cmd_draw.c   | 84 ++++++++++++++++++--------
+ src/kosmickrisp/vulkan/kk_debug.c      |  1 +
+ src/kosmickrisp/vulkan/kk_debug.h      |  1 +
+ 5 files changed, 83 insertions(+), 28 deletions(-)
+
+diff --git a/src/kosmickrisp/vulkan/kk_cmd_buffer.c b/src/kosmickrisp/vulkan/kk_cmd_buffer.c
+index 12c6dbc..de06814 100644
+--- a/src/kosmickrisp/vulkan/kk_cmd_buffer.c
++++ b/src/kosmickrisp/vulkan/kk_cmd_buffer.c
+@@ -1388,14 +1388,25 @@ kk_apply_attachment_store_ops(struct kk_cmd_buffer *cmd, bool force_store)
+    }
+    enum mtl_store_action depth_store_action = MTL_STORE_ACTION_UNKNOWN;
+    enum mtl_store_action stencil_store_action = MTL_STORE_ACTION_UNKNOWN;
++   /* Metal skips the resolve of all but the first layer when a partial render
++    * target is both stored and resolved, so a don't-care attachment resolved
++    * in the pass is only resolved at the end of the pass. */
++   bool depth_force = force_store;
++   bool stencil_force = force_store;
++   if (!force_store_in && render->depth_att.resolve_in_pass &&
++       render->depth_att.store_op == VK_ATTACHMENT_STORE_OP_DONT_CARE)
++      depth_force = false;
++   if (!force_store_in && render->stencil_att.resolve_in_pass &&
++       render->stencil_att.store_op == VK_ATTACHMENT_STORE_OP_DONT_CARE)
++      stencil_force = false;
+    if (render->depth_att.iview) {
+       depth_store_action = kk_get_attachment_store_op(
+-         &render->depth_att, force_store,
++         &render->depth_att, depth_force,
+          render->rendering_to_whole_framebuffer, VK_IMAGE_ASPECT_DEPTH_BIT);
+    }
+    if (render->stencil_att.iview) {
+       stencil_store_action = kk_get_attachment_store_op(
+-         &render->stencil_att, force_store,
++         &render->stencil_att, stencil_force,
+          render->rendering_to_whole_framebuffer, VK_IMAGE_ASPECT_STENCIL_BIT);
+    }
+    bool ds_resolve_dont_care =
+@@ -1430,7 +1441,7 @@ kk_attachment_do_renderpass_resolve(const struct kk_attachment *attachment,
+                                     bool rendering_to_whole_framebuffer,
+                                     VkImageAspectFlags aspect)
+ {
+-   if (!rendering_to_whole_framebuffer)
++   if (!rendering_to_whole_framebuffer && !attachment->resolve_in_pass)
+       return false;
+ 
+    if (attachment->resolve_mode == VK_RESOLVE_MODE_NONE ||
+@@ -1441,7 +1452,8 @@ kk_attachment_do_renderpass_resolve(const struct kk_attachment *attachment,
+     * Producer barriers do not synchronize depth render pass resolves
+     * properly, even when it's STAGE_ALL -> STAGE_ALL.
+     * Force meta resolves for depth and stencil for now. */
+-   if (!(attachment->resolve_iview->vk.aspects & VK_IMAGE_ASPECT_COLOR_BIT))
++   if (!(attachment->resolve_iview->vk.aspects & VK_IMAGE_ASPECT_COLOR_BIT) &&
++       !attachment->resolve_in_pass)
+       return false;
+ 
+    /* Dynamic rendering doesn't allow different formats but the Mesa Vulkan
+diff --git a/src/kosmickrisp/vulkan/kk_cmd_buffer.h b/src/kosmickrisp/vulkan/kk_cmd_buffer.h
+index 5bc76fe..9750f22 100644
+--- a/src/kosmickrisp/vulkan/kk_cmd_buffer.h
++++ b/src/kosmickrisp/vulkan/kk_cmd_buffer.h
+@@ -105,6 +105,10 @@ struct kk_attachment {
+    VkAttachmentLoadOp load_op;
+    VkAttachmentStoreOp store_op;
+    VkClearValue clear_value;
++
++   /* Resolve in the render pass even though it does not cover the whole
++    * framebuffer or is a depth/stencil resolve. */
++   bool resolve_in_pass;
+ };
+ 
+ struct kk_rendering_state {
+@@ -180,6 +184,7 @@ struct kk_graphics_state {
+    bool in_custom_resolve;
+    struct {
+       const struct kk_image_view *view;
++      const struct kk_image_view *depth_view;
+       VkRect2D area;
+    } dump;
+    struct {
+diff --git a/src/kosmickrisp/vulkan/kk_cmd_draw.c b/src/kosmickrisp/vulkan/kk_cmd_draw.c
+index 5e8ba53..bb4ec43 100644
+--- a/src/kosmickrisp/vulkan/kk_cmd_draw.c
++++ b/src/kosmickrisp/vulkan/kk_cmd_draw.c
+@@ -395,6 +395,14 @@ kk_CmdBeginRendering(VkCommandBuffer commandBuffer,
+    render->stitch = KK_EXPERIMENTAL(STITCH_PASSES) && !cmd->no_stitch &&
+                     (render->flags & (VK_RENDERING_RESUMING_BIT |
+                                       VK_RENDERING_SUSPENDING_BIT));
++
++   /* A stitched pass is followed by a queue wait, which also orders its
++    * depth/stencil resolves. The render target size is the area, so with no
++    * offset the resolve covers exactly the area. */
++   bool ds_in_pass = KK_EXPERIMENTAL(DS_RESOLVE) && render->stitch &&
++                     render->area.offset.x == 0 && render->area.offset.y == 0;
++   render->depth_att.resolve_in_pass = ds_in_pass;
++   render->stencil_att.resolve_in_pass = ds_in_pass;
+    bool force_attachment_load =
+       !is_whole_framebuffer ||
+       ((render->flags & VK_RENDERING_RESUMING_BIT) && !render->stitch);
+@@ -678,31 +686,17 @@ kk_dump_thread(void *data)
+ }
+ 
+ static void
+-kk_dump_custom_resolve(struct kk_cmd_buffer *cmd)
++kk_dump_view(struct kk_cmd_buffer *cmd, const char *dir, const char *name,
++             uint32_t index, const struct kk_image_view *view, VkRect2D area,
++             bool depth)
+ {
+-   static const char *dir;
+-   static int64_t first = -1, step, count;
+-   static uint32_t seen;
+-   if (first < 0) {
+-      dir = debug_get_option("KK_DUMP_RESOLVE_DIR", NULL);
+-      first = debug_get_num_option("KK_DUMP_RESOLVE_FIRST", 600);
+-      step = MAX2(debug_get_num_option("KK_DUMP_RESOLVE_STEP", 600), 1);
+-      count = debug_get_num_option("KK_DUMP_RESOLVE_COUNT", 4);
+-   }
+-   const struct kk_image_view *view = cmd->state.gfx.dump.view;
+-   cmd->state.gfx.dump.view = NULL;
+-   if (!dir || !view)
+-      return;
+-
+-   uint32_t index = p_atomic_inc_return(&seen) - 1;
+-   if (index < first || (index - first) % step || (index - first) / step >= count)
+-      return;
+-
+    struct kk_image *image = container_of(view->vk.image, struct kk_image, vk);
+    const struct kk_image_plane *plane = &image->planes[0];
+-   VkRect2D area = cmd->state.gfx.dump.area;
+    uint32_t width = area.extent.width, height = area.extent.height;
+-   uint32_t bpp = util_format_get_blocksize(plane->layout.format.pipe);
++   enum pipe_format format = plane->layout.format.pipe;
++   if (depth)
++      format = util_format_get_depth_only(format);
++   uint32_t bpp = util_format_get_blocksize(format);
+    uint32_t layers = view->vk.layer_count;
+    uint64_t size = (uint64_t)width * height * bpp * layers;
+ 
+@@ -715,12 +709,12 @@ kk_dump_custom_resolve(struct kk_cmd_buffer *cmd)
+       return;
+    }
+    memset((char *)dump->bo->cpu + size, 0, 4);
+-   snprintf(dump->path, sizeof(dump->path), "%s/resolve-%05u.kkdump", dir, index);
++   snprintf(dump->path, sizeof(dump->path), "%s/%s-%05u.kkdump", dir, name, index);
+    dump->width = width;
+    dump->height = height;
+    dump->layers = layers;
+    dump->bytes_per_pixel = bpp;
+-   dump->format = view->vk.format;
++   dump->format = depth ? VK_FORMAT_D32_SFLOAT : view->vk.format;
+ 
+    mtl_compute_encoder *enc = cs_get_compute(cmd);
+    for (uint32_t l = 0; l < layers; l++) {
+@@ -734,6 +728,8 @@ kk_dump_custom_resolve(struct kk_cmd_buffer *cmd)
+          .buffer_2d_image_size_B = (size_t)width * height * bpp,
+          .image_slice = view->vk.base_array_layer + l,
+          .image_level = view->vk.base_mip_level,
++         .options = depth ? MTL_BLIT_OPTION_DEPTH_FROM_DEPTH_STENCIL
++                          : MTL_BLIT_OPTION_NONE,
+       };
+       mtl_copy_from_texture_to_buffer(enc, &copy);
+    }
+@@ -745,6 +741,35 @@ kk_dump_custom_resolve(struct kk_cmd_buffer *cmd)
+       thrd_detach(thread);
+ }
+ 
++static void
++kk_dump_custom_resolve(struct kk_cmd_buffer *cmd)
++{
++   static const char *dir;
++   static int64_t first = -1, step, count;
++   static uint32_t seen;
++   if (first < 0) {
++      dir = debug_get_option("KK_DUMP_RESOLVE_DIR", NULL);
++      first = debug_get_num_option("KK_DUMP_RESOLVE_FIRST", 600);
++      step = MAX2(debug_get_num_option("KK_DUMP_RESOLVE_STEP", 600), 1);
++      count = debug_get_num_option("KK_DUMP_RESOLVE_COUNT", 4);
++   }
++   const struct kk_image_view *view = cmd->state.gfx.dump.view;
++   const struct kk_image_view *depth_view = cmd->state.gfx.dump.depth_view;
++   cmd->state.gfx.dump.view = NULL;
++   cmd->state.gfx.dump.depth_view = NULL;
++   if (!dir || !view)
++      return;
++
++   uint32_t index = p_atomic_inc_return(&seen) - 1;
++   if (index < first || (index - first) % step || (index - first) / step >= count)
++      return;
++
++   kk_dump_view(cmd, dir, "resolve", index, view, cmd->state.gfx.dump.area, false);
++   if (depth_view)
++      kk_dump_view(cmd, dir, "depth", index, depth_view, cmd->state.gfx.dump.area,
++                   true);
++}
++
+ VKAPI_ATTR void VKAPI_CALL
+ kk_CmdEndRendering2KHR(VkCommandBuffer commandBuffer,
+                        UNUSED const VkRenderingEndInfoKHR *pRenderingEndInfo)
+@@ -864,7 +889,6 @@ kk_CmdEndRendering2KHR(VkCommandBuffer commandBuffer,
+       need_meta_resolve = false;
+ 
+    memset(render, 0, sizeof(*render));
+-   kk_dump_custom_resolve(cmd);
+ 
+    if (need_meta_resolve) {
+       kk_meta_resolve_rendering(cmd, &vk_render);
+@@ -894,6 +918,8 @@ kk_CmdEndRendering2KHR(VkCommandBuffer commandBuffer,
+       };
+       kk_meta_resolve_rendering(cmd, &avg_render);
+    }
++
++   kk_dump_custom_resolve(cmd);
+ }
+ 
+ static void
+@@ -902,6 +928,11 @@ kk_begin_custom_resolve_legacy(struct kk_cmd_buffer *cmd)
+    VkCommandBuffer commandBuffer = kk_cmd_buffer_to_handle(cmd);
+    struct kk_rendering_state *render = &cmd->state.gfx.render;
+ 
++   /* The resolve shader may read the multisampled depth and stencil, so they
++    * have to be stored, and are then resolved after the pass as usual. */
++   render->depth_att.resolve_in_pass = false;
++   render->stencil_att.resolve_in_pass = false;
++
+    VkRenderingAttachmentInfo color_atts[KK_MAX_RTS];
+    for (uint32_t i = 0; i < render->color_att_count; i++) {
+       color_atts[i] = (VkRenderingAttachmentInfo){
+@@ -1048,6 +1079,11 @@ kk_CmdBeginCustomResolveEXT(
+                        ? gfx->render.color_att[0].resolve_iview
+                        : NULL;
+    gfx->dump.area = gfx->render.area;
++   gfx->dump.depth_view = gfx->render.depth_att.resolve_mode != VK_RESOLVE_MODE_NONE &&
++                                gfx->render.depth_att.resolve_mode !=
++                                   VK_RESOLVE_MODE_CUSTOM_BIT_EXT
++                             ? gfx->render.depth_att.resolve_iview
++                             : NULL;
+ 
+    if (!kk_tile_resolve_can_start(cmd)) {
+       gfx->tile_resolve.possible = false;
+diff --git a/src/kosmickrisp/vulkan/kk_debug.c b/src/kosmickrisp/vulkan/kk_debug.c
+index 83bb085..59281b2 100644
+--- a/src/kosmickrisp/vulkan/kk_debug.c
++++ b/src/kosmickrisp/vulkan/kk_debug.c
+@@ -29,6 +29,7 @@ const struct debug_named_value experimental_flags[] = {
+    {"tile_resolve", KK_EXPERIMENTAL_TILE_RESOLVE},
+    {"stitch_passes", KK_EXPERIMENTAL_STITCH_PASSES},
+    {"ms_input_fetch", KK_EXPERIMENTAL_MS_INPUT_FETCH},
++   {"ds_resolve", KK_EXPERIMENTAL_DS_RESOLVE},
+    {NULL, 0},
+ };
+ 
+diff --git a/src/kosmickrisp/vulkan/kk_debug.h b/src/kosmickrisp/vulkan/kk_debug.h
+index 33fc38b..ec6d6c8 100644
+--- a/src/kosmickrisp/vulkan/kk_debug.h
++++ b/src/kosmickrisp/vulkan/kk_debug.h
+@@ -32,6 +32,7 @@ enum kk_experimental {
+    KK_EXPERIMENTAL_TILE_RESOLVE = 1ull << 6,
+    KK_EXPERIMENTAL_STITCH_PASSES = 1ull << 7,
+    KK_EXPERIMENTAL_MS_INPUT_FETCH = 1ull << 8,
++   KK_EXPERIMENTAL_DS_RESOLVE = 1ull << 9,
+ };
+ 
+ extern enum kk_experimental kk_mesa_experimental_flags;
+-- 
+2.54.0 (Apple Git-157)
+

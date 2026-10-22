@@ -1,0 +1,14 @@
+#!/bin/sh
+# Desktop run against a Monado build without libusb and with QWERTY_SCRIPT (build/monado-kk-script).
+# ALYX_GAME_TMPDIR gives the game its own temp folder (and single-instance lock).
+set -eu
+base=${ALYX_NATIVE_ROOT:-"$HOME/Code/alyx-native"}
+icd=${KK_ICD:-"$base/build/kk-cr-debug/src/kosmickrisp/vulkan/kosmickrisp_mesa_devenv_icd.aarch64.json"}
+exec python3 "$base/with-matching-monado.py" \
+ --build "$base/build/monado-kk-script" -- \
+ env TMPDIR="${ALYX_GAME_TMPDIR:-${TMPDIR:-/tmp}}" "$base/run-alyx-gpu-timing" \
+ --driver kosmickrisp \
+ --icd "$icd" \
+ --runtime-json "$base/build/monado-kk-script/openxr_monado-dev.json" \
+ --extended-dynamic-state3 disabled --sample-locations-compat enabled \
+ --api-trace "$@"

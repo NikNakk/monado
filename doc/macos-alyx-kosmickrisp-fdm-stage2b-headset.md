@@ -436,11 +436,118 @@ A stitched pass on a memoryless target fails once it has enough geometry. A
 single pass doesn't. Alyx's passes are far below that, but the limit needs
 watching once MSAA is memoryless.
 
-### Remaining for memoryless MSAA
+## Keeping the eye pass in tile memory — 22 October 2026
 
-- **Headset check:** stitching with the tail wait, on the headset.
-- **Input-attachment read:** the final segment's read of the MSAA colour must
-  come from tile memory instead of a split.
-- **Depth and stencil:** the `SAMPLE_ZERO` resolve must be done in the pass. KK
-  avoids that because of a Metal synchronisation bug noted in its source, and
-  because Alyx's render area is partial.
+The headset was not available, so this work used unattended desktop runs.
+
+### Unattended gameplay runs
+
+[`desktop/run-alyx-desktop-game`](../experiments/alyx-vulkan/kosmickrisp-fdm/desktop/run-alyx-desktop-game)
+loads `a1_intro_world_2` with `-novid` against a simulated headset. Alyx waits
+for a controller press before rendering the map, so Monado's qwerty driver
+gained `QWERTY_SCRIPT`, timed scripted key and button input (Monado
+`c8a8910ec`, branch `claude/qwerty-scripted-input`). The script clicks the left
+controller's trigger every 15 s from 45 s, as Left Ctrl + click does by hand.
+That Monado build has libusb and the Rift driver off, so a wedged PS VR2
+adapter cannot block its startup. A separate game temp folder avoids the
+single-instance lock of a stuck earlier `alyx_host`.
+
+`KK_DUMP_RESOLVE_DIR` saves the custom-resolve colour and the resolved depth of
+selected passes. [`desktop/kkdump.py`](../experiments/alyx-vulkan/kosmickrisp-fdm/desktop/kkdump.py)
+converts them to PNG and compares runs. The simulated head is still, so the
+same pass in two runs shows the same view. `KK_SEQ_LOG` with `KK_SEQ_MSL_DIR`
+saves the fragment shaders of a logged pass.
+
+### What the final segment does in gameplay
+
+| Step | What it is |
+| --- | --- |
+| By-region barrier | colour attachment write → input attachment read |
+| 4-vertex draw | reads sample 0 of the MSAA colour as an input attachment, discards by luminance; colour write mask 0, no depth or stencil test |
+| By-region barrier | colour and depth write → fragment read |
+| Custom resolve | brightness-weighted colour resolve |
+
+The draw only feeds occlusion queries. It looks like Source 2's exposure
+histogram. In the menu scene it is absent.
+
+### Dynamic colour write masks (Mesa `999b131`, patch 0012)
+
+KK ignored dynamic colour write masks. It blends in the shader using the
+pipeline's static masks, and its Metal pipelines always write every channel.
+Most of Alyx's pipelines set the mask dynamically, the luminance draw among
+them. The custom-resolve probe's `--ia-dyn-mask` shows the bug with every
+experiment off. Pipelines with dynamic masks now get Metal pipeline variants
+with matching `writeMask` values, built on first use.
+
+### `ms_input_fetch` (same commit)
+
+Metal does not allow imageblocks in fragment functions, so a pixel-rate
+fragment shader cannot read sample 0 from tile memory
+([`fragment_imageblock.m`](../experiments/alyx-vulkan/kosmickrisp-fdm/tile-resolve/fragment_imageblock.m)).
+Reading `[[color(0)]]` on an MSAA target makes Metal run the shader once per
+sample, each invocation seeing its own sample, on private and memoryless
+targets.
+
+`ms_input_fetch` lowers multisampled colour input-attachment reads in shaders
+other than custom-resolve shaders to framebuffer fetches. The deferred barrier
+then no longer splits the final segment, as long as the draw's fragment shader
+reads no multisampled texture. Samples other than 0 now test their own
+luminance. That only changes the histogram's counts at edges.
+
+Without the write-mask fix, the luminance draw's output reached the left eye
+as white patches. With it, eye images match the baseline.
+
+### `ds_resolve` (Mesa `cd25a61`, patch 0013)
+
+`ds_resolve` resolves depth and stencil in stitched passes with Metal's
+`SAMPLE_ZERO` resolve instead of meta passes afterwards. Two Metal behaviours
+showed up with a render target smaller than the attachment
+([`depth_resolve_area.m`](../experiments/alyx-vulkan/kosmickrisp-fdm/tile-resolve/depth_resolve_area.m)):
+
+| Store action | Inside the area | Outside the area | Second layer |
+| --- | --- | --- | --- |
+| Multisample resolve | resolved | resolve texture rewritten | resolved |
+| Store and multisample resolve | resolved | resolve texture rewritten | not resolved |
+
+KK forces a store for partial areas, so at first the right eye's resolved
+depth stayed empty. Don't-care depth and stencil resolved in the pass are no
+longer force-stored at the end of the pass. Metal still rewrites the
+depth-resolve image outside the render area. Alyx draws only inside it.
+
+The queue wait after stitched passes orders the resolve before later work. KK
+avoided render-pass depth resolves because of exactly that ordering problem.
+The resolve texture is set in every segment, so the descriptors stay equal. The
+legacy custom resolve path reads the MSAA depth, so it still stores and
+resolves afterwards.
+
+Resolved depth matches KK's meta resolve exactly in both eyes. With
+`ms_input_fetch` and `ds_resolve`, the eye pass's final segment is a single
+render encoder.
+
+### Desktop gameplay timing
+
+`a1_intro_world_2`, fidelity 5, FDM off, frames from 100 s to 195 s, two runs
+each:
+
+| Configuration | GPU median | p90 |
+| --- | --- | --- |
+| No experiments | 6.83 ms | 8.65 ms |
+| `stitch_passes` | 6.77 ms | 8.65 ms |
+| `tile_resolve,ms_input_fetch,stitch_passes,ds_resolve` | 6.67 ms | 8.49 ms |
+| The same plus `light_barriers` | 6.77 ms | 8.57 ms |
+
+All runs held 60 fps. The full set is about 2% faster. The scene is light, so
+the headset is where this matters.
+
+### Memoryless MSAA: not possible for Alyx's images
+
+Alyx creates its MSAA images without `TRANSIENT_ATTACHMENT`, with sampled and
+transfer usage (colour `0x97`, depth `0xa7`), and does not bind them to the
+lazily allocated memory type. Vulkan gives KK no permission to make them
+memoryless. With everything in tile memory, memoryless would only save memory:
+the passes already neither load nor store the MSAA data.
+
+### Still to do
+
+- **Headset:** run the full set, with and without FDM.
+- **Fallback:** 16 chains at startup are still re-recorded without stitching.
