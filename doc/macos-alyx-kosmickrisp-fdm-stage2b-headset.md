@@ -402,6 +402,25 @@ Stitching does not cost frame rate on the headset. These runs are below the
 earlier 30–33 fps without FDM, which did not use
 `+vr_render_subsampled_depth 1`.
 
+### All experiments together on the headset
+
+`MESA_KK_EXPERIMENTAL=fdm,fdm_rate,light_barriers,tile_resolve,stitch_passes`,
+`+vr_fdm 1`, fidelity 5. Attended.
+
+- **Image:** the user saw correct rendering from the menu into
+  `a1_intro_world_2`, as far as the hidden door in the lockers.
+- **Driver:** no queue errors. 2,468 chains were stitched and 16 re-recorded,
+  all at startup.
+- **Timing:** median frame interval 40.7 ms, GPU median 31.4 ms (p90 41.4 ms).
+- **Stalls:** after the lockers, frames stopped for 1–5 s at a time, from
+  88 s to 103 s. The 14 s gap at 74 s is the map load.
+
+The stalls look like first-time pipeline compilation. With `tile_resolve`, the
+tile pipelines are also built at first draw, on the render thread. A second pass
+through the same area would tell. The run ended at 114 s because
+`launch_xrizer.py` defaults to `--timeout 120`. The earlier headset runs that
+ended with exit 124 hit the same limit.
+
 ### Memoryless targets and stitching
 
 `stitch_resolve.m` with `HEAVY=` draws many small triangles in each segment:
