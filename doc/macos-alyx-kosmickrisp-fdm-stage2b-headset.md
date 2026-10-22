@@ -720,3 +720,34 @@ now copies the parameters, sized to the header and the map's data, in every
 pass that renders the image and does not resume a stitched pass. With all
 experiments and FDM on, the final eye images fill their area again, with no
 new fallbacks and no queue errors.
+
+## Background pipeline builds (Mesa `bb5772b`, patch 0017)
+
+`MESA_KK_EXPERIMENTAL=async_pipelines` returns from graphics pipeline creation
+once the MSL exists, and builds the Metal render pipeline on a device thread
+pool, up to 8 threads.
+
+- **Draws:** a draw whose pipeline is still being built waits up to
+  `KK_ASYNC_PIPELINE_WAIT_MS` (2 ms by default) and is then skipped. Objects
+  may be missing for a few frames instead of the game freezing. In VR, Monado
+  keeps reprojecting meanwhile.
+- **Kept synchronous:** compute pipelines, KK's own meta pipelines (marked with
+  a thread-local flag in `kk_meta_begin`/`kk_meta_end` and at device setup),
+  and the write-mask and tile variants built at draw time.
+- **Teardown:** destroying a shader waits for its build.
+
+Desktop gameplay, `fdm,fdm_rate`, every shader forced cold with a test-only salt
+on the MSL, frames after load:
+
+| | Freezes over 0.25 s | Their total | Longest | Draws skipped | Frames |
+| --- | --- | --- | --- | --- | --- |
+| Synchronous | 15 | 8.3 s | 1.73 s | 0 | 6,811 |
+| `async_pipelines` | 1 | 0.3 s | 0.25 s | 1,486 | 8,071 |
+
+The skips stopped once all builds finished. A late frame shows the same scene
+and objects as the synchronous run.
+
+![Late frame with async_pipelines](images/alyx-kk-async-pipelines-final.png)
+
+With a warm cache nothing changes: builds finish within the wait. Untested on
+the headset.

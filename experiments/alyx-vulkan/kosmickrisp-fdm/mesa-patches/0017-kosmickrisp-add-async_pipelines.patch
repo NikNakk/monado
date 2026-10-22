@@ -1,0 +1,296 @@
+From bb5772bffec05b8dd3ada1cb73a6c788e2ba3158 Mon Sep 17 00:00:00 2001
+From: Nick Kennedy <nick@nick-kennedy.com>
+Date: Thu, 22 Oct 2026 15:39:44 +0100
+Subject: [PATCH] kosmickrisp: add async_pipelines to build render pipelines in
+ the background
+
+MESA_KK_EXPERIMENTAL=async_pipelines returns from graphics pipeline
+creation once the MSL exists and builds the Metal render pipeline on a
+device thread pool. A draw whose pipeline is still being built waits up
+to KK_ASYNC_PIPELINE_WAIT_MS (2 ms by default) and is then skipped.
+Pipelines that the driver creates for its own meta operations, and
+compute pipelines, are still built synchronously. Destroying a shader
+waits for its build.
+
+In Half-Life: Alyx, Metal compiling a pipeline for the first time takes up
+to half a second, and pipelines created on the threads that submit work
+froze the game for seconds on entering new areas.
+
+AI-written commit text (biblioklept).
+
+Generated-by: LLM
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ src/kosmickrisp/vulkan/kk_cmd_draw.c |  6 ++++
+ src/kosmickrisp/vulkan/kk_cmd_meta.c | 11 +++++-
+ src/kosmickrisp/vulkan/kk_debug.c    |  1 +
+ src/kosmickrisp/vulkan/kk_debug.h    |  1 +
+ src/kosmickrisp/vulkan/kk_device.c   | 17 +++++++++
+ src/kosmickrisp/vulkan/kk_device.h   |  5 +++
+ src/kosmickrisp/vulkan/kk_shader.c   | 54 +++++++++++++++++++++++++++-
+ src/kosmickrisp/vulkan/kk_shader.h   | 13 +++++++
+ 8 files changed, 106 insertions(+), 2 deletions(-)
+
+diff --git a/src/kosmickrisp/vulkan/kk_cmd_draw.c b/src/kosmickrisp/vulkan/kk_cmd_draw.c
+index 1859ad5..2d20b26 100644
+--- a/src/kosmickrisp/vulkan/kk_cmd_draw.c
++++ b/src/kosmickrisp/vulkan/kk_cmd_draw.c
+@@ -1149,6 +1149,12 @@ kk_draw_prologue(struct kk_cmd_buffer *cmd)
+ {
+    struct kk_graphics_state *gfx = &cmd->state.gfx;
+ 
++   struct kk_shader *pipeline_vs = cmd->state.shaders[MESA_SHADER_VERTEX];
++   if (pipeline_vs && !kk_shader_pipeline_ready(pipeline_vs)) {
++      kk_encoder_stat("draw skipped, pipeline still compiling", false);
++      return true;
++   }
++
+    const struct kk_shader *fs = cmd->state.shaders[MESA_SHADER_FRAGMENT];
+    bool fetch_only = KK_EXPERIMENTAL(MS_INPUT_FETCH) &&
+                      (!fs || !fs->info.fs.reads_ms_texture);
+diff --git a/src/kosmickrisp/vulkan/kk_cmd_meta.c b/src/kosmickrisp/vulkan/kk_cmd_meta.c
+index fc66dee..cc33846 100644
+--- a/src/kosmickrisp/vulkan/kk_cmd_meta.c
++++ b/src/kosmickrisp/vulkan/kk_cmd_meta.c
+@@ -94,6 +94,7 @@ static void
+ kk_meta_begin(struct kk_cmd_buffer *cmd, struct kk_meta_save *save,
+               VkPipelineBindPoint bind_point, const char *debug_label)
+ {
++   kk_shader_set_sync_compiles(true);
+    struct kk_descriptor_state *desc = kk_get_descriptors_state(cmd, bind_point);
+ 
+    if (bind_point == VK_PIPELINE_BIND_POINT_GRAPHICS) {
+@@ -142,7 +143,7 @@ kk_meta_begin(struct kk_cmd_buffer *cmd, struct kk_meta_save *save,
+ }
+ 
+ static void
+-kk_meta_end(struct kk_cmd_buffer *cmd, struct kk_meta_save *save,
++kk_meta_end_impl(struct kk_cmd_buffer *cmd, struct kk_meta_save *save,
+             VkPipelineBindPoint bind_point)
+ {
+    struct kk_descriptor_state *desc = kk_get_descriptors_state(cmd, bind_point);
+@@ -201,6 +202,14 @@ kk_meta_end(struct kk_cmd_buffer *cmd, struct kk_meta_save *save,
+    memcpy(desc->root.push, save->push, sizeof(save->push));
+ }
+ 
++static void
++kk_meta_end(struct kk_cmd_buffer *cmd, struct kk_meta_save *save,
++            VkPipelineBindPoint bind_point)
++{
++   kk_meta_end_impl(cmd, save, bind_point);
++   kk_shader_set_sync_compiles(false);
++}
++
+ VKAPI_ATTR void VKAPI_CALL
+ kk_CmdFillMemoryKHR(VkCommandBuffer commandBuffer,
+                     const VkDeviceAddressRangeKHR *dstRange,
+diff --git a/src/kosmickrisp/vulkan/kk_debug.c b/src/kosmickrisp/vulkan/kk_debug.c
+index 59281b2..2e0436f 100644
+--- a/src/kosmickrisp/vulkan/kk_debug.c
++++ b/src/kosmickrisp/vulkan/kk_debug.c
+@@ -30,6 +30,7 @@ const struct debug_named_value experimental_flags[] = {
+    {"stitch_passes", KK_EXPERIMENTAL_STITCH_PASSES},
+    {"ms_input_fetch", KK_EXPERIMENTAL_MS_INPUT_FETCH},
+    {"ds_resolve", KK_EXPERIMENTAL_DS_RESOLVE},
++   {"async_pipelines", KK_EXPERIMENTAL_ASYNC_PIPELINES},
+    {NULL, 0},
+ };
+ 
+diff --git a/src/kosmickrisp/vulkan/kk_debug.h b/src/kosmickrisp/vulkan/kk_debug.h
+index ec6d6c8..0b131fe 100644
+--- a/src/kosmickrisp/vulkan/kk_debug.h
++++ b/src/kosmickrisp/vulkan/kk_debug.h
+@@ -33,6 +33,7 @@ enum kk_experimental {
+    KK_EXPERIMENTAL_STITCH_PASSES = 1ull << 7,
+    KK_EXPERIMENTAL_MS_INPUT_FETCH = 1ull << 8,
+    KK_EXPERIMENTAL_DS_RESOLVE = 1ull << 9,
++   KK_EXPERIMENTAL_ASYNC_PIPELINES = 1ull << 10,
+ };
+ 
+ extern enum kk_experimental kk_mesa_experimental_flags;
+diff --git a/src/kosmickrisp/vulkan/kk_device.c b/src/kosmickrisp/vulkan/kk_device.c
+index 54e2ab4..ef9d903 100644
+--- a/src/kosmickrisp/vulkan/kk_device.c
++++ b/src/kosmickrisp/vulkan/kk_device.c
+@@ -6,6 +6,8 @@
+  */
+ 
+ #include "kk_device.h"
++#include "kk_debug.h"
++#include "util/u_cpu_detect.h"
+ 
+ #include "kk_buffer.h"
+ #include "kk_buffer_view.h"
+@@ -316,7 +318,16 @@ kk_CreateDevice(VkPhysicalDevice physicalDevice,
+       dev->has_queue = true;
+    }
+ 
++   if (KK_EXPERIMENTAL(ASYNC_PIPELINES)) {
++      unsigned threads = CLAMP(util_get_cpu_caps()->nr_cpus - 2, 2, 8);
++      dev->has_pipeline_queue =
++         util_queue_init(&dev->pipeline_queue, "kkpso", 256, threads,
++                         UTIL_QUEUE_INIT_RESIZE_IF_FULL, NULL);
++   }
++
++   kk_shader_set_sync_compiles(true);
+    result = kk_device_init_meta(dev);
++   kk_shader_set_sync_compiles(false);
+    if (result != VK_SUCCESS)
+       goto fail_mem_cache;
+ 
+@@ -381,6 +392,12 @@ kk_DestroyDevice(VkDevice _device, const VkAllocationCallbacks *pAllocator)
+       mtl_stop_gpu_capture();
+    }
+ 
++   if (dev->has_pipeline_queue) {
++      util_queue_finish(&dev->pipeline_queue);
++      util_queue_destroy(&dev->pipeline_queue);
++      dev->has_pipeline_queue = false;
++   }
++
+    /* Meta first since it may destroy Vulkan objects */
+    kk_device_finish_meta(dev);
+    kk_device_finish_lib(dev);
+diff --git a/src/kosmickrisp/vulkan/kk_device.h b/src/kosmickrisp/vulkan/kk_device.h
+index 449bde8..000edf2 100644
+--- a/src/kosmickrisp/vulkan/kk_device.h
++++ b/src/kosmickrisp/vulkan/kk_device.h
+@@ -9,6 +9,7 @@
+ #define KK_DEVICE_H 1
+ 
+ #include "kk_private.h"
++#include "util/u_queue.h"
+ 
+ #include "kk_query_table.h"
+ #include "kk_queue.h"
+@@ -98,6 +99,10 @@ struct kk_device {
+       struct util_dynarray free;
+    } stitch_allocators;
+ 
++   /* Builds Metal render pipelines in the background with async_pipelines. */
++   struct util_queue pipeline_queue;
++   bool has_pipeline_queue;
++
+    struct kk_precompiled_cache precompiled_cache;
+ 
+    bool has_queue;
+diff --git a/src/kosmickrisp/vulkan/kk_shader.c b/src/kosmickrisp/vulkan/kk_shader.c
+index f4dde64..20edc24 100644
+--- a/src/kosmickrisp/vulkan/kk_shader.c
++++ b/src/kosmickrisp/vulkan/kk_shader.c
+@@ -1007,7 +1007,11 @@ kk_shader_destroy(struct vk_device *vk_dev, struct kk_shader *shader,
+       pipe->gfx.pre_render_count = 0u;
+ 
+       /* Graphics pipeline. */
+-      mtl_release(pipe->gfx.render);
++      if (pipe->gfx.async)
++         util_queue_fence_wait(&pipe->gfx.ready);
++      util_queue_fence_destroy(&pipe->gfx.ready);
++      if (pipe->gfx.render)
++         mtl_release(pipe->gfx.render);
+       if (pipe->gfx.ds_handle)
+          mtl_release(pipe->gfx.ds_handle);
+       pipe->gfx.render = NULL;
+@@ -1964,6 +1968,45 @@ kk_shader_get_masked_pipeline(struct kk_device *device, struct kk_shader *vs,
+    return pipeline;
+ }
+ 
++static __thread int kk_sync_compiles;
++
++void
++kk_shader_set_sync_compiles(bool sync)
++{
++   kk_sync_compiles += sync ? 1 : -1;
++   assert(kk_sync_compiles >= 0);
++}
++
++static void
++kk_build_render_pipeline_job(void *data, void *gdata, int thread_index)
++{
++   struct kk_shader *vs = data;
++   struct kk_device *device =
++      container_of(vs->vk.base.device, struct kk_device, vk);
++   int64_t start_ns = os_time_get_nano();
++   mtl_render_pipeline_state *render = kk_build_render_pipeline(
++      device, vs, vs->pipeline.gfx.render_stage, UINT32_MAX);
++   kk_compile_log("metal render pipeline (background)", start_ns);
++   if (render == NULL)
++      mesa_loge("kk: background render pipeline build failed");
++   p_atomic_set(&vs->pipeline.gfx.render, render);
++}
++
++bool
++kk_shader_pipeline_ready(struct kk_shader *vs)
++{
++   struct kk_pipeline_handles *pipe = &vs->pipeline;
++   if (pipe->gfx.async && !util_queue_fence_is_signalled(&pipe->gfx.ready)) {
++      static int64_t wait_ns = -1;
++      if (wait_ns < 0)
++         wait_ns = debug_get_num_option("KK_ASYNC_PIPELINE_WAIT_MS", 2) * 1000000ll;
++      if (!util_queue_fence_wait_timeout(&pipe->gfx.ready,
++                                         os_time_get_nano() + wait_ns))
++         return false;
++   }
++   return p_atomic_read(&pipe->gfx.render) != NULL;
++}
++
+ static VkResult
+ kk_compile_graphics_pipeline(struct kk_device *device, struct kk_shader *vs)
+ {
+@@ -1994,6 +2037,15 @@ kk_compile_graphics_pipeline(struct kk_device *device, struct kk_shader *vs)
+    pipe->gfx.render_stage = vs_stage;
+    if (vs->info.vs.has_ds)
+       pipe->gfx.ds_handle = kk_compile_ds_state(device, &vs->info);
++   util_queue_fence_init(&pipe->gfx.ready);
++
++   if (device->has_pipeline_queue && kk_sync_compiles == 0) {
++      pipe->gfx.async = true;
++      util_queue_add_job(&device->pipeline_queue, vs, &pipe->gfx.ready,
++                         kk_build_render_pipeline_job, NULL, 0);
++      return VK_SUCCESS;
++   }
++
+    int64_t start_ns = os_time_get_nano();
+    pipe->gfx.render = kk_build_render_pipeline(device, vs, vs_stage, UINT32_MAX);
+    kk_compile_log("metal render pipeline", start_ns);
+diff --git a/src/kosmickrisp/vulkan/kk_shader.h b/src/kosmickrisp/vulkan/kk_shader.h
+index 3019450..9cf55c1 100644
+--- a/src/kosmickrisp/vulkan/kk_shader.h
++++ b/src/kosmickrisp/vulkan/kk_shader.h
+@@ -10,6 +10,7 @@
+ 
+ #include "kk_device_memory.h"
+ #include "kk_private.h"
++#include "util/u_queue.h"
+ 
+ #include "kosmickrisp/bridge/mtl_format.h"
+ 
+@@ -126,6 +127,10 @@ struct kk_pipeline_handles {
+             mtl_render_pipeline_state *render;
+          } masked[4];
+          uint32_t render_stage;
++         /* With async_pipelines, render is built in the background and
++          * published before ready is signalled. */
++         struct util_queue_fence ready;
++         bool async;
+          uint32_t pre_render_count;
+       } gfx;
+       mtl_compute_pipeline_state *cs;
+@@ -157,6 +162,14 @@ mtl_render_pipeline_state *kk_shader_get_tile_pipeline(struct kk_device *device,
+                                                        uint32_t samples);
+ void kk_compile_log(const char *what, int64_t start_ns);
+ 
++/* Marks the calling thread as creating driver-internal pipelines, which are
++ * always compiled synchronously. Nests. */
++void kk_shader_set_sync_compiles(bool sync);
++
++/* Whether the vertex shader object's render pipeline can be used, waiting a
++ * short time for a background build. */
++bool kk_shader_pipeline_ready(struct kk_shader *vs);
++
+ mtl_render_pipeline_state *
+ kk_shader_get_masked_pipeline(struct kk_device *device, struct kk_shader *vs,
+                               uint32_t masks);
+-- 
+2.54.0 (Apple Git-157)
+
