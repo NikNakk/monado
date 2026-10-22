@@ -1,0 +1,343 @@
+From 43ba38d6240b7c5c6592cf09a6399419d0148bfc Mon Sep 17 00:00:00 2001
+From: Nick Kennedy <nick@nick-kennedy.com>
+Date: Thu, 22 Oct 2026 14:29:19 +0100
+Subject: [PATCH 1/2] kosmickrisp: add KK_COMPILE_LOG for shader and pipeline
+ compile times
+
+KK_COMPILE_LOG logs shader compiles, Metal render pipeline builds, pipeline
+cache loads and the write-mask and tile pipelines built at draw time
+when they take over 5 ms, with the calling thread, a per-second total
+per kind, and the threads that submit to the queue.
+
+AI-written commit text (biblioklept).
+
+Generated-by: LLM
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ src/kosmickrisp/vulkan/kk_queue.c  | 16 +++++
+ src/kosmickrisp/vulkan/kk_shader.c | 96 +++++++++++++++++++++++++++++-
+ src/kosmickrisp/vulkan/kk_shader.h |  2 +
+ 3 files changed, 112 insertions(+), 2 deletions(-)
+
+diff --git a/src/kosmickrisp/vulkan/kk_queue.c b/src/kosmickrisp/vulkan/kk_queue.c
+index c4e06de..6f3983c 100644
+--- a/src/kosmickrisp/vulkan/kk_queue.c
++++ b/src/kosmickrisp/vulkan/kk_queue.c
+@@ -6,6 +6,7 @@
+  */
+ 
+ #include "kk_queue.h"
++#include <pthread.h>
+ #include "kk_fdm.h"
+ #include "kk_debug.h"
+ #include "util/log.h"
+@@ -580,6 +581,21 @@ kk_queue_submit(struct vk_queue *vk_queue, struct vk_queue_submit *submit)
+     * Otherwise, users are playing with fire. */
+    kk_device_make_resources_resident(dev);
+    kk_fdm_latch_gaze();
++   if (debug_get_bool_option("KK_COMPILE_LOG", false)) {
++      static uint64_t seen[4];
++      uint64_t tid = 0;
++      pthread_threadid_np(NULL, &tid);
++      for (uint32_t i = 0; i < ARRAY_SIZE(seen); i++) {
++         if (seen[i] == tid)
++            break;
++         if (seen[i] == 0) {
++            seen[i] = tid;
++            mesa_logi("kk-compile: queue submissions from thread %llu",
++                      (unsigned long long)tid);
++            break;
++         }
++      }
++   }
+ 
+    if (KK_EXPERIMENTAL(STITCH_PASSES)) {
+       VkResult result = kk_queue_submit_stitched(queue, submit);
+diff --git a/src/kosmickrisp/vulkan/kk_shader.c b/src/kosmickrisp/vulkan/kk_shader.c
+index 9681ef6..f4dde64 100644
+--- a/src/kosmickrisp/vulkan/kk_shader.c
++++ b/src/kosmickrisp/vulkan/kk_shader.c
+@@ -20,6 +20,8 @@
+ #include "kosmickrisp/bridge/mtl_bridge.h"
+ #include "kosmickrisp/bridge/mtl_tile.h"
+ #include "util/simple_mtx.h"
++#include "util/os_time.h"
++#include <pthread.h>
+ #include "kosmickrisp/bridge/ns_process_info.h"
+ #include "kosmickrisp/bridge/vk_to_mtl_map.h"
+ #include "kosmickrisp/compiler/nir_to_msl.h"
+@@ -1527,6 +1529,61 @@ get_empty_nir(struct kk_device *dev, mesa_shader_stage stage,
+    return nir;
+ }
+ 
++/* KK_COMPILE_LOG: log compile steps over 5 ms with their thread, and a
++ * per-second total of compile time per kind. */
++static bool
++kk_compile_log_enabled(void)
++{
++   static int enabled = -1;
++   if (enabled < 0)
++      enabled = debug_get_bool_option("KK_COMPILE_LOG", false);
++   return enabled;
++}
++
++void
++kk_compile_log(const char *what, int64_t start_ns)
++{
++   if (!kk_compile_log_enabled())
++      return;
++   int64_t now = os_time_get_nano();
++   int64_t ns = now - start_ns;
++   uint64_t tid = 0;
++   pthread_threadid_np(NULL, &tid);
++   if (ns > 5000000)
++      mesa_logi("kk-compile: %s %.1f ms on thread %llu", what, ns / 1e6,
++                (unsigned long long)tid);
++
++   static simple_mtx_t lock = SIMPLE_MTX_INITIALIZER;
++   static struct {
++      const char *what;
++      int64_t ns;
++      uint32_t count;
++   } totals[16];
++   static int64_t window_start;
++   simple_mtx_lock(&lock);
++   uint32_t i;
++   for (i = 0; i < ARRAY_SIZE(totals) && totals[i].what && totals[i].what != what; i++)
++      ;
++   if (i < ARRAY_SIZE(totals)) {
++      totals[i].what = what;
++      totals[i].ns += ns;
++      totals[i].count++;
++   }
++   if (window_start == 0)
++      window_start = now;
++   if (now - window_start >= 1000000000ll) {
++      for (i = 0; i < ARRAY_SIZE(totals) && totals[i].what; i++) {
++         if (totals[i].count)
++            mesa_logi("kk-compile-second: %s %u calls %.1f ms", totals[i].what,
++                      totals[i].count, totals[i].ns / 1e6);
++         totals[i].ns = 0;
++         totals[i].count = 0;
++      }
++      window_start = now;
++   }
++   simple_mtx_unlock(&lock);
++}
++
+ static VkResult
+ kk_compile_compute_pipeline(struct kk_device *device,
+                             const struct msl_compile_data *data,
+@@ -1783,9 +1840,11 @@ kk_shader_get_tile_pipeline(struct kk_device *device, struct kk_shader *vs,
+          mtl_function_descriptor *function =
+             mtl_new_library_function_descriptor(library,
+                                                 vs->tile_msl.entrypoint_name);
++         int64_t start_ns = os_time_get_nano();
+          pipeline = mtl_new_tile_render_pipeline(
+             device->mtl_compiler_handle, function, samples,
+             vs->info.vs.rt_formats, MAX_DRAW_BUFFERS);
++         kk_compile_log("metal tile pipeline at draw", start_ns);
+          mtl_release(function);
+          mtl_release(library);
+       }
+@@ -1892,8 +1951,10 @@ kk_shader_get_masked_pipeline(struct kk_device *device, struct kk_shader *vs,
+       }
+    }
+    if (pipeline == NULL && free_slot < ARRAY_SIZE(vs->pipeline.gfx.masked)) {
++      int64_t start_ns = os_time_get_nano();
+       pipeline = kk_build_render_pipeline(device, vs,
+                                           vs->pipeline.gfx.render_stage, masks);
++      kk_compile_log("metal write-mask variant at draw", start_ns);
+       if (pipeline) {
+          vs->pipeline.gfx.masked[free_slot].masks = masks;
+          vs->pipeline.gfx.masked[free_slot].render = pipeline;
+@@ -1933,7 +1994,9 @@ kk_compile_graphics_pipeline(struct kk_device *device, struct kk_shader *vs)
+    pipe->gfx.render_stage = vs_stage;
+    if (vs->info.vs.has_ds)
+       pipe->gfx.ds_handle = kk_compile_ds_state(device, &vs->info);
++   int64_t start_ns = os_time_get_nano();
+    pipe->gfx.render = kk_build_render_pipeline(device, vs, vs_stage, UINT32_MAX);
++   kk_compile_log("metal render pipeline", start_ns);
+    if (pipe->gfx.render == NULL)
+       result = VK_ERROR_INVALID_SHADER_NV;
+ 
+@@ -1941,7 +2004,7 @@ kk_compile_graphics_pipeline(struct kk_device *device, struct kk_shader *vs)
+ }
+ 
+ static VkResult
+-kk_compile_shaders(struct vk_device *device, uint32_t shader_count,
++kk_compile_shaders_impl(struct vk_device *device, uint32_t shader_count,
+                    struct vk_shader_compile_info *infos,
+                    const struct vk_graphics_pipeline_state *state,
+                    const struct vk_features *enabled_features,
+@@ -2149,7 +2212,7 @@ kk_msl_deserialize(struct blob_reader *blob, mesa_shader_stage stage,
+ }
+ 
+ static VkResult
+-kk_deserialize_shader(struct vk_device *vk_dev, struct blob_reader *blob,
++kk_deserialize_shader_impl(struct vk_device *vk_dev, struct blob_reader *blob,
+                       uint32_t binary_version,
+                       const VkAllocationCallbacks *pAllocator,
+                       struct vk_shader **shader_out)
+@@ -2310,6 +2373,35 @@ static const struct vk_shader_ops kk_shader_ops = {
+       kk_shader_get_executable_internal_representations,
+ };
+ 
++static VkResult
++kk_compile_shaders(struct vk_device *device, uint32_t shader_count,
++                   struct vk_shader_compile_info *infos,
++                   const struct vk_graphics_pipeline_state *state,
++                   const struct vk_features *enabled_features,
++                   const VkAllocationCallbacks *pAllocator,
++                   struct vk_shader **shaders_out)
++{
++   int64_t start_ns = os_time_get_nano();
++   VkResult result = kk_compile_shaders_impl(device, shader_count, infos, state,
++                                             enabled_features, pAllocator,
++                                             shaders_out);
++   kk_compile_log("compile shaders", start_ns);
++   return result;
++}
++
++static VkResult
++kk_deserialize_shader(struct vk_device *vk_dev, struct blob_reader *blob,
++                      uint32_t binary_version,
++                      const VkAllocationCallbacks *pAllocator,
++                      struct vk_shader **shader_out)
++{
++   int64_t start_ns = os_time_get_nano();
++   VkResult result = kk_deserialize_shader_impl(vk_dev, blob, binary_version,
++                                                pAllocator, shader_out);
++   kk_compile_log("load shader from cache", start_ns);
++   return result;
++}
++
+ const struct vk_device_shader_ops kk_device_shader_ops = {
+    .get_nir_options = kk_get_nir_options,
+    .get_spirv_options = kk_get_spirv_options,
+diff --git a/src/kosmickrisp/vulkan/kk_shader.h b/src/kosmickrisp/vulkan/kk_shader.h
+index 0974d37..3019450 100644
+--- a/src/kosmickrisp/vulkan/kk_shader.h
++++ b/src/kosmickrisp/vulkan/kk_shader.h
+@@ -155,6 +155,8 @@ struct kk_device;
+ mtl_render_pipeline_state *kk_shader_get_tile_pipeline(struct kk_device *device,
+                                                        struct kk_shader *vs,
+                                                        uint32_t samples);
++void kk_compile_log(const char *what, int64_t start_ns);
++
+ mtl_render_pipeline_state *
+ kk_shader_get_masked_pipeline(struct kk_device *device, struct kk_shader *vs,
+                               uint32_t masks);
+-- 
+2.54.0 (Apple Git-157)
+
+
+From b9719f1e182ef4ea5372d5c6870ffe5fe9fc9524 Mon Sep 17 00:00:00 2001
+From: Nick Kennedy <nick@nick-kennedy.com>
+Date: Thu, 22 Oct 2026 15:16:16 +0100
+Subject: [PATCH 2/2] kosmickrisp: publish fdm_rate parameters in every
+ non-resumed pass
+
+Subsampled images received their rate map parameters once, by a GPU copy
+recorded in the first pass that rendered them, after which a CPU-side
+mark skipped further copies. When that command buffer was re-recorded
+or dropped, as stitched chains that fall back are at startup, the copy
+never ran and the image kept empty parameters, so later sampling used
+the physical layout: Alyx's final eye image filled only the top-left
+part of each view. The parameters are now copied in every pass that
+renders the image and does not resume a stitched pass, sized to the
+header and the map's parameter data.
+
+AI-written commit text (biblioklept).
+
+Generated-by: LLM
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ src/kosmickrisp/vulkan/kk_fdm.c   | 35 +++++++++++++++----------------
+ src/kosmickrisp/vulkan/kk_image.h |  1 +
+ 2 files changed, 18 insertions(+), 18 deletions(-)
+
+diff --git a/src/kosmickrisp/vulkan/kk_fdm.c b/src/kosmickrisp/vulkan/kk_fdm.c
+index f29f2cb..d873dae 100644
+--- a/src/kosmickrisp/vulkan/kk_fdm.c
++++ b/src/kosmickrisp/vulkan/kk_fdm.c
+@@ -426,6 +426,8 @@ kk_fdm_get_map(struct kk_device *dev, struct kk_image *density,
+    }
+    density->fdm.params = params;
+    density->fdm.serial = ++kk_fdm_serial;
++   density->fdm.params_bytes =
++      KK_RATE_PARAMS_HEADER_B + mtl_rate_map_parameter_size(map);
+    memcpy(density->fdm.map_shift, shift, sizeof(shift));
+ 
+    struct kk_rate_params_header *header = density->fdm.params->cpu;
+@@ -525,22 +527,14 @@ kk_fdm_publish(struct kk_cmd_buffer *cmd, struct kk_image *density,
+    struct kk_image *image = container_of(iview->vk.image, struct kk_image, vk);
+    if (image->rate_params == NULL)
+       return;
+-   if (image->rate_params_owner == density &&
+-       image->rate_params_serial == density->fdm.serial)
+-      return;
++   /* Copied in every pass that renders the image rather than once: the
++    * command buffer holding an earlier copy may be re-recorded or dropped. */
++   uint32_t bytes = MIN2(density->fdm.params_bytes, KK_RATE_PARAMS_SIZE_B);
+    if (cmd->metal.render == NULL)
+       mtl_copy_from_buffer_to_buffer(cs_get_compute(cmd), density->fdm.params->map,
+-                                     0, image->rate_params->map, 0,
+-                                     KK_RATE_PARAMS_SIZE_B);
++                                     0, image->rate_params->map, 0, bytes);
+    else
+-      memcpy(image->rate_params->cpu, density->fdm.params->cpu,
+-             KK_RATE_PARAMS_SIZE_B);
+-   if (kk_fdm_debug()) {
+-      static uint32_t republished;
+-      if (image->rate_params_owner != NULL && (++republished & (republished - 1)) == 0)
+-         mesa_logi("kk-fdm: %u parameter block rewrites of already-published images",
+-                   republished);
+-   }
++      memcpy(image->rate_params->cpu, density->fdm.params->cpu, bytes);
+    image->rate_params_owner = density;
+    image->rate_params_serial = density->fdm.serial;
+ }
+@@ -644,17 +638,22 @@ kk_fdm_setup_rendering(struct kk_cmd_buffer *cmd,
+       gfx->stitch.fdm_serial = density->fdm.serial;
+    }
+    uint64_t params = 0;
++   /* Resumed segments of a stitched pass may not start with another
++    * encoder; the segment that began the pass published the parameters. */
++   bool publish = !(render->flags & VK_RENDERING_RESUMING_BIT);
+    if (map) {
+       mtl_render_pass_descriptor_set_rate_map(descriptor, map);
+       params = density->fdm.params->gpu;
+-      for (uint32_t i = 0; i < render->color_att_count; i++) {
++      for (uint32_t i = 0; publish && i < render->color_att_count; i++) {
+          kk_fdm_publish(cmd, density, render->color_att[i].iview);
+          kk_fdm_publish(cmd, density, render->color_att[i].resolve_iview);
+       }
+-      kk_fdm_publish(cmd, density, render->depth_att.iview);
+-      kk_fdm_publish(cmd, density, render->depth_att.resolve_iview);
+-      kk_fdm_publish(cmd, density, render->stencil_att.iview);
+-      kk_fdm_publish(cmd, density, render->stencil_att.resolve_iview);
++      if (publish) {
++         kk_fdm_publish(cmd, density, render->depth_att.iview);
++         kk_fdm_publish(cmd, density, render->depth_att.resolve_iview);
++         kk_fdm_publish(cmd, density, render->stencil_att.iview);
++         kk_fdm_publish(cmd, density, render->stencil_att.resolve_iview);
++      }
+    }
+    simple_mtx_unlock(&kk_fdm_lock);
+ 
+diff --git a/src/kosmickrisp/vulkan/kk_image.h b/src/kosmickrisp/vulkan/kk_image.h
+index 6994b0e..66a6f97 100644
+--- a/src/kosmickrisp/vulkan/kk_image.h
++++ b/src/kosmickrisp/vulkan/kk_image.h
+@@ -65,6 +65,7 @@ struct kk_image {
+       uint32_t map_version, map_width, map_height, map_layers;
+       int16_t map_shift[8][2];
+       uint64_t serial;
++      uint32_t params_bytes;
+       struct kk_bo *params;
+       struct kk_bo **old_params;
+       uint32_t old_params_count;
+-- 
+2.54.0 (Apple Git-157)
+

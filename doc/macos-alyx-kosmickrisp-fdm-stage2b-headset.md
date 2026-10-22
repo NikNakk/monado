@@ -682,3 +682,41 @@ Options:
   controlled by KK, which does not depend on the OS cache.
 - **Raised limit:** keep `XRT_MACOS_CLIENT_GPU_HUNG_MS=30000` so a freeze no
   longer ends the session.
+
+### Cold compiles by configuration
+
+`KK_MSL_SALT`, a test aid prepended to every MSL source and not committed, forces
+every Metal compile to miss the cache. Same desktop session as above:
+
+| Configuration | Metal pipelines over 5 ms | Their total | Longest |
+| --- | --- | --- | --- |
+| No experiments | 162 | 26.9 s | 474 ms |
+| `fdm,fdm_rate` | 163 | 27.9 s | 506 ms |
+
+The experiments do not add compile work. The write-mask variants, about 1.8 s,
+appear in both because that fix applies everywhere. Rebuilding KK without
+changing generated code keeps the cache warm: a rebuild with a new library UUID
+gave 0.01 s. A cold run straight after the FDM-only runs may come from the
+shared system cache evicting entries.
+
+The two macOS panics that day (SOCD, iBoot) did not come during compile floods.
+At 11:30 nothing had been running for 30 min. At 14:52 a run had stopped making
+progress at startup 8 min earlier, and Monado had logged that the display link
+had not fired. `caffeinate` had not been restarted after the first reboot. Since
+then, runs go through a watchdog that stops on a stalled log.
+
+## Eye images in the top left with FDM and stitching (Mesa `b9719f1`)
+
+On the desktop, each eye's picture filled only about 56% of its 384×480 area,
+in the top left, like FDM's physical layout. The submit bounds (0.8 × 0.8333)
+and xrizer's 384×480 swapchain were the same with FDM on and off. Bisecting
+pointed to `fdm,fdm_rate,stitch_passes`; `fdm,fdm_rate,tile_resolve` was correct.
+
+Subsampled images got their rate parameters once, by a GPU copy in the first
+pass that rendered them, and a CPU-side mark then skipped further copies. The
+16 stitched chains that fall back at startup are re-recorded, so the recording
+holding that copy was never submitted and the image kept empty parameters. KK
+now copies the parameters, sized to the header and the map's data, in every
+pass that renders the image and does not resume a stitched pass. With all
+experiments and FDM on, the final eye images fill their area again, with no
+new fallbacks and no queue errors.
