@@ -551,3 +551,52 @@ the passes already neither load nor store the MSAA data.
 
 - **Headset:** run the full set, with and without FDM.
 - **Fallback:** 16 chains at startup are still re-recorded without stitching.
+
+## Gaze-centred FDM in KosmicKrisp — 22 October 2026
+
+Alyx draws its density map itself and gets no gaze through OpenVR. Monado's
+eye-tracked foveation (`XR_META_foveation_eye_tracked`) needs a foveation
+profile on a swapchain, and Monado rejects that for Vulkan swapchains such as
+xrizer's. So gaze has to reach KK from xrizer, which can read it through
+`XR_EXT_eye_gaze_interaction`. Alyx removes the foveation itself before
+submitting, so the compositor is not involved.
+
+### KK side (Mesa `325c97a`, patch 0014)
+
+- `kk_fdm_set_gaze(view, x, y, valid)` is exported from the driver library.
+  `x` and `y` are in [0, 1] across the render area. `KK_FDM_GAZE` simulates gaze
+  as `x,y` or `sweep[:seconds]`.
+- Gaze is latched at queue submission, at most every 10 ms, so the passes of a
+  frame share one map.
+- KK keeps the column and row rate profiles it derives from Alyx's density map,
+  and shifts them per eye so that the middle of the highest-rate band lands on
+  the gaze point. Rate maps stay separable, so the high-rate region is still a
+  cross.
+- Rate-map parameter blocks (64 KB each) were kept until the density image was
+  destroyed. They are now recycled through a ring of eight per density image.
+- A stitched chain whose segments got different maps is re-recorded without
+  stitching under one latched gaze.
+
+### Desktop results
+
+`a1_intro_world_2`, `+vr_fdm 1`, fidelity 5, final 8-bit eye image
+(`KK_DUMP_PASSES_DIR`). Left, gaze fixed at (0.2, 0.5): the left wall and
+railing stay sharp and the right side is blocky. Right, gaze at (0.8, 0.5): the
+reverse.
+
+![Gaze left](images/alyx-kk-fdm-gaze-left.png)
+![Gaze right](images/alyx-kk-fdm-gaze-right.png)
+
+| Run | Maps built | Stitch fallbacks | Queue errors |
+| --- | --- | --- | --- |
+| `fdm,fdm_rate`, gaze sweep every 4 s | over 2,000 | — | 0 |
+| Full set, gaze sweep | over 1,000 | 128 of about 5,400 (16 at startup) | 0 |
+
+All runs held 60 fps. Frames from the sweep show no seams or corruption.
+
+### Still to do
+
+- **xrizer:** read gaze through `XR_EXT_eye_gaze_interaction`, project it into
+  each eye's field of view, and call `kk_fdm_set_gaze`.
+- **Headset:** judge latency, filtering and how visible the foveation boundary
+  is.
