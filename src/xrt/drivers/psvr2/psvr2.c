@@ -1007,6 +1007,10 @@ psvr2_hmd_get_tracked_pose(struct xrt_device *xdev,
 
 	// Push the eye pose before the head pose if required, so that we're returning the gaze relative to the head
 	if (name == XRT_INPUT_GENERIC_EYE_GAZE_POSE) {
+		if (hmd->et_data.gaze_relation_history == NULL) {
+			*out_relation = (struct xrt_space_relation)XRT_SPACE_RELATION_ZERO;
+			return XRT_SUCCESS;
+		}
 		m_relation_history_get(hmd->et_data.gaze_relation_history, prediction_ns_hw,
 		                       m_relation_chain_reserve(&chain));
 	}
