@@ -335,6 +335,15 @@ struct xrt_vec3_f64
 #define XRT_VEC3_ZERO {0.f, 0.f, 0.f}
 // clang-format on
 /*!
+ * All-one value for @ref xrt_vec3
+ *
+ * @ingroup xrt_iface math
+ * @relates xrt_vec3
+ */
+// clang-format off
+#define XRT_VEC3_ONE {1.f, 1.f, 1.f}
+// clang-format on
+/*!
  * Value for @ref xrt_vec3 with 1 in the @p x coordinate.
  *
  * @ingroup xrt_iface math
