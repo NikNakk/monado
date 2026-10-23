@@ -26,16 +26,6 @@
 
 #include "math/m_api.h"
 
-#include <atomic>
-#include <vector>
-#include <memory>
-#include <mutex>
-#include <shared_mutex>
-#include <optional>
-#include <stdexcept>
-#include <array>
-#include <fstream>
-
 #include "correspondence_search.h"
 #include "led_search_model.h"
 #include "pose_metrics.h"
@@ -43,6 +33,17 @@
 #include "optimizer/pose_optimize.hpp"
 #include "optimizer/rig_calibration.hpp"
 #include "optimizer/sensor_fusion.hpp"
+
+#include <array>
+#include <atomic>
+#include <ceres/context.h>
+#include <fstream>
+#include <memory>
+#include <mutex>
+#include <optional>
+#include <shared_mutex>
+#include <stdexcept>
+#include <vector>
 
 
 #define CT_TRACE(ct, ...) U_LOG_IFL_T(ct->log_level, __VA_ARGS__)
@@ -461,6 +462,9 @@ public: // Fields
 	bool deterministic{false};
 
 	std::vector<std::shared_ptr<CameraMosaic>> mosaics;
+
+	// Put here to be destroyed before devices (reverse declaration order)
+	std::unique_ptr<ceres::Context> ceres_context{};
 
 	std::shared_mutex device_lock;
 	std::vector<std::unique_ptr<Device>> devices;

@@ -23,13 +23,14 @@
 
 #include <array>
 #include <atomic>
+#include <ceres/context.h>
 #include <cstddef>
 #include <cstring>
 #include <memory>
 #include <optional>
 #include <string>
-#include <vector>
 #include <type_traits>
+#include <vector>
 
 
 namespace xrt::tracking::constellation {
@@ -424,6 +425,8 @@ struct SolveSnapshot
 struct SensorFusion
 {
 public: // Fields
+	ceres::Context *context;
+
 	u_logging_level log_level;
 
 	/*!
@@ -533,7 +536,9 @@ private: // Methods
 	resetLocked();
 
 public: // Methods
-	SensorFusion(t_constellation_device_id_t id, const t_constellation_tracker_led_model *led_model);
+	SensorFusion(ceres::Context *context,
+	             t_constellation_device_id_t id,
+	             const t_constellation_tracker_led_model *led_model);
 
 	~SensorFusion();
 

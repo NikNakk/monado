@@ -1552,6 +1552,7 @@ struct SensorFusionProblem
 		options.manifold_ownership = ceres::DO_NOT_TAKE_OWNERSHIP;
 		options.loss_function_ownership = ceres::DO_NOT_TAKE_OWNERSHIP;
 		options.enable_fast_removal = true;
+		options.context = fusion.context;
 
 		this->problem = ceres::Problem(options);
 
@@ -2535,13 +2536,13 @@ SensorFusion::runFusionLocked()
 	const int num_residuals = problem.NumResiduals();
 
 	ceres::Solver::Options options{};
-	options.max_num_iterations = 3;
+	options.max_num_iterations = 3; // iterations are expensive, our seeds are good
 	/*
 	 * The problem is block sparse: a keyframe only touches it's observations, IMU preintegration,
 	 * keyframe intrinsics/extrinsics, and the world gravity.
 	 */
 	options.linear_solver_type = ceres::LinearSolverType::SPARSE_NORMAL_CHOLESKY;
-	// Eigen's sparse backend is the one this Ceres is built with, see CERES_USE_EIGEN_SPARSE.
+	// We require Eigen's sparse backend, see root CMakeLists.txt which enforces we have this backend.
 	options.sparse_linear_algebra_library_type = ceres::SparseLinearAlgebraLibraryType::EIGEN_SPARSE;
 	options.minimizer_progress_to_stdout = false;
 	options.logging_type = ceres::LoggingType::PER_MINIMIZER_ITERATION;
@@ -2693,8 +2694,11 @@ SensorFusion::runFusionLocked()
  *
  */
 
-SensorFusion::SensorFusion(t_constellation_device_id_t id, const t_constellation_tracker_led_model *led_model)
-    : log_level(debug_get_log_option_sensor_fusion_log()), //
+SensorFusion::SensorFusion(ceres::Context *context,
+                           t_constellation_device_id_t id,
+                           const t_constellation_tracker_led_model *led_model)
+    : context(context),                                    //
+      log_level(debug_get_log_option_sensor_fusion_log()), //
       device(id, led_model),                               //
       sample_queue()                                       //
 {

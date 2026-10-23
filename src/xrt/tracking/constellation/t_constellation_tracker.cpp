@@ -1237,6 +1237,8 @@ Device::pushImuSample(const xrt_imu_sample &sample)
 ConstellationTracker::ConstellationTracker(t_constellation_tracker_params *params)
     : log_level(debug_get_log_option_constellation_tracker_log()), params(*params), rig_calibration_lock()
 {
+	this->ceres_context.reset(ceres::Context::Create());
+
 	// If the deterministic flag is set, we enable single-threaded processing, and mark it as deterministic.
 	if ((params->flags & T_CONSTELLATION_TRACKER_FLAGS_DETERMINISTIC) != 0) {
 		this->single_threaded = true;
@@ -1473,8 +1475,10 @@ ConstellationTracker::addDevice(t_constellation_tracker_device_params *params, t
 		this->data_recorder->recordDeviceInfo(*new_device);
 	}
 
-	new_device->sensor_fusion =
-	    std::make_unique<sensor_fusion::SensorFusion>(id, new_device->search_model->led_model);
+	new_device->sensor_fusion = std::make_unique<sensor_fusion::SensorFusion>( //
+	    this->ceres_context.get(),                                             //
+	    id,                                                                    //
+	    new_device->search_model->led_model);                                  //
 
 	for (auto &mosaic : this->mosaics) {
 		for (auto &camera : mosaic->cameras) {
