@@ -345,7 +345,11 @@ computeImuResidual(const PreintegratedImuSamples &imu_preintegration,
  *
  */
 
-//! IMU preintegration factor, between each camera keyframe.
+/*!
+ * IMU preintegration factor, between each camera keyframe.
+ *
+ * The keyframes are LED model states, which this sees the IMU at through the model -> IMU extrinsics.
+ */
 struct ImuCostFunctor
 {
 	PreintegratedImuSamples preintegration;
@@ -354,6 +358,7 @@ struct ImuCostFunctor
 	bool
 	operator()(const T *const world_gravity_parameters,
 	           const T *const imu_bias_parameters,
+	           const T *const imu_extrinsics_parameters,
 	           const T *const start_keyframe_parameters,
 	           const T *const end_keyframe_parameters,
 	           T *residuals) const
@@ -363,18 +368,21 @@ struct ImuCostFunctor
 
 		const ImuBias<T> imu_bias{Map<const Vector<T, ImuBias<T>::kNumParameters>>(imu_bias_parameters)};
 
-		const PoseWithVelocity<T> start_T_world_device{
+		const ImuExtrinsics<T> imu_extrinsics{
+		    Map<const Vector<T, ImuExtrinsics<T>::kNumParameters>>(imu_extrinsics_parameters)};
+
+		const PoseWithVelocity<T> start_T_world_model{
 		    Map<const Vector<T, PoseWithVelocity<T>::kNumParameters>>(start_keyframe_parameters)};
-		const PoseWithVelocity<T> end_T_world_device{
+		const PoseWithVelocity<T> end_T_world_model{
 		    Map<const Vector<T, PoseWithVelocity<T>::kNumParameters>>(end_keyframe_parameters)};
 
 		Vector<T, PreintegratedImuSamples::kNumResiduals> computed_residual;
-		computeImuResidual<T>(this->preintegration, //
-		                      start_T_world_device, //
-		                      end_T_world_device,   //
-		                      imu_bias,             //
-		                      world_gravity,        //
-		                      computed_residual);   //
+		computeImuResidual<T>(this->preintegration,                           //
+		                      imu_extrinsics.toWorldImu(start_T_world_model), //
+		                      imu_extrinsics.toWorldImu(end_T_world_model),   //
+		                      imu_bias,                                       //
+		                      world_gravity,                                  //
+		                      computed_residual);                             //
 
 		Map<Vector<T, PreintegratedImuSamples::kNumResiduals>> out_residual(residuals);
 		out_residual = this->preintegration.whitening.cast<T>() * computed_residual;
@@ -387,6 +395,7 @@ typedef ceres::AutoDiffCostFunction<ImuCostFunctor,                           //
                                     PreintegratedImuSamples::kNumResiduals,   //
                                     WorldGravity<double>::kNumParameters,     // world_gravity
                                     ImuBias<double>::kNumParameters,          // imu_bias
+                                    ImuExtrinsics<double>::kNumParameters,    // imu_extrinsics
                                     PoseWithVelocity<double>::kNumParameters, // start_keyframe
                                     PoseWithVelocity<double>::kNumParameters> // end_keyframe
     ImuCostFunction;

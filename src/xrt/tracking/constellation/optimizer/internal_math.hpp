@@ -360,6 +360,13 @@ template <typename T> struct PoseWithVelocity : Pose<T>
 	}
 };
 
+/*!
+ * The LED model -> IMU rotation.
+ *
+ * Device keyframe states are LED model poses, which the camera factors constrain directly, and only the IMU factors
+ * see the IMU through this rotation on top of them. Solving for it then leaves the poses where the cameras put them,
+ * rather than having to walk them the opposite way to keep the LED model still.
+ */
 template <typename T> struct ImuExtrinsics
 {
 	static_assert(!std::is_const_v<T>,
@@ -370,18 +377,31 @@ template <typename T> struct ImuExtrinsics
 	//! Degrees of freedom
 	static constexpr int kNumTangentParameters = 3;
 
-	Quaternion<T> Q_imu_model;
+	Quaternion<T> Q_model_imu;
 
-	template <typename Derived> ImuExtrinsics(Quaternion<Derived> quat) : Q_imu_model(quat.template cast<T>()) {}
+	template <typename Derived> ImuExtrinsics(Quaternion<Derived> quat) : Q_model_imu(quat.template cast<T>()) {}
 
 	ImuExtrinsics(Eigen::Ref<const Vector<T, kNumParameters>> parameters)
-	    : Q_imu_model(Quaternion<T>(parameters.template segment<4>(0)))
+	    : Q_model_imu(Quaternion<T>(parameters.template segment<4>(0)))
 	{}
 
 	void
 	pack(Eigen::Ref<Vector<T, kNumParameters>> parameters) const
 	{
-		parameters.template segment<4>(0) = this->Q_imu_model.coeffs();
+		parameters.template segment<4>(0) = this->Q_model_imu.coeffs();
+	}
+
+	/*!
+	 * The IMU's state given the LED model's. The two share an origin, so only the orientation differs, and the
+	 * velocity, being the origin's, carries straight over.
+	 */
+	PoseWithVelocity<T>
+	toWorldImu(const PoseWithVelocity<T> &T_world_model) const
+	{
+		PoseWithVelocity<T> T_world_imu = T_world_model;
+		T_world_imu.rotation = T_world_model.rotation * this->Q_model_imu;
+
+		return T_world_imu;
 	}
 };
 

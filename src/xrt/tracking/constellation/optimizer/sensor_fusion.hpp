@@ -26,6 +26,7 @@
 #include <cstddef>
 #include <cstring>
 #include <memory>
+#include <optional>
 #include <string>
 #include <vector>
 #include <type_traits>
@@ -215,14 +216,26 @@ struct DevicePreintegration
 struct DeviceImuCalibration
 {
 	//! Accelerometer bias, in meters per second squared.
-	xrt_vec3_f64 accel_bias;
+	xrt_vec3_f64 accel_bias XRT_VEC3_ZERO;
 	//! Gyroscope bias, in radians per second.
-	xrt_vec3_f64 gyro_bias;
+	xrt_vec3_f64 gyro_bias XRT_VEC3_ZERO;
 	//! Per-axis accelerometer scale, unitless.
-	xrt_vec3_f64 accel_scale;
+	xrt_vec3_f64 accel_scale XRT_VEC3_ONE;
 
-	//! The IMU -> LED model rotation.
-	xrt_quat Qcv_imu_model;
+	//! The LED model -> IMU rotation.
+	xrt_quat Qcv_model_imu XRT_QUAT_IDENTITY;
+};
+
+struct DeviceSolveState
+{
+	//! The time of the solve
+	timepoint_ns time_ns;
+	//! The world -> LED model pose at the solve
+	xrt_pose Tcv_world_device;
+	//! The world velocity at the solve
+	xrt_vec3_f64 world_velocity;
+	//! The imu calibration at the solve
+	DeviceImuCalibration imu_calibration;
 };
 
 struct Device
@@ -232,41 +245,24 @@ public: // Fields
 
 	const t_constellation_tracker_led_model *const led_model;
 
-	bool has_latest_solve{false};
-	timepoint_ns latest_solve_time_ns;
-	xrt_pose Tcv_world_device_latest;
+	//! The latest fused solve.
+	std::optional<DeviceSolveState> latest_solve;
+	//! The solved state for the latest IMU dead reckoned position.
+	std::optional<DeviceSolveState> latest_imu_reckon;
 
-	//! World velocity, in meters per second.
-	xrt_vec3_f64 latest_world_velocity;
-
-	//! Accelerometer bias, in meters per second squared.
-	xrt_vec3_f64 latest_accel_bias;
-	//! Gyroscope bias, in radians per second.
-	xrt_vec3_f64 latest_gyro_bias;
-	//! Per-axis accelerometer scale, unitless.
-	xrt_vec3_f64 latest_accel_scale;
-	//! The IMU -> constellation offset
-	xrt_quat latest_Qcv_imu_model;
-
-	//! The relation history of the device, for historical poses older than the latest pose.
+	//! The relation history of the device, used as a fast way to retrieve the latest dead-reckoned poses.
 	m_relation_history *relation_history;
 
 	//! Pre-calibrated accelerometer bias, in meters per second squared.
-	xrt_vec3_f64 calibrated_accel_bias;
-	//! Pre-calibrated gyroscope bias, in radians per second.
-	xrt_vec3_f64 calibrated_gyro_bias;
-	//! Pre-calibrated per-axis accelerometer scale, unitless.
-	xrt_vec3_f64 calibrated_accel_scale;
-	//! The calibrated IMU -> constellation offset
-	xrt_quat calibrated_Qcv_imu_model;
+	DeviceImuCalibration stored_imu_calibration;
 
 	/*!
 	 * The preintegrated IMU samples between keyframes, as a ring running parallel to @ref
 	 * SensorFusion::keyframe_storage: slot `i` holds the interval that *ends* at the keyframe in slot `i`.
 	 *
-	 * Sharing the keyframe ring's indexing is what makes a window shift free for these too. The slot belonging to
-	 * the oldest keyframe in the window has no predecessor to integrate from and is simply never read. Index this
-	 * through @ref SensorFusion::preintegrationLocked rather than directly.
+	 * Sharing the keyframe ring's indexing is what makes a window shift free for these too. The slot belonging
+	 * to the oldest keyframe in the window has no predecessor to integrate from and is simply never read. Index
+	 * this through @ref SensorFusion::preintegrationLocked rather than directly.
 	 */
 	std::array<DevicePreintegration, kSlidingWindowSize> preintegrations;
 
@@ -296,8 +292,14 @@ public: // Methods
 	Device &
 	operator=(const Device &) = delete;
 
+	const DeviceImuCalibration &
+	getLatestImuCalibration() const;
+
 	/*!
-	 * Resets the device's state to a fresh state, assuming that the biases were still good.
+	 * Resets the device's state to a fresh state.
+	 *
+	 * Can be used if all prior converged data can no longer
+	 * be considered trusted (eg. large jump in clock sync).
 	 */
 	void
 	resetLocked();
@@ -323,7 +325,7 @@ public: // Fields
 //! A device's solved state at one keyframe.
 struct SolvedDeviceKeyframe
 {
-	//! Solved world -> IMU pose.
+	//! Solved world -> LED model pose.
 	xrt_pose Tcv_world_device;
 	//! Solved world-frame velocity, in meters per second.
 	xrt_vec3_f64 velocity;
@@ -376,11 +378,11 @@ struct SnapshotDevice
 	//! A bit per keyframe age the solve held a state for.
 	uint32_t keyframe_mask;
 
-	//! Solved IMU -> LED model rotation.
-	xrt_quat Qcv_imu_model;
+	//! Solved LED model -> IMU rotation.
+	xrt_quat Qcv_model_imu;
 
-	//! The IMU -> LED model rotation from the rig calibration, for measuring how far the solve has walked from it.
-	xrt_quat calibrated_Qcv_imu_model;
+	//! The LED model -> IMU rotation from the rig calibration, for measuring how far the solve has walked from it.
+	xrt_quat calibrated_Qcv_model_imu;
 };
 
 /*!
@@ -468,18 +470,6 @@ public: // Fields
 	//! Whether the current state is dirty and we need to run an optimization
 	bool dirty{false};
 
-	/*!
-	 * Set when a tick had to park a preintegration purely because the IMU had not reached the end of its interval
-	 * yet.
-	 *
-	 * Read by `pushImuSample()` without the lock, which is why it is atomic: the sample that closes the interval
-	 * is the thing that unblocks the tick, so it is also the thing that has to wake it up.
-	 *
-	 * @note This only hurries the interval along so it is ready for the next solve. It deliberately does *not*
-	 *       hold the solve back, see @ref SensorFusion::tickLocked.
-	 */
-	std::atomic<bool> waiting_on_imu{false};
-
 	//! How many camera samples have been dropped for turning up after their keyframe was already sealed.
 	uint64_t num_late_samples_dropped{0};
 
@@ -533,11 +523,10 @@ private: // Methods
 	/*!
 	 * Integrates every dirty IMU interval of the device.
 	 *
-	 * @param[in,out] work_remaining   Set when an interval could not be integrated yet and has to be retried.
-	 * @param[in,out] wants_imu_wakeup Set when only a newer IMU sample can unblock an interval.
+	 * @param[in,out] work_remaining Set when an interval could not be integrated yet and has to be retried.
 	 */
 	void
-	preintegrateDeviceLocked(bool &work_remaining, bool &wants_imu_wakeup);
+	preintegrateDeviceLocked(bool &work_remaining);
 
 	//! Triggers the sensor fusion to reset it's state
 	void

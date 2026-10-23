@@ -67,11 +67,11 @@ getDeviceWindowEntityName()
 	return std::format("{}/window", getWorldEntityName());
 }
 
-//! Child of the device entity, which is the solved IMU pose, so this carries only the IMU -> LED model rotation.
+//! Child of the device entity, which is the solved LED model pose, so this carries only the LED model -> IMU rotation.
 std::string
-getDeviceModelEntityName()
+getDeviceImuEntityName()
 {
-	return std::format("{}/model", getDeviceEntityName());
+	return std::format("{}/imu", getDeviceEntityName());
 }
 
 std::string
@@ -93,12 +93,12 @@ getCameraMetricsEntityName(size_t mosaic_idx, size_t camera_idx, t_constellation
  *
  */
 
-//! The IMU -> LED model rotation as a rotation vector about the IMU's own axes, in degrees.
+//! The LED model -> IMU rotation as a rotation vector about the LED model's own axes, in degrees.
 xrt_vec3
-imuModelRotationVectorDegrees(const xrt_quat &Qcv_imu_model)
+modelImuRotationVectorDegrees(const xrt_quat &Qcv_model_imu)
 {
 	// The log of a negative-w quaternion is the long way round, so flip it onto the short one first.
-	xrt_quat q = Qcv_imu_model;
+	xrt_quat q = Qcv_model_imu;
 	if (q.w < 0.0f) {
 		q = xrt_quat{-q.x, -q.y, -q.z, -q.w};
 	}
@@ -167,16 +167,16 @@ RerunContext::logSolveSummary(const SolveSnapshot &snapshot)
 	    std::popcount(snapshot.device.keyframe_mask)); //
 
 	const SnapshotDevice &device = snapshot.device;
-	const xrt_vec3 imu_model_rotation_deg = imuModelRotationVectorDegrees(device.Qcv_imu_model);
+	const xrt_vec3 model_imu_rotation_deg = modelImuRotationVectorDegrees(device.Qcv_model_imu);
 
 	text += std::format(                                                                                 //
-	    "* IMU -> model offset: {:.3f} deg, {:.3f} deg from calibration\n"                               //
-	    "* IMU -> model rotation vector: {:.3f} {:.3f} {:.3f} deg\n"                                     //
-	    "* Q_imu_model: {:.5f} {:.5f} {:.5f} {:.5f}\n",                                                  //
-	    orientationErrorDegrees(XRT_QUAT_IDENTITY, device.Qcv_imu_model),                                //
-	    orientationErrorDegrees(device.calibrated_Qcv_imu_model, device.Qcv_imu_model),                  //
-	    imu_model_rotation_deg.x, imu_model_rotation_deg.y, imu_model_rotation_deg.z,                    //
-	    device.Qcv_imu_model.x, device.Qcv_imu_model.y, device.Qcv_imu_model.z, device.Qcv_imu_model.w); //
+	    "* Model -> IMU offset: {:.3f} deg, {:.3f} deg from calibration\n"                               //
+	    "* Model -> IMU rotation vector: {:.3f} {:.3f} {:.3f} deg\n"                                     //
+	    "* Q_model_imu: {:.5f} {:.5f} {:.5f} {:.5f}\n",                                                  //
+	    orientationErrorDegrees(XRT_QUAT_IDENTITY, device.Qcv_model_imu),                                //
+	    orientationErrorDegrees(device.calibrated_Qcv_model_imu, device.Qcv_model_imu),                  //
+	    model_imu_rotation_deg.x, model_imu_rotation_deg.y, model_imu_rotation_deg.z,                    //
+	    device.Qcv_model_imu.x, device.Qcv_model_imu.y, device.Qcv_model_imu.z, device.Qcv_model_imu.w); //
 
 	this->stream->log(kSummaryEntityName, rerun::TextDocument(text).with_media_type(rerun::MediaType::markdown()));
 }
@@ -239,17 +239,17 @@ RerunContext::logDevice(const SolveSnapshot &snapshot)
 	this->stream->log(device_entity + "/axes", rerun::TransformAxes3D(kAxisLength));
 
 	/*
-	 * The device entity is the solved IMU pose, and the camera factors see the LED model through this rotation on
-	 * top of it, so the angle between these axes and the device's is the offset the solve is holding. Drawn longer
-	 * so the two stay tellable apart when the offset is small.
+	 * The device entity is the solved LED model pose, and the IMU factors see the IMU through this rotation on top
+	 * of it, so the angle between these axes and the device's is the offset the solve is holding. Drawn longer so
+	 * the two stay tellable apart when the offset is small.
 	 */
-	xrt_pose T_imu_model = XRT_POSE_IDENTITY;
-	T_imu_model.orientation = device.Qcv_imu_model;
+	xrt_pose T_model_imu = XRT_POSE_IDENTITY;
+	T_model_imu.orientation = device.Qcv_model_imu;
 
-	const std::string model_entity = getDeviceModelEntityName();
+	const std::string imu_entity = getDeviceImuEntityName();
 
-	this->stream->log(model_entity, toRerunTransform(T_imu_model));
-	this->stream->log(model_entity + "/axes", rerun::TransformAxes3D(kAxisLength * 1.5f));
+	this->stream->log(imu_entity, toRerunTransform(T_model_imu));
+	this->stream->log(imu_entity + "/axes", rerun::TransformAxes3D(kAxisLength * 1.5f));
 
 	/*
 	 * The velocity is in world space but the device entity carries the device's own transform, so the arrow is
@@ -363,8 +363,12 @@ RerunContext::logDeviceMetrics(const SolveSnapshot &snapshot)
 	    static_cast<float>(newest.accel_bias.z),
 	};
 
+	// The bias lives in the IMU's frame, and the keyframe holds the LED model's.
+	xrt_quat Qcv_world_imu;
+	math_quat_rotate(&newest.Tcv_world_device.orientation, &device.Qcv_model_imu, &Qcv_world_imu);
+
 	xrt_vec3 world_bias;
-	math_quat_rotate_vec3(&newest.Tcv_world_device.orientation, &body_bias, &world_bias);
+	math_quat_rotate_vec3(&Qcv_world_imu, &body_bias, &world_bias);
 
 	this->stream->log(metrics + "/accel_bias_world_x", rerun::Scalars(world_bias.x));
 	this->stream->log(metrics + "/accel_bias_world_y", rerun::Scalars(world_bias.y));
@@ -374,24 +378,24 @@ RerunContext::logDeviceMetrics(const SolveSnapshot &snapshot)
 	this->stream->log(metrics + "/accel_scale_z", rerun::Scalars(newest.accel_scale.z));
 
 	// This *probably* shouldn't be moving much unless we're missing some large calibration step.
-	this->stream->log(metrics + "/imu_model_offset_deg",
-	                  rerun::Scalars(orientationErrorDegrees(XRT_QUAT_IDENTITY, device.Qcv_imu_model)));
+	this->stream->log(metrics + "/model_imu_offset_deg",
+	                  rerun::Scalars(orientationErrorDegrees(XRT_QUAT_IDENTITY, device.Qcv_model_imu)));
 
 	// How far the solve has walked from the rig calibration it was seeded with.
 	this->stream->log(
-	    metrics + "/imu_model_calibration_offset_deg",
-	    rerun::Scalars(orientationErrorDegrees(device.calibrated_Qcv_imu_model, device.Qcv_imu_model)));
+	    metrics + "/model_imu_calibration_offset_deg",
+	    rerun::Scalars(orientationErrorDegrees(device.calibrated_Qcv_model_imu, device.Qcv_model_imu)));
 
 	/*
-	 * Per-axis, about the IMU's own axes. The angle alone says there is an offset, this says which way it
+	 * Per-axis, about the LED model's own axes. The angle alone says there is an offset, this says which way it
 	 * points: an error in how the driver tilts the LED model into the IMU frame shows up almost entirely on one
 	 * axis.
 	 */
-	const xrt_vec3 imu_model_rotation_deg = imuModelRotationVectorDegrees(device.Qcv_imu_model);
+	const xrt_vec3 model_imu_rotation_deg = modelImuRotationVectorDegrees(device.Qcv_model_imu);
 
-	this->stream->log(metrics + "/imu_model_rotation_x_deg", rerun::Scalars(imu_model_rotation_deg.x));
-	this->stream->log(metrics + "/imu_model_rotation_y_deg", rerun::Scalars(imu_model_rotation_deg.y));
-	this->stream->log(metrics + "/imu_model_rotation_z_deg", rerun::Scalars(imu_model_rotation_deg.z));
+	this->stream->log(metrics + "/model_imu_rotation_x_deg", rerun::Scalars(model_imu_rotation_deg.x));
+	this->stream->log(metrics + "/model_imu_rotation_y_deg", rerun::Scalars(model_imu_rotation_deg.y));
+	this->stream->log(metrics + "/model_imu_rotation_z_deg", rerun::Scalars(model_imu_rotation_deg.z));
 }
 
 void
@@ -408,12 +412,10 @@ RerunContext::logObservations(const SolveSnapshot &snapshot)
 	}
 
 	/*
-	 * The camera factors project the LEDs through the solved IMU -> model rotation, so everything below is measured
-	 * against the model pose that produces, not the bare IMU pose the keyframe holds. The PnP seed is a model pose
-	 * as well, so this is also what makes the seed comparison like for like.
+	 * The keyframe holds the LED model pose the camera factors project through, and the PnP seed is a model pose as
+	 * well, so the seed comparison below is like for like.
 	 */
-	const xrt_pose Tcv_world_model =
-	    solvedWorldModelPose(keyframe.device.Tcv_world_device, snapshot.device.Qcv_imu_model);
+	const xrt_pose &Tcv_world_model = keyframe.device.Tcv_world_device;
 
 	for (uint32_t i = 0; i < keyframe.num_observations; i++) {
 		const SnapshotObservation &observation = keyframe.observations[i];

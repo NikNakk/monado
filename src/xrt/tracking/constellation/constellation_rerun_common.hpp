@@ -69,20 +69,6 @@ predictedCameraDevicePose(const xrt_pose &Tcv_world_cam, const xrt_pose &Tcv_wor
 	return Tcv_cam_device;
 }
 
-/*!
- * The solved LED model pose. The solvers hold the IMU's pose, and their camera factors see the LEDs through
- * `Qcv_imu_model` on top of it about a shared origin, so anything drawn or measured against the LED model has to go
- * through this rather than the bare IMU pose.
- */
-inline xrt_pose
-solvedWorldModelPose(const xrt_pose &Tcv_world_imu, const xrt_quat &Qcv_imu_model)
-{
-	xrt_pose Tcv_world_model = Tcv_world_imu;
-	math_quat_rotate(&Tcv_world_imu.orientation, &Qcv_imu_model, &Tcv_world_model.orientation);
-
-	return Tcv_world_model;
-}
-
 //! The angle between two orientations, in degrees.
 inline float
 orientationErrorDegrees(const xrt_quat &a, const xrt_quat &b)

@@ -103,7 +103,8 @@ public: // Fields
 	//! Per-axis accelerometer scale, unitless.
 	xrt_vec3_f64 accel_scale;
 
-	xrt_quat Qcv_imu_model;
+	//! The LED model -> IMU rotation.
+	xrt_quat Qcv_model_imu;
 };
 
 //! The pose the calibration ended up with for a single camera.
@@ -131,7 +132,7 @@ struct KeyframeCalibration
 public: // Fields
 	timepoint_ns timestamp_ns;
 
-	//! The pose of the device, in OpenCV space.
+	//! The world -> LED model pose of the device, in OpenCV space.
 	xrt_pose Tcv_world_device;
 	//! The linear velocity of the device in world space, in meters per second, in OpenCV space.
 	xrt_vec3 velocity_m_s;

@@ -340,32 +340,28 @@ struct StaticCameraObservationCostFunctor
 
 	template <typename T>
 	bool
-	operator()(const T *const keyframe_parameters,       //
-	           const T *const imu_extrinsics_parameters, //
-	           T *residuals) const                       //
+	operator()(const T *const keyframe_parameters, //
+	           T *residuals) const                 //
 	{
-		const Pose<T> predicted_T_world_device{
-		    Map<const Vector<T, Pose<T>::kNumParameters>>(keyframe_parameters)};
+		const Pose<T> predicted_T_world_model{
+		    Map<const Vector<T, Pose<T>::kNumParameters>>(keyframe_parameters),
+		};
 
-		const ImuExtrinsics<T> predicted_imu_extrinsics{
-		    Map<const Vector<T, ImuExtrinsics<T>::kNumParameters>>(imu_extrinsics_parameters)};
+		const auto predicted_T_cam_model = Tcv_cam_world.cast<T>() * predicted_T_world_model.toTransform();
 
-		const auto predicted_T_camera_imu = Tcv_cam_world.cast<T>() * predicted_T_world_device.toTransform();
-
-		const Quaternion<T> Q_cam_model =
-		    Quaternion<T>(predicted_T_camera_imu.rotation()) * predicted_imu_extrinsics.Q_imu_model;
+		const Quaternion<T> Q_cam_model(predicted_T_cam_model.rotation());
 
 		for (size_t i = 0; i < observation.num_points; i++) {
 			const auto blob_position_2d = map_vec2(this->observation.points2d[i]).cast<T>();
 			const auto T_model_led = map_vec3(this->observation.points3d[i]).cast<T>();
 
 			Map<Vector2<T>> residual(residuals + (i * kNumLedResiduals));
-			computeLedResidual<T>(params,                               //
-			                      predicted_T_camera_imu.translation(), //
-			                      Q_cam_model,                          //
-			                      blob_position_2d,                     //
-			                      T_model_led,                          //
-			                      residual);                            //
+			computeLedResidual<T>(params,                              //
+			                      predicted_T_cam_model.translation(), //
+			                      Q_cam_model,                         //
+			                      blob_position_2d,                    //
+			                      T_model_led,                         //
+			                      residual);                           //
 
 			residual /= T(kBlobPositionSigmaPixels);
 		}
@@ -376,8 +372,7 @@ struct StaticCameraObservationCostFunctor
 
 typedef ceres::AutoDiffCostFunction<StaticCameraObservationCostFunctor,       //
                                     ceres::DYNAMIC,                           //
-                                    PoseWithVelocity<double>::kNumParameters, //
-                                    ImuExtrinsics<double>::kNumParameters>    //
+                                    PoseWithVelocity<double>::kNumParameters> //
     StaticCameraObservationCostFunction;
 
 /*!
@@ -1034,6 +1029,178 @@ private:
 	double target_cost;
 };
 
+//! Does a single IMU sample integration and updates the passed state parameters
+static void
+integrateOnce(timepoint_ns &pose_ns,
+              const xrt_imu_sample &sample,
+              Vector3d &T_world_device,
+              Quaterniond &Q_world_imu,
+              Vector3d &world_velocity,
+              const Vector3d &gravity_vec,
+              const Vector3d &accel_bias,
+              const Vector3d &gyro_bias,
+              const Vector3d &accel_scale)
+{
+	double dt = time_ns_to_s(sample.timestamp_ns - pose_ns);
+	// @todo: Handle this properly
+	// assert(dt >= 0);
+	dt = MAX(0.0, dt);
+
+	Vector3d cur_accel = (map_vec3_f64(sample.accel_m_s2) - accel_bias).cwiseProduct(accel_scale);
+	auto cur_gyro = map_vec3_f64(sample.gyro_rad_secs) - gyro_bias;
+
+	auto world_accel = Q_world_imu * cur_accel;
+
+	// Cancel out the force of gravity that is being applied
+	world_accel += gravity_vec;
+
+	T_world_device += (world_velocity * dt) + (0.5 * world_accel * dt * dt);
+	world_velocity += world_accel * dt;
+
+	Q_world_imu *= quat_exp_so3(cur_gyro * dt);
+
+	pose_ns = sample.timestamp_ns;
+}
+
+static void
+integrateToTimestampHistory(const double world_gravity_mag,
+                            DeviceSolveState &inout_solve,
+                            const std::span<const xrt_imu_sample> imu_samples,
+                            m_relation_history *relation_history)
+{
+	assert(imu_samples.size() > 0);
+
+	const Vector3d gravity_vec = {0, world_gravity_mag, 0};
+
+	/*
+	 * The solve holds the LED model pose, but the samples are in the IMU's frame, so integrate the IMU's pose and
+	 * take the model back off it for everything that leaves here. The two share an origin, so position and
+	 * velocity need no conversion.
+	 */
+	const Quaterniond Q_model_imu = map_quat(inout_solve.imu_calibration.Qcv_model_imu).cast<double>().normalized();
+
+	timepoint_ns pose_ns = inout_solve.time_ns;
+	Vector3d T_world_device = map_vec3(inout_solve.Tcv_world_device.position).cast<double>();
+	Quaterniond Q_world_model = map_quat(inout_solve.Tcv_world_device.orientation).cast<double>();
+	Quaterniond Q_world_imu = Q_world_model * Q_model_imu;
+
+	const auto accel_bias = map_vec3_f64(inout_solve.imu_calibration.accel_bias);
+	const auto gyro_bias = map_vec3_f64(inout_solve.imu_calibration.gyro_bias);
+	const auto accel_scale = map_vec3_f64(inout_solve.imu_calibration.accel_scale);
+
+	Vector3d world_velocity = map_vec3_f64(inout_solve.world_velocity);
+	for (const auto &sample : imu_samples) {
+		integrateOnce(pose_ns,        //
+		              sample,         //
+		              T_world_device, //
+		              Q_world_imu,    //
+		              world_velocity, //
+		              gravity_vec,    //
+		              accel_bias,     //
+		              gyro_bias,      //
+		              accel_scale);   //
+
+		// Normalize the orientation
+		Q_world_imu.normalize();
+
+		Q_world_model = (Q_world_imu * Q_model_imu.conjugate()).normalized();
+
+		xrt_space_relation relation = {
+		    .relation_flags = static_cast<xrt_space_relation_flags>(
+		        XRT_SPACE_RELATION_ORIENTATION_VALID_BIT | XRT_SPACE_RELATION_POSITION_VALID_BIT |
+		        XRT_SPACE_RELATION_LINEAR_VELOCITY_VALID_BIT | XRT_SPACE_RELATION_ANGULAR_VELOCITY_VALID_BIT |
+		        XRT_SPACE_RELATION_ORIENTATION_TRACKED_BIT | XRT_SPACE_RELATION_POSITION_TRACKED_BIT),
+		    .pose = XRT_POSE_IDENTITY,
+		    .linear_velocity = XRT_VEC3_ZERO,
+		    .angular_velocity = XRT_VEC3_ZERO,
+		};
+		map_vec3(relation.pose.position) = T_world_device.cast<float>();
+		map_quat(relation.pose.orientation) = Q_world_model.cast<float>();
+		map_vec3(relation.linear_velocity) = world_velocity.cast<float>();
+		// World-frame angular velocity is the same for every frame on the device, so the IMU's will do.
+		map_vec3(relation.angular_velocity) =
+		    (Q_world_imu * (map_vec3_f64(sample.gyro_rad_secs) - gyro_bias)).cast<float>();
+
+		m_relation_history_push(relation_history, &relation, pose_ns);
+	}
+
+	map_vec3(inout_solve.Tcv_world_device.position) = T_world_device.cast<float>();
+	map_quat(inout_solve.Tcv_world_device.orientation) = Q_world_model.cast<float>();
+	map_vec3_f64(inout_solve.world_velocity) = world_velocity;
+	inout_solve.time_ns = pose_ns;
+}
+
+/*!
+ * Dead reckons @p inout_solve forward through every IMU sample that has arrived since it, pushing a pose for each into
+ * the device's relation history.
+ *
+ * The history only takes poses newer than the newest it already holds, so wherever it already covers the range, the
+ * poses integrated there are dropped, and only the state carried out the end of the range is kept.
+ *
+ * @return false, leaving @p inout_solve untouched, when the samples could not be collected.
+ */
+static bool
+reckonToLatestImu(SensorFusion *fusion, DeviceSolveState &inout_solve)
+{
+	auto &device = fusion->device;
+
+	const timepoint_ns latest_imu_ts_ns = device.latest_imu_ts_ns.load();
+
+	// Nothing has arrived since, so there is nothing to integrate.
+	if (latest_imu_ts_ns <= inout_solve.time_ns) {
+		return true;
+	}
+
+	std::array<xrt_imu_sample, kImuBufferSize> samples_buf;
+	uint32_t num_samples = 0;
+	xrt_imu_sample out_first_after;
+	const auto result = collectImuSamplesForRange( //
+	    device,                                    //
+	    inout_solve.time_ns,                       //
+	    latest_imu_ts_ns,                          //
+	    samples_buf,                               //
+	    num_samples,                               //
+	    out_first_after);                          //
+
+	// The range ends at the newest sample, so there is usually no sample after it to find.
+	if (result != ImuCollectResult::Ok && result != ImuCollectResult::NoSampleAfterEnd) {
+		return false;
+	}
+
+	if (num_samples == 0) {
+		return true;
+	}
+
+	const timepoint_ns start_ns = inout_solve.time_ns;
+	integrateToTimestampHistory(fusion->snapshot.world_gravity_mag,                               //
+	                            inout_solve,                                                      //
+	                            std::span<const xrt_imu_sample>(samples_buf.data(), num_samples), //
+	                            device.relation_history);                                         //
+
+	SF_TRACE(fusion, "Filled relation history for device %d from %" PRIi64 " to %" PRIi64, device.id, start_ns,
+	         samples_buf[num_samples - 1].timestamp_ns);
+
+	return true;
+}
+
+static void
+updateDeviceRelationHistory(SensorFusion *fusion)
+{
+	auto &device = fusion->device;
+
+	auto &solve = device.latest_imu_reckon;
+
+	// We have no fusion solve yet to start with
+	if (!solve.has_value()) {
+		return;
+	}
+
+	// Update the imu calibration
+	solve->imu_calibration = device.latest_solve->imu_calibration;
+
+	(void)reckonToLatestImu(fusion, *solve);
+}
+
 extern "C" void *
 thread_runner(void *ptr)
 {
@@ -1046,6 +1213,9 @@ thread_runner(void *ptr)
 	os_thread_helper_lock(&fusion->thread);
 	while (os_thread_helper_is_running_locked(&fusion->thread)) {
 		timepoint_ns now_ns = os_monotonic_get_ns();
+
+		// Update the latest device relation history
+		updateDeviceRelationHistory(fusion);
 
 		auto &queue = fusion->sample_queue;
 		auto is_ready = [](timepoint_ns now_ns, timepoint_ns latest_imu_ts_ns) {
@@ -1061,8 +1231,9 @@ thread_runner(void *ptr)
 			};
 		};
 
-		if (std::none_of(queue.begin(), queue.end(),
-		                 is_ready(now_ns, fusion->device.latest_imu_ts_ns.load()))) {
+		timepoint_ns latest_imu_ts_ns = fusion->device.latest_imu_ts_ns.load();
+
+		if (std::none_of(queue.begin(), queue.end(), is_ready(now_ns, latest_imu_ts_ns))) {
 			os_thread_helper_wait_locked(&fusion->thread);
 
 			// Shutdown wakes us the same way work does, so just exit out if we're no longer supposed to run
@@ -1071,8 +1242,7 @@ thread_runner(void *ptr)
 			}
 		}
 
-		auto ready_end = std::stable_partition(queue.begin(), queue.end(),
-		                                       is_ready(now_ns, fusion->device.latest_imu_ts_ns.load()));
+		auto ready_end = std::stable_partition(queue.begin(), queue.end(), is_ready(now_ns, latest_imu_ts_ns));
 
 		pending.clear();
 		pending.insert(pending.end(), queue.begin(), ready_end);
@@ -1082,10 +1252,7 @@ thread_runner(void *ptr)
 		std::stable_sort(pending.begin(), pending.end(),
 		                 [](const auto &a, const auto &b) { return a.timestamp_ns < b.timestamp_ns; });
 
-		/*
-		 * Camera samples are the only thing a solve is worth running for. A pass with none of them was woken
-		 * by pushImuSample() to unpark a preintegration, and only needs to get as far as integrating it.
-		 */
+		// Camera samples are the only thing a solve is worth running for.
 		const bool have_new_input = !pending.empty();
 
 		for (const auto &sample : pending) {
@@ -1099,163 +1266,10 @@ thread_runner(void *ptr)
 		if (fusion->tickLocked(have_new_input)) {
 			fusion->runFusionLocked();
 		}
-
-		// Make sure this is set if we still have more in the queue
-		if (!queue.empty()) {
-			fusion->waiting_on_imu.store(true, std::memory_order_relaxed);
-		}
 	}
 	os_thread_helper_unlock(&fusion->thread);
 
 	return nullptr;
-}
-
-//! Does a single IMU sample integration and updates the passed state parameters
-static void
-integrateOnce(timepoint_ns &pose_ns,
-              const xrt_imu_sample &sample,
-              Vector3d &T_world_device,
-              Quaterniond &Q_world_device,
-              Vector3d &world_velocity,
-              const Vector3d &gravity_vec,
-              const Vector3d &accel_bias,
-              const Vector3d &gyro_bias,
-              const Vector3d &accel_scale)
-{
-	double dt = time_ns_to_s(sample.timestamp_ns - pose_ns);
-	// @todo: Handle this properly
-	// assert(dt >= 0);
-	dt = MAX(0.0, dt);
-
-	Vector3d cur_accel = (map_vec3_f64(sample.accel_m_s2) - accel_bias).cwiseProduct(accel_scale);
-	auto cur_gyro = map_vec3_f64(sample.gyro_rad_secs) - gyro_bias;
-
-	auto world_accel = Q_world_device * cur_accel;
-
-	// Cancel out the force of gravity that is being applied
-	world_accel += gravity_vec;
-
-	T_world_device += (world_velocity * dt) + (0.5 * world_accel * dt * dt);
-	world_velocity += world_accel * dt;
-
-	Q_world_device *= quat_exp_so3(cur_gyro * dt);
-
-	pose_ns = sample.timestamp_ns;
-}
-
-static void
-integrateToTimestampHistory(const double world_gravity_mag,
-                            const timepoint_ns solve_time_ns,
-                            const xrt_pose &Tcv_world_device_solve,
-                            const xrt_vec3_f64 &solve_world_velocity,
-                            const xrt_vec3_f64 &solve_accel_bias,
-                            const xrt_vec3_f64 &solve_gyro_bias,
-                            const xrt_vec3_f64 &solve_accel_scale,
-                            const std::span<const xrt_imu_sample> imu_samples,
-                            m_relation_history *relation_history)
-{
-	assert(imu_samples.size() > 0);
-
-	const Vector3d gravity_vec = {0, world_gravity_mag, 0};
-
-	timepoint_ns pose_ns = solve_time_ns;
-	Vector3d T_world_device = map_vec3(Tcv_world_device_solve.position).cast<double>();
-	Quaterniond Q_world_device = map_quat(Tcv_world_device_solve.orientation).cast<double>();
-
-	const auto accel_bias = map_vec3_f64(solve_accel_bias);
-	const auto gyro_bias = map_vec3_f64(solve_gyro_bias);
-	const auto accel_scale = map_vec3_f64(solve_accel_scale);
-
-	Vector3d world_velocity = map_vec3_f64(solve_world_velocity);
-	for (const auto &sample : imu_samples) {
-		integrateOnce(pose_ns,        //
-		              sample,         //
-		              T_world_device, //
-		              Q_world_device, //
-		              world_velocity, //
-		              gravity_vec,    //
-		              accel_bias,     //
-		              gyro_bias,      //
-		              accel_scale);   //
-
-		// Normalize the orientation
-		Q_world_device.normalize();
-
-		xrt_space_relation relation = {
-		    .relation_flags = static_cast<xrt_space_relation_flags>(
-		        XRT_SPACE_RELATION_ORIENTATION_VALID_BIT | XRT_SPACE_RELATION_POSITION_VALID_BIT |
-		        XRT_SPACE_RELATION_LINEAR_VELOCITY_VALID_BIT | XRT_SPACE_RELATION_ANGULAR_VELOCITY_VALID_BIT |
-		        XRT_SPACE_RELATION_ORIENTATION_TRACKED_BIT | XRT_SPACE_RELATION_POSITION_TRACKED_BIT),
-		    .pose = XRT_POSE_IDENTITY,
-		    .linear_velocity = XRT_VEC3_ZERO,
-		    .angular_velocity = XRT_VEC3_ZERO,
-		};
-		map_vec3(relation.pose.position) = T_world_device.cast<float>();
-		map_quat(relation.pose.orientation) = Q_world_device.cast<float>();
-		map_vec3(relation.linear_velocity) = world_velocity.cast<float>();
-		map_vec3(relation.angular_velocity) =
-		    (Q_world_device * (map_vec3_f64(sample.gyro_rad_secs) - gyro_bias)).cast<float>();
-
-		m_relation_history_push(relation_history, &relation, pose_ns);
-	}
-}
-
-static void
-integrateToTimestamp(const double world_gravity_mag,
-                     const timepoint_ns solve_time_ns,
-                     const xrt_pose &Tcv_world_device_solve,
-                     const xrt_vec3_f64 &solve_world_velocity,
-                     const xrt_vec3_f64 &solve_accel_bias,
-                     const xrt_vec3_f64 &solve_gyro_bias,
-                     const xrt_vec3_f64 &solve_accel_scale,
-                     const std::span<const xrt_imu_sample> imu_samples,
-                     const std::optional<xrt_imu_sample> &first_imu_sample_after,
-                     xrt_space_relation &relation)
-{
-	assert(imu_samples.size() > 0);
-
-	Vector3d gravity_vec = {0, world_gravity_mag, 0};
-
-	timepoint_ns pose_ns = solve_time_ns;
-	Vector3d T_world_device = map_vec3(Tcv_world_device_solve.position).cast<double>();
-	Quaterniond Q_world_device = map_quat(Tcv_world_device_solve.orientation).cast<double>();
-
-	const auto accel_bias = map_vec3_f64(solve_accel_bias);
-	const auto gyro_bias = map_vec3_f64(solve_gyro_bias);
-	const auto accel_scale = map_vec3_f64(solve_accel_scale);
-
-	xrt_imu_sample end_sample = first_imu_sample_after.value_or(imu_samples.back());
-
-	Vector3d world_velocity = map_vec3_f64(solve_world_velocity);
-	for (const auto &sample : imu_samples) {
-		integrateOnce(pose_ns,        //
-		              sample,         //
-		              T_world_device, //
-		              Q_world_device, //
-		              world_velocity, //
-		              gravity_vec,    //
-		              accel_bias,     //
-		              gyro_bias,      //
-		              accel_scale);   //
-	}
-
-	// Normalize the orientation
-	Q_world_device.normalize();
-
-	relation = {
-	    .relation_flags = static_cast<xrt_space_relation_flags>(
-	        XRT_SPACE_RELATION_ORIENTATION_VALID_BIT | XRT_SPACE_RELATION_POSITION_VALID_BIT |
-	        XRT_SPACE_RELATION_LINEAR_VELOCITY_VALID_BIT | XRT_SPACE_RELATION_ANGULAR_VELOCITY_VALID_BIT |
-	        XRT_SPACE_RELATION_ORIENTATION_TRACKED_BIT | XRT_SPACE_RELATION_POSITION_TRACKED_BIT),
-	    .pose = XRT_POSE_IDENTITY,
-	    .linear_velocity = XRT_VEC3_ZERO,
-	    .angular_velocity = XRT_VEC3_ZERO,
-	};
-	map_vec3(relation.pose.position) = T_world_device.cast<float>();
-	map_quat(relation.pose.orientation) = Q_world_device.cast<float>();
-	map_vec3(relation.linear_velocity) = world_velocity.cast<float>();
-	map_vec3(relation.angular_velocity) =
-	    (Q_world_device * (map_vec3_f64(end_sample.gyro_rad_secs) - gyro_bias)).cast<float>();
 }
 
 }; // namespace
@@ -1297,6 +1311,15 @@ struct SensorFusionProblem
 	 * Zero before the first.
 	 */
 	uint64_t build_generation{0};
+
+	/*!
+	 * Counts the times the calibration seeds have been thrown away, see @ref resetDeviceCalibrationSeedsLocked.
+	 *
+	 * The calibration can be replaced from another thread while a solve runs with the lock dropped, unseeding the
+	 * blocks that solve is still writing into. A solve that sees this change across it knows its result belongs to
+	 * a calibration that no longer applies.
+	 */
+	uint64_t calibration_generation{0};
 
 	/*!
 	 * Set once an eviction has marginalized against the current problem, and cleared by the next build.
@@ -1613,11 +1636,13 @@ struct SensorFusionProblem
 		 */
 		this->dropPriorIfBlocksMissingLocked(fusion, keyframe_mask);
 
+		const auto &latest_imu_calib = device.getLatestImuCalibration();
+
 		if (keyframe_mask != 0) {
 			auto &imu_extrinsics_block = blocks.imu_extrinsics;
 
 			if (!imu_extrinsics_block.seeded) {
-				ImuExtrinsics<double>(map_quat(fusion.device.latest_Qcv_imu_model).cast<double>())
+				ImuExtrinsics<double>(map_quat(latest_imu_calib.Qcv_model_imu).cast<double>())
 				    .pack(imu_extrinsics_block.seedVec());
 			}
 
@@ -1642,9 +1667,9 @@ struct SensorFusionProblem
 				}
 
 				if (!imu_bias_block.seeded) {
-					ImuBias<double>(map_vec3_f64(device.latest_accel_bias),
-					                map_vec3_f64(device.latest_gyro_bias),
-					                map_vec3_f64(device.latest_accel_scale))
+					ImuBias<double>(map_vec3_f64(latest_imu_calib.accel_bias),
+					                map_vec3_f64(latest_imu_calib.gyro_bias),
+					                map_vec3_f64(latest_imu_calib.accel_scale))
 					    .pack(imu_bias_block.seedVec());
 				}
 
@@ -1680,22 +1705,14 @@ struct SensorFusionProblem
 				}
 
 				if (!keyframe_block.seeded) {
-					xrt_pose Tcv_world_device;
-					if (observedDevicePoseLocked(keyframe, Tcv_world_device)) {
+					xrt_pose Tcv_world_model;
+					if (observedDevicePoseLocked(keyframe, Tcv_world_model)) {
 						const Vector3d velocity =
-						    seedVelocityLocked(fusion, keyframe_age, Tcv_world_device);
+						    seedVelocityLocked(fusion, keyframe_age, Tcv_world_model);
 
-						xrt_pose Tcv_device_imu = {
-						    .orientation = fusion.device.latest_Qcv_imu_model,
-						    .position = XRT_VEC3_ZERO,
-						};
-						math_pose_invert(&Tcv_device_imu, &Tcv_device_imu);
-
-						xrt_pose Tcv_world_imu;
-						math_pose_transform(&Tcv_world_device, &Tcv_device_imu, &Tcv_world_imu);
-
-						// Seed the pose
-						PoseWithVelocity<double>(Tcv_world_imu, velocity)
+						// Seed the pose, the PnP seed is already the LED model pose the block
+						// holds.
+						PoseWithVelocity<double>(Tcv_world_model, velocity)
 						    .pack(keyframe_block.seedVec());
 					}
 				}
@@ -1817,7 +1834,6 @@ struct SensorFusionProblem
 				const auto keyframe_idx = fusion.keyframeIdxLocked(keyframe_age);
 
 				auto &keyframe_block = parameter_blocks.keyframes[keyframe_idx];
-				auto &device_imu_extrinsics_block = parameter_blocks.imu_extrinsics;
 
 				xrt_pose Tcv_cam_world;
 				math_pose_invert(&observation.Tcv_world_cam, &Tcv_cam_world);
@@ -1832,11 +1848,9 @@ struct SensorFusionProblem
 				                new StaticCameraObservationCostFunctor{
 				                    camera.params, observation, isometryFromPose(Tcv_cam_world)}, //
 				                num_residuals),                                                   //
-				            {{keyframe_block.anchorData(), &this->pose_with_velocity_manifold},
-				             {device_imu_extrinsics_block.anchorData(), &this->quaternion_manifold}}),
-				        &camera_loss,                         //
-				        keyframe_block.data(),                //
-				        device_imu_extrinsics_block.data())); //
+				            {{keyframe_block.anchorData(), &this->pose_with_velocity_manifold}}),
+				        &camera_loss,            //
+				        keyframe_block.data())); //
 			}
 		}
 
@@ -1880,14 +1894,16 @@ struct SensorFusionProblem
 				                new ImuCostFunctor({preintegration.imu_preintegration})), //
 				            {{blocks.world_gravity.anchorData(), nullptr},
 				             {start_imu_bias_block.anchorData(), nullptr},
+				             {blocks.imu_extrinsics.anchorData(), &this->quaternion_manifold},
 				             {start_keyframe_block.anchorData(), &this->pose_with_velocity_manifold},
 				             {end_keyframe_block.anchorData(), &this->pose_with_velocity_manifold}}),
 				        nullptr,
 				        blocks.world_gravity.data(), //
 				        // Preintegrate with the IMU bias of the *start* keyframe
-				        start_imu_bias_block.data(), //
-				        start_keyframe_block.data(), //
-				        end_keyframe_block.data())); //
+				        start_imu_bias_block.data(),  //
+				        blocks.imu_extrinsics.data(), //
+				        start_keyframe_block.data(),  //
+				        end_keyframe_block.data()));  //
 
 				// IMU bias random walk residual
 				blocks.keyframe_marginalization_residuals[start_age_idx].push_back(
@@ -1921,9 +1937,9 @@ struct SensorFusionProblem
 					    problem.AddResidualBlock(
 					        anchorJacobians(
 					            new ImuBiasAnchorCostFunction(new ImuBiasAnchorCostFunctor(
-					                {ImuBias<double>(map_vec3_f64(device.latest_accel_bias),
-					                                 map_vec3_f64(device.latest_gyro_bias),
-					                                 map_vec3_f64(device.latest_accel_scale))})),
+					                {ImuBias<double>(map_vec3_f64(latest_imu_calib.accel_bias),
+					                                 map_vec3_f64(latest_imu_calib.gyro_bias),
+					                                 map_vec3_f64(latest_imu_calib.accel_scale))})),
 					            {{oldest_bias.anchorData(), nullptr}}), //
 					        nullptr,                                    //
 					        oldest_bias.data()));                       //
@@ -1961,8 +1977,8 @@ struct SensorFusionProblem
 		out.id = device.id;
 		// Overwritten from the solved extrinsics block, and left identity for a device the solve
 		// skipped.
-		out.Qcv_imu_model = XRT_QUAT_IDENTITY;
-		out.calibrated_Qcv_imu_model = device.calibrated_Qcv_imu_model;
+		out.Qcv_model_imu = XRT_QUAT_IDENTITY;
+		out.calibrated_Qcv_model_imu = device.stored_imu_calibration.Qcv_model_imu;
 
 		snapshot.num_keyframes = fusion.num_keyframes;
 		for (uint32_t age = 0; age < fusion.num_keyframes; age++) {
@@ -2015,8 +2031,8 @@ struct SensorFusionProblem
 
 		const auto &extrinsics_block = blocks.imu_extrinsics;
 		if (extrinsics_block.seeded) {
-			map_quat(device.Qcv_imu_model) =
-			    ImuExtrinsics<double>(extrinsics_block.vec).Q_imu_model.coeffs().cast<float>();
+			map_quat(device.Qcv_model_imu) =
+			    ImuExtrinsics<double>(extrinsics_block.vec).Q_model_imu.coeffs().cast<float>();
 		}
 
 		for (uint32_t age = 0; age < snapshot.keyframes.size(); age++) {
@@ -2053,7 +2069,8 @@ struct SensorFusionProblem
 	 * Drops everything seeded from a device's calibration, so the next build re-seeds it.
 	 *
 	 * The keyframe poses are deliberately left alone: they are seeded from observations, which a change of IMU
-	 * intrinsics says nothing about, and throwing away a converged pose would cost the solve its warm start.
+	 * calibration (intrinsics+extrinsics) says nothing about, and throwing away a converged pose would cost the
+	 * solve its warm start.
 	 */
 	void
 	resetDeviceCalibrationSeedsLocked()
@@ -2069,6 +2086,8 @@ struct SensorFusionProblem
 		for (auto &bias : this->parameter_blocks.keyframe_imu_biases) {
 			bias.unseed();
 		}
+
+		this->calibration_generation += 1;
 	}
 
 	void
@@ -2306,21 +2325,15 @@ struct SensorFusionProblem
  */
 
 Device::Device(t_constellation_device_id_t id, const t_constellation_tracker_led_model *led_model)
-    : id(id),                                      //
-      led_model(led_model),                        //
-      calibrated_accel_bias({0.0, 0.0, 0.0}),      //
-      calibrated_gyro_bias({0.0, 0.0, 0.0}),       //
-      calibrated_accel_scale({1.0, 1.0, 1.0}),     //
-      calibrated_Qcv_imu_model(XRT_QUAT_IDENTITY), //
-      imu_write_count(0),                          //
-      imu_samples()                                //
+    : id(id),                          //
+      led_model(led_model),            //
+      latest_solve(std::nullopt),      //
+      latest_imu_reckon(std::nullopt), //
+      stored_imu_calibration(),        //
+      imu_write_count(0),              //
+      imu_samples()                    //
 {
 	m_relation_history_create(&this->relation_history);
-
-	this->latest_accel_bias = this->calibrated_accel_bias;
-	this->latest_gyro_bias = this->calibrated_gyro_bias;
-	this->latest_accel_scale = this->calibrated_accel_scale;
-	this->latest_Qcv_imu_model = this->calibrated_Qcv_imu_model;
 
 	this->resetLocked();
 }
@@ -2330,12 +2343,23 @@ Device::~Device()
 	m_relation_history_destroy(&this->relation_history);
 }
 
+const DeviceImuCalibration &
+Device::getLatestImuCalibration() const
+{
+	if (this->latest_solve) {
+		return this->latest_solve->imu_calibration;
+	}
+
+	return this->stored_imu_calibration;
+}
+
 void
 Device::resetLocked()
 {
 	m_relation_history_clear(this->relation_history);
 
-	this->has_latest_solve = false;
+	this->latest_solve = std::nullopt;
+	this->latest_imu_reckon = std::nullopt;
 
 	for (auto &preintegration : this->preintegrations) {
 		preintegration = DevicePreintegration::Identity(DevicePreintegrationState::Dirty);
@@ -2492,9 +2516,8 @@ SensorFusion::rebuildForEvictionLocked()
 	 * what is left, so they are thrown away here.
 	 */
 	bool work_remaining = false;
-	bool wants_imu_wakeup = false;
 
-	this->preintegrateDeviceLocked(work_remaining, wants_imu_wakeup);
+	this->preintegrateDeviceLocked(work_remaining);
 
 	(void)this->buildFusionLocked();
 	// We aren't doing a solve here, just making sure our marginalization is up to date
@@ -2514,8 +2537,8 @@ SensorFusion::runFusionLocked()
 	ceres::Solver::Options options{};
 	options.max_num_iterations = 3;
 	/*
-	 * The problem is block sparse: a keyframe only touches its own camera observations and the two IMU factors
-	 * either side of it.
+	 * The problem is block sparse: a keyframe only touches it's observations, IMU preintegration,
+	 * keyframe intrinsics/extrinsics, and the world gravity.
 	 */
 	options.linear_solver_type = ceres::LinearSolverType::SPARSE_NORMAL_CHOLESKY;
 	// Eigen's sparse backend is the one this Ceres is built with, see CERES_USE_EIGEN_SPARSE.
@@ -2540,12 +2563,28 @@ SensorFusion::runFusionLocked()
 	ceres::Solver::Summary summary;
 
 	/*
+	 * Replacing the calibration is the one thing that reaches into the problem while the lock is dropped, and it
+	 * leaves whatever this solve produces describing a calibration that no longer applies.
+	 */
+	const uint64_t calibration_generation = this->problem->calibration_generation;
+
+	/*
 	 * Unlock the fusion thread, since we've built our Ceres problem and nothing else will touch it or the parameter
 	 * pointers.
 	 */
 	os_thread_helper_unlock(&this->thread);
 	ceres::Solve(options, &problem, &summary);
 	os_thread_helper_lock(&this->thread);
+
+	/*
+	 * Reading the result back would find the blocks the new calibration unseeded empty. Replacing it also marked
+	 * the fusion dirty, so the next tick rebuilds from the new seeds and solves again.
+	 */
+	if (this->problem->calibration_generation != calibration_generation) {
+		SF_DEBUG(this, "IMU calibration for device %d changed during the solve, discarding it.",
+		         this->device.id);
+		return;
+	}
 
 	SolveSnapshot &snapshot = this->snapshot;
 	this->problem->fillSolvedSnapshot(snapshot);
@@ -2576,6 +2615,16 @@ SensorFusion::runFusionLocked()
 		snapshot.solve_index += 1;
 
 		os_thread_helper_lock(&this->thread);
+
+		/*
+		 * The snapshot itself is still good, but committing it would put the old calibration's biases and
+		 * extrinsics back over the new ones, and the next build would seed from those.
+		 */
+		if (this->problem->calibration_generation != calibration_generation) {
+			SF_DEBUG(this, "IMU calibration for device %d changed while logging the solve, discarding it.",
+			         this->device.id);
+			return;
+		}
 	}
 #endif
 
@@ -2593,51 +2642,36 @@ SensorFusion::runFusionLocked()
 			continue;
 		}
 
-		// we have a previous solve and it's older than the new one
-		if (this->device.has_latest_solve && keyframe.timestamp_ns > this->device.latest_solve_time_ns) {
-			std::array<xrt_imu_sample, kImuBufferSize> samples_buf;
-			uint32_t num_samples = 0;
-			xrt_imu_sample first_after;
+		this->device.latest_solve = DeviceSolveState{
+		    .time_ns = keyframe.timestamp_ns,
+		    .Tcv_world_device = keyframe.device.Tcv_world_device,
+		    .world_velocity = keyframe.device.velocity,
+		    .imu_calibration =
+		        {
+		            .accel_bias = keyframe.device.accel_bias,
+		            .gyro_bias = keyframe.device.gyro_bias,
+		            .accel_scale = keyframe.device.accel_scale,
+		            .Qcv_model_imu = snapshot.device.Qcv_model_imu,
+		        },
+		};
 
-			// Get the IMU samples
-			const ImuCollectResult result = collectImuSamplesForRange(this->device,                      //
-			                                                          this->device.latest_solve_time_ns, //
-			                                                          keyframe.timestamp_ns,             //
-			                                                          samples_buf,                       //
-			                                                          num_samples,                       //
-			                                                          first_after);                      //
-
-			/*
-			 * If we got it OK, or there's no sample *after*, that's fine, we're integrating
-			 * until the last IMU sample *before* the stop time.
-			 */
-			if ((result == ImuCollectResult::Ok || result == ImuCollectResult::NoSampleAfterEnd) //
-			    && num_samples > 0) {
-				integrateToTimestampHistory(
-				    this->snapshot.world_gravity_mag,                                 //
-				    this->device.latest_solve_time_ns,                                //
-				    this->device.Tcv_world_device_latest,                             //
-				    this->device.latest_world_velocity,                               //
-				    this->device.latest_accel_bias,                                   //
-				    this->device.latest_gyro_bias,                                    //
-				    this->device.latest_accel_scale,                                  //
-				    std::span<const xrt_imu_sample>(samples_buf.data(), num_samples), //
-				    this->device.relation_history);                                   //
-
-				SF_DEBUG(this, "Filled relation history for device %d from %" PRIi64 " to %" PRIi64,
-				         this->device.id, this->device.latest_solve_time_ns, keyframe.timestamp_ns);
-			}
+		/*
+		 * Restart dead reckoning from this solve, carried forward to the newest IMU sample. That integrates the
+		 * stretch since the keyframe a second time, but everything reckoned from here on starts from the better
+		 * estimate.
+		 */
+		DeviceSolveState reckon = *this->device.latest_solve;
+		if (reckonToLatestImu(this, reckon)) {
+			this->device.latest_imu_reckon = reckon;
+		} else if (!this->device.latest_imu_reckon.has_value()) {
+			// Nothing older to dead reckon from, so start from the solve itself and let the next pass
+			// retry.
+			this->device.latest_imu_reckon = this->device.latest_solve;
+		} else {
+			SF_WARN(this,
+			        "Could not dead reckon device %d from its solve at %" PRIi64 ", keeping the old one",
+			        this->device.id, keyframe.timestamp_ns);
 		}
-
-		this->device.has_latest_solve = true;
-		this->device.latest_solve_time_ns = keyframe.timestamp_ns;
-		this->device.Tcv_world_device_latest = keyframe.device.Tcv_world_device;
-		this->device.latest_world_velocity = keyframe.device.velocity;
-
-		this->device.latest_accel_bias = keyframe.device.accel_bias;
-		this->device.latest_gyro_bias = keyframe.device.gyro_bias;
-		this->device.latest_accel_scale = keyframe.device.accel_scale;
-		this->device.latest_Qcv_imu_model = snapshot.device.Qcv_imu_model;
 
 		device_updated = true;
 
@@ -2710,15 +2744,11 @@ SensorFusion::setDeviceImuCalibration(const DeviceImuCalibration &calibration)
 {
 	os_thread_helper_lock(&this->thread);
 
-	this->device.calibrated_accel_bias = calibration.accel_bias;
-	this->device.calibrated_gyro_bias = calibration.gyro_bias;
-	this->device.calibrated_accel_scale = calibration.accel_scale;
-	this->device.calibrated_Qcv_imu_model = calibration.Qcv_imu_model;
+	this->device.stored_imu_calibration = calibration;
 
-	this->device.latest_accel_bias = calibration.accel_bias;
-	this->device.latest_gyro_bias = calibration.gyro_bias;
-	this->device.latest_accel_scale = calibration.accel_scale;
-	this->device.latest_Qcv_imu_model = calibration.Qcv_imu_model;
+	if (this->device.latest_solve) {
+		this->device.latest_solve->imu_calibration = calibration;
+	}
 
 	/*
 	 * Blocks seeded from the old values, and the anchor built out of them, both belong to a calibration that no
@@ -2937,15 +2967,10 @@ SensorFusion::pushImuSample(const xrt_imu_sample &xr_sample)
 	this->device.latest_imu_ts_ns.store(xr_sample.timestamp_ns, std::memory_order_release);
 
 	/*
-	 * The fusion thread parked a preintegration because the IMU had not reached the end of its interval
-	 * yet, and this sample may be the one that closes it. Signalled *without* the mutex on purpose: taking
-	 * it here would put the IMU thread behind whatever the fusion thread is chewing on, which is the one
-	 * thing this path must never do. The cost is that a wakeup can be lost to that race, which just means
-	 * waiting for the next sample at most a couple milliseconds later.
+	 * This technically races, but the timing of the race is rare and just means we have to
+	 * wait until the next IMU or camera sample to dead reckon the next pose.
 	 */
-	if (this->waiting_on_imu.load(std::memory_order_relaxed)) {
-		os_thread_helper_signal_locked(&this->thread);
-	}
+	os_thread_helper_signal_locked(&this->thread);
 
 	return;
 }
@@ -2957,86 +2982,10 @@ SensorFusion::getTrackedPose(timepoint_ns requested_time_ns,
 {
 	out_relation = XRT_SPACE_RELATION_ZERO;
 
-	os_thread_helper_lock(&this->thread);
+	m_relation_history_get(this->device.relation_history, requested_time_ns, &out_relation);
+	out_time_ns = requested_time_ns;
 
-	if (!device.has_latest_solve) {
-		os_thread_helper_unlock(&this->thread);
-		return;
-	}
-
-	double world_gravity_mag = this->snapshot.world_gravity_mag;
-	timepoint_ns latest_solve_time_ns = this->device.latest_solve_time_ns;
-	xrt_pose Tcv_world_device = this->device.Tcv_world_device_latest;
-	xrt_vec3_f64 world_velocity = this->device.latest_world_velocity;
-	xrt_vec3_f64 accel_bias = this->device.latest_accel_bias;
-	xrt_vec3_f64 gyro_bias = this->device.latest_gyro_bias;
-	xrt_vec3_f64 accel_scale = this->device.latest_accel_scale;
-	xrt_quat Qcv_imu_model = this->device.latest_Qcv_imu_model;
-
-	os_thread_helper_unlock(&this->thread);
-
-	bool integrate_to = true;
-
-	if (requested_time_ns <= latest_solve_time_ns) {
-		SF_TRACE(this, "Requested time is before our latest sample, can't work backwards.");
-		integrate_to = false;
-	}
-
-	std::array<xrt_imu_sample, kImuBufferSize> samples_buf;
-	uint32_t num_samples = 0;
-	std::optional<xrt_imu_sample> first_after;
-
-	if (integrate_to) {
-		xrt_imu_sample raw_first_after;
-		const ImuCollectResult result = collectImuSamplesForRange(this->device,         //
-		                                                          latest_solve_time_ns, //
-		                                                          requested_time_ns,    //
-		                                                          samples_buf,          //
-		                                                          num_samples,          //
-		                                                          raw_first_after);     //
-
-		// Check if we got it OK
-		if (result != ImuCollectResult::Ok && result != ImuCollectResult::NoSampleAfterEnd) {
-			SF_TRACE(this, "IMU data collection for dead reckoning failed, got %d",
-			         static_cast<int>(result));
-			integrate_to = false;
-		}
-
-		if (num_samples == 0) {
-			SF_TRACE(this, "No IMU data found for dead reckoning");
-			integrate_to = false;
-		}
-
-		if (result == ImuCollectResult::NoSampleAfterEnd) {
-			first_after = std::nullopt;
-		} else {
-			first_after = raw_first_after;
-		}
-	}
-
-	if (integrate_to) {
-		integrateToTimestamp(                                                 //
-		    world_gravity_mag,                                                //
-		    latest_solve_time_ns,                                             //
-		    Tcv_world_device,                                                 //
-		    world_velocity,                                                   //
-		    accel_bias,                                                       //
-		    gyro_bias,                                                        //
-		    accel_scale,                                                      //
-		    std::span<const xrt_imu_sample>(samples_buf.data(), num_samples), //
-		    first_after,                                                      //
-		    out_relation);                                                    //
-		out_time_ns = samples_buf[num_samples - 1].timestamp_ns;
-
-		SF_TRACE(this, "Used dead reckoning for pose at ts %" PRIi64, requested_time_ns);
-	} else {
-		m_relation_history_get(this->device.relation_history, requested_time_ns, &out_relation);
-		out_time_ns = requested_time_ns;
-
-		SF_TRACE(this, "Used relation history for pose at ts %" PRIi64, requested_time_ns);
-	}
-
-	math_quat_rotate(&out_relation.pose.orientation, &Qcv_imu_model, &out_relation.pose.orientation);
+	SF_TRACE(this, "Used relation history for pose at ts %" PRIi64, requested_time_ns);
 
 	// Convert to OpenXR coordinate space before outputting
 	math_pose_convert_from_opencv(&out_relation.pose, &out_relation.pose);
@@ -3048,7 +2997,7 @@ SensorFusion::getTrackedPose(timepoint_ns requested_time_ns,
 	         " succeeded.\n"
 	         "Pose: %f,%f,%f\t%f,%f,%f,%f\n"
 	         "Velocity: %f,%f,%f\t%f,%f,%f",
-	         latest_solve_time_ns, out_time_ns, out_relation.pose.position.x, out_relation.pose.position.y,
+	         out_time_ns, out_time_ns, out_relation.pose.position.x, out_relation.pose.position.y,
 	         out_relation.pose.position.z, out_relation.pose.orientation.x, out_relation.pose.orientation.y,
 	         out_relation.pose.orientation.z, out_relation.pose.orientation.w, out_relation.linear_velocity.x,
 	         out_relation.linear_velocity.y, out_relation.linear_velocity.z, out_relation.angular_velocity.x,
@@ -3070,18 +3019,19 @@ SensorFusion::resetLocked()
 	this->keyframe_head = 0;
 	this->num_keyframes = 0;
 
-	this->waiting_on_imu.store(false, std::memory_order_relaxed);
 	this->num_late_samples_dropped = 0;
 
 	this->device.resetLocked();
 }
 
 void
-SensorFusion::preintegrateDeviceLocked(bool &work_remaining, bool &wants_imu_wakeup)
+SensorFusion::preintegrateDeviceLocked(bool &work_remaining)
 {
-	ImuBias<ImuBiasJet> bias = ImuBias<double>(map_vec3_f64(this->device.latest_accel_bias),  //
-	                                           map_vec3_f64(this->device.latest_gyro_bias),   //
-	                                           map_vec3_f64(this->device.latest_accel_scale)) //
+	const auto &imu_calibration = this->device.getLatestImuCalibration();
+
+	ImuBias<ImuBiasJet> bias = ImuBias<double>(map_vec3_f64(imu_calibration.accel_bias),  //
+	                                           map_vec3_f64(imu_calibration.gyro_bias),   //
+	                                           map_vec3_f64(imu_calibration.accel_scale)) //
 	                               .seed();
 
 	/*
@@ -3129,10 +3079,10 @@ SensorFusion::preintegrateDeviceLocked(bool &work_remaining, bool &wants_imu_wak
 		case ImuCollectResult::Lapped:
 			SF_WARN(this, "IMU ring lapped while collecting samples, fusion is running slow.");
 			/*
-			 * A retry can succeed once the fusion thread has caught up, but hammering it from the
-			 * IMU path would only make it slower, so this waits for the next camera sample.
+			 * This sample just had it's IMU data overwritten in the middle of us collecting it, so we need
+			 * to mark it empty.
 			 */
-			work_remaining = true;
+			preintegration = DevicePreintegration::Identity(DevicePreintegrationState::Empty);
 			continue;
 
 		case ImuCollectResult::Overflow:
@@ -3159,12 +3109,8 @@ SensorFusion::preintegrateDeviceLocked(bool &work_remaining, bool &wants_imu_wak
 			continue;
 
 		case ImuCollectResult::NoSampleAfterEnd:
-			/*
-			 * The IMU has not reached the end of this interval yet. The sample that lands past it
-			 * is what unblocks this, so ask pushImuSample() to wake us when one does.
-			 */
+			// The IMU has not reached the end of this interval yet. Wait for wakeup.
 			work_remaining = true;
-			wants_imu_wakeup = true;
 			continue;
 		}
 
@@ -3209,15 +3155,8 @@ SensorFusion::tickLocked(bool have_new_input)
 	 * silently forgotten until the next camera sample happens along.
 	 */
 	bool work_remaining = false;
-	/*
-	 * Narrower than the above: only work that a *new IMU sample* can unblock, which is the only work worth having
-	 * the IMU path wake us up for.
-	 */
-	bool wants_imu_wakeup = false;
 
-	this->preintegrateDeviceLocked(work_remaining, wants_imu_wakeup);
-
-	this->waiting_on_imu.store(wants_imu_wakeup, std::memory_order_relaxed);
+	this->preintegrateDeviceLocked(work_remaining);
 
 	/*
 	 * Deliberately not gated on `work_remaining`. buildLocked() already leaves an interval that has not integrated

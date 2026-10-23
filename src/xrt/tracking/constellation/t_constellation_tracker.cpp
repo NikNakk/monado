@@ -160,7 +160,7 @@ run_room_calibration_func(void *ptr)
 			    .accel_bias = result.imu.accel_bias,
 			    .gyro_bias = result.imu.gyro_bias,
 			    .accel_scale = result.imu.accel_scale,
-			    .Qcv_imu_model = result.imu.Qcv_imu_model,
+			    .Qcv_model_imu = result.imu.Qcv_model_imu,
 			});
 		}
 	}

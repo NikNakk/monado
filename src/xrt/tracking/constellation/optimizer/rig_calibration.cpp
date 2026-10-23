@@ -228,15 +228,14 @@ template <typename T>
 void
 computeCameraObservationResiduals(const camera_model &params,
                                   const std::span<const CameraObservationLed> &leds,
-                                  const ImuExtrinsics<T> &imu_extrinsics,
                                   const Eigen::Transform<T, 3, Eigen::Isometry> &predicted_T_world_camera,
-                                  const Eigen::Transform<T, 3, Eigen::Isometry> &predicted_T_world_device,
+                                  const Eigen::Transform<T, 3, Eigen::Isometry> &predicted_T_world_model,
                                   T *residuals)
 {
 	const auto predicted_T_camera_world = predicted_T_world_camera.inverse();
-	const auto predicted_T_camera_imu = predicted_T_camera_world * predicted_T_world_device;
+	const auto predicted_T_camera_model = predicted_T_camera_world * predicted_T_world_model;
 
-	const Quaternion<T> Q_cam_model = Quaternion<T>(predicted_T_camera_imu.rotation()) * imu_extrinsics.Q_imu_model;
+	const Quaternion<T> Q_cam_model(predicted_T_camera_model.rotation());
 
 	for (size_t i = 0; i < leds.size(); i++) {
 		const CameraObservationLed &led = leds[i];
@@ -245,13 +244,13 @@ computeCameraObservationResiduals(const camera_model &params,
 		const Vector3<T> T_model_led(T(led.point3d.x), T(led.point3d.y), T(led.point3d.z));
 
 		Map<Vector2<T>> residual(residuals + (i * kNumLedResiduals));
-		computeLedResidual<T>(                    //
-		    params,                               //
-		    predicted_T_camera_imu.translation(), //
-		    Q_cam_model,                          //
-		    blob_position_2d,                     //
-		    T_model_led,                          //
-		    residual);                            //
+		computeLedResidual<T>(                      //
+		    params,                                 //
+		    predicted_T_camera_model.translation(), //
+		    Q_cam_model,                            //
+		    blob_position_2d,                       //
+		    T_model_led,                            //
+		    residual);                              //
 
 		residual /= T(kBlobPositionSigmaPixels);
 	}
@@ -273,20 +272,16 @@ struct FixedCameraObservationCostFunctor
 
 	template <typename T>
 	bool
-	operator()(const T *const keyframe_parameters, const T *const imu_extrinsics_parameters, T *residuals) const
+	operator()(const T *const keyframe_parameters, T *residuals) const
 	{
-		const Pose<T> predicted_T_world_device{
+		const Pose<T> predicted_T_world_model{
 		    Map<const Vector<T, Pose<T>::kNumParameters>>(keyframe_parameters)};
-
-		const ImuExtrinsics<T> predicted_imu_extrinsics{
-		    Map<const Vector<T, ImuExtrinsics<T>::kNumParameters>>(imu_extrinsics_parameters)};
 
 		computeCameraObservationResiduals<T>(                //
 		    this->params,                                    //
 		    this->leds,                                      //
-		    predicted_imu_extrinsics,                        //
 		    isometryFromPose(this->Tcv_world_cam).cast<T>(), //
-		    predicted_T_world_device.toTransform(),          //
+		    predicted_T_world_model.toTransform(),           //
 		    residuals);                                      //
 
 		return true;
@@ -295,8 +290,7 @@ struct FixedCameraObservationCostFunctor
 
 typedef ceres::AutoDiffCostFunction<FixedCameraObservationCostFunctor,        //
                                     ceres::DYNAMIC,                           //
-                                    PoseWithVelocity<double>::kNumParameters, //
-                                    ImuExtrinsics<double>::kNumParameters>    //
+                                    PoseWithVelocity<double>::kNumParameters> //
     FixedCameraObservationCostFunction;
 
 //! Camera observation against the camera pinned at the origin with only pitch and roll free.
@@ -307,26 +301,20 @@ struct TwoDofCameraObservationCostFunctor
 
 	template <typename T>
 	bool
-	operator()(const T *const keyframe_parameters,
-	           const T *const imu_extrinsics_parameters,
-	           const T *const pitch_roll_parameters,
-	           T *residuals) const
+	operator()(const T *const keyframe_parameters, const T *const pitch_roll_parameters, T *residuals) const
 	{
-		const Pose<T> predicted_T_world_device{
+		const Pose<T> predicted_T_world_model{
 		    Map<const Vector<T, Pose<T>::kNumParameters>>(keyframe_parameters)};
-
-		const ImuExtrinsics<T> predicted_imu_extrinsics{
-		    Map<const Vector<T, ImuExtrinsics<T>::kNumParameters>>(imu_extrinsics_parameters)};
 
 		const PitchRoll<T> predicted_pitch_roll{
 		    Map<const Vector<T, PitchRoll<T>::kNumParameters>>(pitch_roll_parameters)};
 
-		computeCameraObservationResiduals<T>(                             //
-		    this->params,                                                 //
-		    this->leds,                                                   //
-		    predicted_imu_extrinsics, predicted_pitch_roll.toTransform(), //
-		    predicted_T_world_device.toTransform(),                       //
-		    residuals);                                                   //
+		computeCameraObservationResiduals<T>(      //
+		    this->params,                          //
+		    this->leds,                            //
+		    predicted_pitch_roll.toTransform(),    //
+		    predicted_T_world_model.toTransform(), //
+		    residuals);                            //
 
 		return true;
 	}
@@ -335,7 +323,6 @@ struct TwoDofCameraObservationCostFunctor
 typedef ceres::AutoDiffCostFunction<TwoDofCameraObservationCostFunctor,       //
                                     ceres::DYNAMIC,                           //
                                     PoseWithVelocity<double>::kNumParameters, //
-                                    ImuExtrinsics<double>::kNumParameters,    //
                                     PitchRoll<double>::kNumParameters>        //
     TwoDofCameraObservationCostFunction;
 
@@ -347,16 +334,10 @@ struct DynamicCameraObservationCostFunctor
 
 	template <typename T>
 	bool
-	operator()(const T *const keyframe_parameters,
-	           const T *const imu_extrinsics_parameters,
-	           const T *const camera_parameters,
-	           T *residuals) const
+	operator()(const T *const keyframe_parameters, const T *const camera_parameters, T *residuals) const
 	{
-		const Pose<T> predicted_T_world_device{
+		const Pose<T> predicted_T_world_model{
 		    Map<const Vector<T, Pose<T>::kNumParameters>>(keyframe_parameters)};
-
-		const ImuExtrinsics<T> predicted_imu_extrinsics{
-		    Map<const Vector<T, ImuExtrinsics<T>::kNumParameters>>(imu_extrinsics_parameters)};
 
 		const Pose<T> predicted_T_world_camera{
 		    Map<const Vector<T, Pose<T>::kNumParameters>>(camera_parameters)};
@@ -364,9 +345,8 @@ struct DynamicCameraObservationCostFunctor
 		computeCameraObservationResiduals<T>(       //
 		    this->params,                           //
 		    this->leds,                             //
-		    predicted_imu_extrinsics,               //
 		    predicted_T_world_camera.toTransform(), //
-		    predicted_T_world_device.toTransform(), //
+		    predicted_T_world_model.toTransform(),  //
 		    residuals);                             //
 
 		return true;
@@ -376,7 +356,6 @@ struct DynamicCameraObservationCostFunctor
 typedef ceres::AutoDiffCostFunction<DynamicCameraObservationCostFunctor,      //
                                     ceres::DYNAMIC,                           //
                                     PoseWithVelocity<double>::kNumParameters, //
-                                    ImuExtrinsics<double>::kNumParameters,    //
                                     Pose<double>::kNumParameters>             //
     DynamicCameraObservationCostFunction;
 
@@ -570,6 +549,7 @@ struct RigCalibrationProblem
 			    nullptr,                             //
 			    blocks.world_gravity.data(),         //
 			    blocks.imu_bias.data(),              //
+			    blocks.imu_extrinsics.data(),        //
 			    blocks.keyframes.at(i).data(),       //
 			    blocks.keyframes.at(i + 1).data())); //
 		}
@@ -618,7 +598,6 @@ struct RigCalibrationProblem
 					        num_residuals),
 					    &camera_loss,                  //
 					    keyframe_block,                //
-					    blocks.imu_extrinsics.data(),  //
 					    blocks.static_camera.data())); //
 				} else if (camera_description.dynamic) {
 					// Dynamic camera
@@ -627,9 +606,8 @@ struct RigCalibrationProblem
 					        new DynamicCameraObservationCostFunctor{camera_description.params,
 					                                                std::move(leds)},
 					        num_residuals),
-					    &camera_loss,                 //
-					    keyframe_block,               //
-					    blocks.imu_extrinsics.data(), //
+					    &camera_loss,   //
+					    keyframe_block, //
 					    blocks.dynamic_cameras.at(camera_description.dynamic_parameter_idx)
 					        .data())); //
 				} else {
@@ -640,9 +618,8 @@ struct RigCalibrationProblem
 					                                              std::move(leds),
 					                                              camera_description.Tcv_world_cam},
 					        num_residuals),
-					    &camera_loss,                   //
-					    keyframe_block,                 //
-					    blocks.imu_extrinsics.data())); //
+					    &camera_loss,     //
+					    keyframe_block)); //
 				}
 			}
 		}
@@ -1014,12 +991,12 @@ unpackResult(t_constellation_device_id_t device_id,
 		    .gyro_bias = {},
 		    .accel_scale = {},
 
-		    .Qcv_imu_model = {},
+		    .Qcv_model_imu = {},
 		};
 		map_vec3_f64(result.imu.accel_bias) = bias.accel_bias;
 		map_vec3_f64(result.imu.gyro_bias) = bias.gyro_bias;
 		map_vec3_f64(result.imu.accel_scale) = bias.accel_scale;
-		map_quat(result.imu.Qcv_imu_model) = extrinsics.Q_imu_model.cast<float>();
+		map_quat(result.imu.Qcv_model_imu) = extrinsics.Q_model_imu.cast<float>();
 	}
 
 	{
@@ -1529,7 +1506,7 @@ RigCalibration::optimize(CalibrationResult &out_result)
 	}
 #endif
 
-	out_result = result;
+	out_result = std::move(result);
 
 	return true;
 }

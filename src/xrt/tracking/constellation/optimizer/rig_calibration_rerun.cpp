@@ -158,7 +158,7 @@ RerunContext::logSolveSummary(const CalibrationResult &result)
 	    "\n"                                                                                //
 	    "## IMU\n"                                                                          //
 	    "\n"                                                                                //
-	    "* Q_imu_model: {:.5f} {:.5f} {:.5f} {:.5f} m/s^2\n"                                //
+	    "* Q_model_imu: {:.5f} {:.5f} {:.5f} {:.5f}\n"                                      //
 	    "* Accel bias: {:.5f} {:.5f} {:.5f} m/s^2\n"                                        //
 	    "* Gyro bias: {:.5f} {:.5f} {:.5f} rad/s\n"                                         //
 	    "* Accel scale: {:.5f} {:.5f} {:.5f}\n"                                             //
@@ -179,7 +179,7 @@ RerunContext::logSolveSummary(const CalibrationResult &result)
 	    result.camera_fitness.chi_squared,                                                  //
 	    result.camera_fitness.meanChiSquared(),                                             //
 	    result.camera_fitness.rmsSigma(),                                                   //
-	    imu.Qcv_imu_model.x, imu.Qcv_imu_model.y, imu.Qcv_imu_model.z, imu.Qcv_imu_model.w, //
+	    imu.Qcv_model_imu.x, imu.Qcv_model_imu.y, imu.Qcv_model_imu.z, imu.Qcv_model_imu.w, //
 	    imu.accel_bias.x, imu.accel_bias.y, imu.accel_bias.z,                               //
 	    imu.gyro_bias.x, imu.gyro_bias.y, imu.gyro_bias.z,                                  //
 	    imu.accel_scale.x, imu.accel_scale.y, imu.accel_scale.z,                            //
@@ -278,8 +278,8 @@ RerunContext::logKeyframe(const CalibrationResult &result, const KeyframeCalibra
 void
 RerunContext::logKeyframeObservations(const CalibrationResult &result, const KeyframeCalibration &keyframe)
 {
-	// The keyframe holds the IMU's pose, the LEDs hang off the model the camera factors rotate it into.
-	const xrt_pose Tcv_world_model = solvedWorldModelPose(keyframe.Tcv_world_device, result.imu.Qcv_imu_model);
+	// The keyframe holds the LED model's pose, which is what the LEDs hang off.
+	const xrt_pose &Tcv_world_model = keyframe.Tcv_world_device;
 
 	for (const CameraCalibration &camera : result.cameras) {
 		std::string observation_entity = getCameraObservationEntityName(camera.mosaic_idx, camera.camera_idx);
@@ -343,11 +343,10 @@ RerunContext::logKeyframeMetrics(const CalibrationResult &result, const Keyframe
 	                  rerun::Scalars(static_cast<float>(keyframe.camera_samples.size())));
 
 	/*
-	 * The camera factors were fit through the solved IMU -> model rotation, and the tracker's seed is a model pose
-	 * as well, so both the residual and the seed comparison below are measured against the model, not the bare IMU
-	 * pose.
+	 * The keyframe holds the LED model pose the camera factors were fit to, and the tracker's seed is a model pose
+	 * as well, so the seed comparison below is like for like.
 	 */
-	const xrt_pose Tcv_world_model = solvedWorldModelPose(keyframe.Tcv_world_device, result.imu.Qcv_imu_model);
+	const xrt_pose &Tcv_world_model = keyframe.Tcv_world_device;
 
 	// How far the solved poses land from what each camera actually measured.
 	for (const DeviceCameraSample &camera_sample : keyframe.camera_samples) {
