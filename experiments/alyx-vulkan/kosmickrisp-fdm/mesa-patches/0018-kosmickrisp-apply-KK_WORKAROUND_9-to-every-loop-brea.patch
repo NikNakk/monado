@@ -1,0 +1,36 @@
+From e6b9712a8c7825444b29bbeed4e387da0edf738f Mon Sep 17 00:00:00 2001
+From: Nick Kennedy <nick@nick-kennedy.com>
+Date: Fri, 23 Oct 2026 15:54:53 +0100
+Subject: [PATCH] kosmickrisp: apply KK_WORKAROUND_9 to every loop break
+
+The Metal compiler's reordering of a loop's sole break also hangs the GPU
+in shaders that do not request maximal reconvergence. Half-Life: Alyx's
+FS-0e188069 world-material shader stalls the whole GPU on M5 with fast
+math, although its loop count is only 0 to 3. Guarding the break with
+simd_active_threads_mask() fixes a standalone GFXReconstruct replay
+(original: 3 of 3 GPU resets; guarded: 0 of 4) and the in-game turning
+repro (2 of 2 clean). MESA_KK_DISABLE_WORKAROUNDS=9 still disables it.
+
+Generated-by: LLM
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ src/kosmickrisp/compiler/nir_to_msl.c | 3 +--
+ 1 file changed, 1 insertion(+), 2 deletions(-)
+
+diff --git a/src/kosmickrisp/compiler/nir_to_msl.c b/src/kosmickrisp/compiler/nir_to_msl.c
+index c722f9f..a5ede07 100644
+--- a/src/kosmickrisp/compiler/nir_to_msl.c
++++ b/src/kosmickrisp/compiler/nir_to_msl.c
+@@ -2046,8 +2046,7 @@ jump_instr_to_msl(struct nir_to_msl_ctx *ctx, nir_jump_instr *jump)
+       break;
+    case nir_jump_break:
+       /* KK_WORKAROUND_9 */
+-      if (!ctx->shader->info.maximally_reconverges ||
+-          (ctx->disabled_workarounds & BITFIELD64_BIT(9))) {
++      if (ctx->disabled_workarounds & BITFIELD64_BIT(9)) {
+          P_IND(ctx, "break;\n");
+       } else {
+          P_IND(ctx, "if ((ulong)simd_active_threads_mask()) break;\n");
+-- 
+2.54.0 (Apple Git-157)
+

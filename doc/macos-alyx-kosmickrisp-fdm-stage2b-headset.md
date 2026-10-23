@@ -825,6 +825,13 @@ semaphore waits at the failure showed only waits queued behind the hang.
 With custom resolve hidden, Alyx enables the same Vulkan extensions on both
 drivers.
 
+**Root cause (23 October).** The stall is the Metal compiler bug in KK_WORKAROUND_9
+(reordering a loop's sole `break`), hit by world-material shader FS-0e188069's
+counted loop with fast math. KK applied the workaround only to shaders requesting
+maximal reconvergence. KK commit `e6b9712` (patch 0018) applies it to every loop
+break: the standalone GFXReconstruct replay and 2 of 2 in-game turning runs are
+clean. Details: `kk-tests/turning-capture/README.md`.
+
 **Mac restarts.** Four watchdog restarts today ("SOCD report detected: (iBoot
 panic)", `Boot faults: wdog`). One froze about a minute after a forced GPU
 reset; another 20 s after xctrace spent 14 minutes saving a trace, writing
