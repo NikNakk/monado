@@ -1,0 +1,156 @@
+  [vk] fdm strict-device-request extension=VK_KHR_swapchain
+  [vk] fdm strict-device-request extension=VK_KHR_dedicated_allocation
+  [vk] fdm strict-device-request extension=VK_KHR_external_fence
+  [vk] fdm strict-device-request extension=VK_KHR_external_memory
+  [vk] fdm strict-device-request extension=VK_KHR_external_semaphore
+  [vk] fdm strict-device-request extension=VK_KHR_get_memory_requirements2
+  [vk] fdm strict-device-request extension=VK_KHR_image_format_list
+  [vk] fdm strict-device-request extension=VK_EXT_metal_objects
+  [vk] fdm strict-device-request extension=VK_KHR_descriptor_update_template
+  [vk] fdm strict-device-request extension=VK_KHR_image_format_list
+  [vk] fdm strict-device-request extension=VK_KHR_maintenance1
+  [vk] fdm strict-device-request extension=VK_KHR_maintenance2
+  [vk] fdm strict-device-request extension=VK_EXT_separate_stencil_usage
+  [vk] fdm strict-device-request extension=VK_KHR_swapchain_mutable_format
+  [vk] fdm strict-device-request extension=VK_KHR_dynamic_rendering
+  [vk] fdm strict-device-request extension=VK_KHR_dynamic_rendering_local_read
+  [vk] fdm strict-device-request extension=VK_KHR_depth_stencil_resolve
+  [vk] fdm strict-device-request extension=VK_KHR_create_renderpass2
+  [vk] fdm strict-device-request extension=VK_EXT_host_image_copy
+  [vk] fdm strict-device-request extension=VK_EXT_extended_dynamic_state
+  [vk] fdm strict-device-request extension=VK_EXT_extended_dynamic_state3
+  [vk] fdm strict-device-request extension=VK_EXT_sample_locations
+  [vk] fdm strict-device-request extension=VK_KHR_multiview
+  [vk] fdm strict-device-request pNext sType=1000053001
+  [vk] fdm strict-device-request pNext sType=1000044003
+  [vk] fdm strict-device-request pNext sType=1000232000
+  [vk] fdm strict-device-request pNext sType=1000270000
+  [vk] fdm strict-device-request pNext sType=1000267000
+  [vk] fdm strict-device-request pNext sType=1000455000
+  [vk] device-request flags=0 queues=1 layers=0 coreFeatures=present
+  [vk] device-request core word=0 value=0
+  [vk] device-request core word=1 value=1
+  [vk] device-request core word=2 value=1
+  [vk] device-request core word=3 value=1
+  [vk] device-request core word=4 value=0
+  [vk] device-request core word=5 value=1
+  [vk] device-request core word=6 value=1
+  [vk] device-request core word=7 value=1
+  [vk] device-request core word=8 value=0
+  [vk] device-request core word=9 value=1
+  [vk] device-request core word=10 value=1
+  [vk] device-request core word=11 value=1
+  [vk] device-request core word=12 value=1
+  [vk] device-request core word=13 value=1
+  [vk] device-request core word=14 value=1
+  [vk] device-request core word=15 value=0
+  [vk] device-request core word=16 value=1
+  [vk] device-request core word=17 value=1
+  [vk] device-request core word=18 value=1
+  [vk] device-request core word=19 value=1
+  [vk] device-request core word=20 value=1
+  [vk] device-request core word=21 value=1
+  [vk] device-request core word=22 value=1
+  [vk] device-request core word=23 value=1
+  [vk] device-request core word=24 value=0
+  [vk] device-request core word=25 value=1
+  [vk] device-request core word=26 value=1
+  [vk] device-request core word=27 value=1
+  [vk] device-request core word=28 value=1
+  [vk] device-request core word=29 value=1
+  [vk] device-request core word=30 value=0
+  [vk] device-request core word=31 value=1
+  [vk] device-request core word=32 value=1
+  [vk] device-request core word=33 value=1
+  [vk] device-request core word=34 value=1
+  [vk] device-request core word=35 value=1
+  [vk] device-request core word=36 value=1
+  [vk] device-request core word=37 value=1
+  [vk] device-request core word=38 value=0
+  [vk] device-request core word=39 value=0
+  [vk] device-request core word=40 value=1
+  [vk] device-request core word=41 value=1
+  [vk] device-request core word=42 value=0
+  [vk] device-request core word=43 value=1
+  [vk] device-request core word=44 value=0
+  [vk] device-request core word=45 value=0
+  [vk] device-request core word=46 value=0
+  [vk] device-request core word=47 value=0
+  [vk] device-request core word=48 value=0
+  [vk] device-request core word=49 value=0
+  [vk] device-request core word=50 value=0
+  [vk] device-request core word=51 value=0
+  [vk] device-request core word=52 value=0
+  [vk] device-request core word=53 value=0
+  [vk] device-request core word=54 value=1
+  [vk] device-request queue=0 family=0 count=1 flags=0
+  [vk] device-request queue=0 priority=0 value=0x1p+0
+  [vk] device-request VkPhysicalDeviceMultiviewFeatures payloadWord=0 value=1 (may include tail padding)
+  [vk] device-request VkPhysicalDeviceMultiviewFeatures payloadWord=1 value=0 (may include tail padding)
+  [vk] device-request VkPhysicalDeviceMultiviewFeatures payloadWord=2 value=0 (may include tail padding)
+  [vk] device-request VkPhysicalDeviceMultiviewFeatures payloadWord=3 value=0 (may include tail padding)
+  [vk] device-request VkPhysicalDeviceDynamicRenderingFeatures payloadWord=0 value=1 (may include tail padding)
+  [vk] device-request VkPhysicalDeviceDynamicRenderingFeatures payloadWord=1 value=0 (may include tail padding)
+  [vk] device-request VkPhysicalDeviceDynamicRenderingLocalReadFeatures payloadWord=0 value=1 (may include tail padding)
+  [vk] device-request VkPhysicalDeviceDynamicRenderingLocalReadFeatures payloadWord=1 value=0 (may include tail padding)
+  [vk] device-request VkPhysicalDeviceHostImageCopyFeatures payloadWord=0 value=1 (may include tail padding)
+  [vk] device-request VkPhysicalDeviceHostImageCopyFeatures payloadWord=1 value=0 (may include tail padding)
+  [vk] device-request VkPhysicalDeviceExtendedDynamicStateFeaturesEXT payloadWord=0 value=1 (may include tail padding)
+  [vk] device-request VkPhysicalDeviceExtendedDynamicStateFeaturesEXT payloadWord=1 value=0 (may include tail padding)
+  [vk] device-request VkPhysicalDeviceExtendedDynamicState3FeaturesEXT payloadWord=0 value=0 (may include tail padding)
+  [vk] device-request VkPhysicalDeviceExtendedDynamicState3FeaturesEXT payloadWord=1 value=0 (may include tail padding)
+  [vk] device-request VkPhysicalDeviceExtendedDynamicState3FeaturesEXT payloadWord=2 value=0 (may include tail padding)
+  [vk] device-request VkPhysicalDeviceExtendedDynamicState3FeaturesEXT payloadWord=3 value=0 (may include tail padding)
+  [vk] device-request VkPhysicalDeviceExtendedDynamicState3FeaturesEXT payloadWord=4 value=0 (may include tail padding)
+  [vk] device-request VkPhysicalDeviceExtendedDynamicState3FeaturesEXT payloadWord=5 value=0 (may include tail padding)
+  [vk] device-request VkPhysicalDeviceExtendedDynamicState3FeaturesEXT payloadWord=6 value=0 (may include tail padding)
+  [vk] device-request VkPhysicalDeviceExtendedDynamicState3FeaturesEXT payloadWord=7 value=0 (may include tail padding)
+  [vk] device-request VkPhysicalDeviceExtendedDynamicState3FeaturesEXT payloadWord=8 value=0 (may include tail padding)
+  [vk] device-request VkPhysicalDeviceExtendedDynamicState3FeaturesEXT payloadWord=9 value=0 (may include tail padding)
+  [vk] device-request VkPhysicalDeviceExtendedDynamicState3FeaturesEXT payloadWord=10 value=1 (may include tail padding)
+  [vk] device-request VkPhysicalDeviceExtendedDynamicState3FeaturesEXT payloadWord=11 value=0 (may include tail padding)
+  [vk] device-request VkPhysicalDeviceExtendedDynamicState3FeaturesEXT payloadWord=12 value=0 (may include tail padding)
+  [vk] device-request VkPhysicalDeviceExtendedDynamicState3FeaturesEXT payloadWord=13 value=0 (may include tail padding)
+  [vk] device-request VkPhysicalDeviceExtendedDynamicState3FeaturesEXT payloadWord=14 value=0 (may include tail padding)
+  [vk] device-request VkPhysicalDeviceExtendedDynamicState3FeaturesEXT payloadWord=15 value=1 (may include tail padding)
+  [vk] device-request VkPhysicalDeviceExtendedDynamicState3FeaturesEXT payloadWord=16 value=0 (may include tail padding)
+  [vk] device-request VkPhysicalDeviceExtendedDynamicState3FeaturesEXT payloadWord=17 value=0 (may include tail padding)
+  [vk] device-request VkPhysicalDeviceExtendedDynamicState3FeaturesEXT payloadWord=18 value=0 (may include tail padding)
+  [vk] device-request VkPhysicalDeviceExtendedDynamicState3FeaturesEXT payloadWord=19 value=0 (may include tail padding)
+  [vk] device-request VkPhysicalDeviceExtendedDynamicState3FeaturesEXT payloadWord=20 value=0 (may include tail padding)
+  [vk] device-request VkPhysicalDeviceExtendedDynamicState3FeaturesEXT payloadWord=21 value=0 (may include tail padding)
+  [vk] device-request VkPhysicalDeviceExtendedDynamicState3FeaturesEXT payloadWord=22 value=0 (may include tail padding)
+  [vk] device-request VkPhysicalDeviceExtendedDynamicState3FeaturesEXT payloadWord=23 value=0 (may include tail padding)
+  [vk] device-request VkPhysicalDeviceExtendedDynamicState3FeaturesEXT payloadWord=24 value=0 (may include tail padding)
+  [vk] device-request VkPhysicalDeviceExtendedDynamicState3FeaturesEXT payloadWord=25 value=0 (may include tail padding)
+  [vk] device-request VkPhysicalDeviceExtendedDynamicState3FeaturesEXT payloadWord=26 value=0 (may include tail padding)
+  [vk] device-request VkPhysicalDeviceExtendedDynamicState3FeaturesEXT payloadWord=27 value=0 (may include tail padding)
+  [vk] device-request VkPhysicalDeviceExtendedDynamicState3FeaturesEXT payloadWord=28 value=0 (may include tail padding)
+  [vk] device-request VkPhysicalDeviceExtendedDynamicState3FeaturesEXT payloadWord=29 value=0 (may include tail padding)
+  [vk] device-request VkPhysicalDeviceExtendedDynamicState3FeaturesEXT payloadWord=30 value=0 (may include tail padding)
+  [vk] device-request VkPhysicalDeviceExtendedDynamicState3FeaturesEXT payloadWord=31 value=0 (may include tail padding)
+  [vk] fdm strict-device-forwarded extension=VK_KHR_swapchain
+  [vk] fdm strict-device-forwarded extension=VK_KHR_dedicated_allocation
+  [vk] fdm strict-device-forwarded extension=VK_KHR_external_fence
+  [vk] fdm strict-device-forwarded extension=VK_KHR_external_memory
+  [vk] fdm strict-device-forwarded extension=VK_KHR_external_semaphore
+  [vk] fdm strict-device-forwarded extension=VK_KHR_get_memory_requirements2
+  [vk] fdm strict-device-forwarded extension=VK_KHR_image_format_list
+  [vk] fdm strict-device-forwarded extension=VK_EXT_metal_objects
+  [vk] fdm strict-device-forwarded extension=VK_KHR_descriptor_update_template
+  [vk] fdm strict-device-forwarded extension=VK_KHR_image_format_list
+  [vk] fdm strict-device-forwarded extension=VK_KHR_maintenance1
+  [vk] fdm strict-device-forwarded extension=VK_KHR_maintenance2
+  [vk] fdm strict-device-forwarded extension=VK_EXT_separate_stencil_usage
+  [vk] fdm strict-device-forwarded extension=VK_KHR_swapchain_mutable_format
+  [vk] fdm strict-device-forwarded extension=VK_KHR_dynamic_rendering
+  [vk] fdm strict-device-forwarded extension=VK_KHR_dynamic_rendering_local_read
+  [vk] fdm strict-device-forwarded extension=VK_KHR_depth_stencil_resolve
+  [vk] fdm strict-device-forwarded extension=VK_KHR_create_renderpass2
+  [vk] fdm strict-device-forwarded extension=VK_EXT_host_image_copy
+  [vk] fdm strict-device-forwarded extension=VK_EXT_extended_dynamic_state
+  [vk] fdm strict-device-forwarded extension=VK_EXT_extended_dynamic_state3
+  [vk] fdm strict-device-forwarded extension=VK_EXT_sample_locations
+  [vk] fdm strict-device-forwarded extension=VK_KHR_multiview
+  [vk] fdm strict-device-forwarded extension=VK_KHR_portability_subset
+  [vk] strict vkCreateDevice driver result=-8

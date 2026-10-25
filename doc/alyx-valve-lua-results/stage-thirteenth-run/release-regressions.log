@@ -1,0 +1,27 @@
+   Compiling fakexr v0.1.0 (/private/tmp/xrizer-performance/fakexr)
+   Compiling xrizer v0.5.0 (/private/tmp/xrizer-performance)
+warning: function `view_matrix` is never used
+   --> src/stage.rs:258:8
+    |
+258 | pub fn view_matrix(view: &openxr::View) -> Mat4 {
+    |        ^^^^^^^^^^^
+    |
+    = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: function `projection_matrix` is never used
+   --> src/stage.rs:268:8
+    |
+268 | pub fn projection_matrix(fov: openxr::Fovf, near: f32, far: f32) -> Mat4 {
+    |        ^^^^^^^^^^^^^^^^^
+
+warning: `xrizer` (lib test) generated 2 warnings
+    Finished `release` profile [optimized] target(s) in 6.33s
+     Running unittests src/lib.rs (/private/tmp/xrizer-perf-target/release/deps/xrizer-70333ede28baf55b)
+
+running 2 tests
+[2026-10-20T14:46:50.939 WARN  xrizer::compositor ThreadId(2)] failed to render stage override: stage overrides are unsupported by this graphics backend
+[2026-10-20T14:46:50.939 WARN  xrizer::compositor ThreadId(3)] stage overrides are unsupported by this graphics backend; retaining application/skybox layers
+test compositor::tests::failed_stage_recreation_does_not_reuse_discarded_eyes ... ok
+test compositor::tests::unsupported_stage_keeps_submitted_application_eyes ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 87 filtered out; finished in 0.00s

@@ -1,0 +1,1047 @@
+From eecb8cc77b09fdfe7e609ae9cda95736eac8796c Mon Sep 17 00:00:00 2001
+From: Nick Kennedy <nick@nick-kennedy.com>
+Date: Tue, 20 Oct 2026 08:47:27 +0200
+Subject: [PATCH 1/2] host: validate Valve Lua and prepare isolated constrained
+ xrizer startup
+
+Signed-off-by: Nick Kennedy <nick@nick-kennedy.com>
+---
+ NativeARM/host/Makefile                   |  24 ++++
+ NativeARM/host/XRIZER.md                  |  85 ++++++++++++++
+ NativeARM/host/alyx_host.c                |  49 ++++++--
+ NativeARM/host/kl_glibc.c                 |  10 ++
+ NativeARM/host/kl_steambridge.c           |  17 ++-
+ NativeARM/host/kl_steambridge.h           |   2 +-
+ NativeARM/host/tests/check_constrained.py |   4 +-
+ NativeARM/host/tests/guest_home.c         |  18 +++
+ NativeARM/host/tests/svc_guard.c          |  28 ++++-
+ NativeARM/host/tests/svc_trap.c           |  20 ++++
+ NativeARM/host/tests/valve_lua.c          | 137 ++++++++++++++++++++++
+ NativeARM/host/tests/valve_preflight.c    |  35 ++++++
+ NativeARM/scripts/clone_game_root.py      |  63 ++++++++++
+ NativeARM/scripts/fetch_lua_runtime.py    |  51 ++++++++
+ NativeARM/scripts/launch_xrizer.py        |  89 ++++++++++++++
+ NativeARM/scripts/prepare_guest_dir.py    |  43 +++++++
+ NativeARM/scripts/run_valve_lua.py        |  81 +++++++++++++
+ 17 files changed, 739 insertions(+), 17 deletions(-)
+ create mode 100644 NativeARM/host/tests/guest_home.c
+ create mode 100644 NativeARM/host/tests/svc_trap.c
+ create mode 100644 NativeARM/host/tests/valve_lua.c
+ create mode 100644 NativeARM/host/tests/valve_preflight.c
+ create mode 100644 NativeARM/scripts/clone_game_root.py
+ create mode 100644 NativeARM/scripts/fetch_lua_runtime.py
+ create mode 100644 NativeARM/scripts/launch_xrizer.py
+ create mode 100644 NativeARM/scripts/prepare_guest_dir.py
+ create mode 100644 NativeARM/scripts/run_valve_lua.py
+
+diff --git a/NativeARM/host/Makefile b/NativeARM/host/Makefile
+index 4e88c0b..054c8f5 100644
+--- a/NativeARM/host/Makefile
++++ b/NativeARM/host/Makefile
+@@ -114,3 +114,27 @@ check-svc-guard: $(RT_OBJS) $(filter-out $(OUT)/alyx_host.c.o,$(HOST_OBJS))
+ 	$(OUT)/check-svc-guard
+ 
+ .PHONY: check-svc-guard
++
++# Build only. Running requires an explicit path to the owner's ARM64 depot.
++valve-lua-test: $(RT_OBJS) $(filter-out $(OUT)/alyx_host.c.o,$(HOST_OBJS))
++	$(CC) $(CFLAGS) -o $(OUT)/valve-lua-test tests/valve_lua.c $^ $(LDLIBS) -I.
++
++.PHONY: valve-lua-test
++
++valve-preflight: $(RT_OBJS) $(filter-out $(OUT)/alyx_host.c.o,$(HOST_OBJS))
++	$(CC) $(CFLAGS) -o $(OUT)/valve-preflight tests/valve_preflight.c $^ $(LDLIBS) -I.
++
++.PHONY: valve-preflight
++
++check-svc-trap:
++	@mkdir -p $(OUT)
++	$(CC) $(CFLAGS) -o $(OUT)/check-svc-trap tests/svc_trap.c
++	$(OUT)/check-svc-trap
++
++.PHONY: check-svc-trap
++
++check-guest-home: $(RT_OBJS) $(filter-out $(OUT)/alyx_host.c.o,$(HOST_OBJS))
++	$(CC) $(CFLAGS) -o $(OUT)/check-guest-home tests/guest_home.c $^ $(LDLIBS) -I.
++	$(OUT)/check-guest-home
++
++.PHONY: check-guest-home
+diff --git a/NativeARM/host/XRIZER.md b/NativeARM/host/XRIZER.md
+index ff1a296..b387645 100644
+--- a/NativeARM/host/XRIZER.md
++++ b/NativeARM/host/XRIZER.md
+@@ -1,5 +1,10 @@
+ # Native xrizer host adapter
+ 
++Current checkpoint: private-memory ABI translation is user-authorized. The
++constrained host now runs only with explicit `--run-constrained`. Actual Valve
++Lua allocator tests and a headless Source2Main/xrizer startup pass as described
++at the end. Earlier preflight-only restrictions below record prior milestones.
++
+ Build without VeRantyx's renderer/readback objects:
+ 
+ ```sh
+@@ -118,3 +123,83 @@ The constrained host's unconditional execution gate remains in place.
+ Klepton's separate `KL_VK_STRICT=1` mode now preserves graphics requests and
+ returns driver errors rather than using its legacy feature repair/stub paths;
+ see `VULKAN_BACKENDS.md` in that checkout for native driver tests.
++
++
++## Authorized ABI translation and first headless startup
++
++The user authorized necessary private-memory ABI translation on 20 October.
++Installed game binaries remain unchanged; kl_luafix/kl_guestfix are excluded.
++`HOST_MODE=constrained` remains default-blocked until `--run-constrained` is
++explicitly passed. It then forces strict Vulkan, managed thread tracking,
++trap-code SVC handling and generic patch-table off. It forces real constructors
++on and clears constructor-skip/pretranslated-image overrides. A pre-constructor
++hook rejects unresolved imports, ABI refusals and untrapped SVC candidates.
++It installs the Lua setter replacement for both probes and engine execution.
++
++`valve-lua-test` now exercises the actual owner's libvscript with GNU C++/unwind
++runtime dependencies from verified Debian package-index hashes. Three rounds
++check strings up to 8 MiB, 262144-element table growth and contents, full GC,
++zero live Lua mappings after close, and allocation failure/recovery. Three
++mremap attempts return ENOSYS and successfully fall back. The real ELF setter
++GOT binding is checked; the original low-address Lua branch remains unchanged.
++No Lua/video text patch is installed. Actual engine Lua setup/VR play remains
++unverified. The C `floor` function is now correctly forwarded, rather than
++left unresolved.
++
++`valve-preflight` enables KL_LOAD_NO_INIT for mapping/relocation only. Engine,
++Vulkan renderer, VR, video and client modules pass with zero unresolved imports
++and translation refusals. libvideo has 1703 SVC sites, all converted to reserved
++fatal BRK markers; they are NOT assumed harmless or replaced with NOPs. Any
++executed marker stops with an unsupported-operation diagnostic. These are not
++working Linux raw syscall semantics. All five constructor probes subsequently
++pass, including the client, without reaching a marker or glibc zero stub.
++
++The new scripts are explicit, isolated tools:
++
++- fetch_lua_runtime.py fetches selected Debian ARM64 runtime packages over HTTPS,
++  verifies package sizes/SHA256 against the recorded index, extracts libraries
++  and copyright files, and installs nothing. Default packages are libstdc++6
++  and libgcc-s1; libuuid1 is also supported for engine tests.
++- clone_game_root.py creates a NEW APFS clonefile content root, overlays original
++  ARM64 depot files, and refuses existing outputs/full-copy fallback/input
++  symlinks. Cloned files have separate inodes; writing a clone is tested to
++  preserve source bytes. It does not use the old rm-rf/symlink content script.
++- prepare_guest_dir.py creates a NEW flat ELF library lookup directory. Exact
++  filenames take priority over generated SONAME aliases, retaining distinct
++  .so/.so.N inputs. Adreno ICD/mimalloc exclusions match the existing host path.
++- run_valve_lua.py creates a NEW isolated test directory, derives setter/branch
++  locations from the actual ELF, bounds execution and hashes all five libraries
++  before/after. It never invokes Source2Main.
++- launch_xrizer.py uses xrizer's dual-ICD wrapper/census, requires a cloned root,
++  isolates OpenVR registry, guest HOME, cache/config and Steam-discovery files,
++  and records command/environment/results. Native Darwin HOME stays unchanged.
++  The Steam bridge uses the real running macOS client and ownership/authentication
++  path; constrained launches refuse a missing client instead of fabricating a
++  process ID. They do not write the real ~/.steam discovery files.
++
++A bounded `--no-xr-runtime` startup reached Source2Main, loaded the real macOS
++Steam client and native xrizer, then hit the deliberate OpenXR-unavailable
++checkpoint. The process exited 0 on the engine's VR failure path; that is NOT
++successful gameplay. The explicit invalid XR_RUNTIME_JSON prevents runtime
++fallback, so Monado/headset access was excluded. Steam client loading and API
++callbacks were observed; full gameplay/ownership progression was not proven by
++this early-exit run.
++
++For the first user headset test, from this checkout:
++
++```sh
++python3 NativeARM/scripts/launch_xrizer.py \
++  --root /private/tmp/alyx-native-game-root \
++  --libs /private/tmp/alyx-native-guest-libs-ready \
++  --output /private/tmp/alyx-monado-first \
++  --runtime-json /Users/nickkennedy/Code/monado-2/build/arm64/openxr_monado-dev.json \
++  --timeout 120
++```
++
++Native macOS Steam must be running and signed in to the owning account. This
++uses MoltenVK by default. Output must be new for each run. Logs are under
++`backend/run.log`, with driver census and launch manifests beside it. The first
++test should establish whether it reaches the menu and draws stereo correctly;
++no headset/GPU-frame benchmark or actual foveation API trace is claimed yet.
++KosmicKrisp selection is available with --driver kosmickrisp --icd PATH, but its
++known missing VK_EXT_metal_objects still blocks Monado interoperability.
+diff --git a/NativeARM/host/alyx_host.c b/NativeARM/host/alyx_host.c
+index 5789fdc..33f7c08 100644
+--- a/NativeARM/host/alyx_host.c
++++ b/NativeARM/host/alyx_host.c
+@@ -17,6 +17,17 @@
+ #include "kl_tls.h"
+ #include "kl_glibc.h"
+ #include "kl_fault.h"
++#ifdef ALYX_CONSTRAINED_HOST
++static void constrained_image_check(const char *path, kl_image *img) {
++    const kl_stats *s=kl_get_stats(img);
++    unsigned n=0; kl_missing_imports(img,&n);
++    fprintf(stderr,"[constrained-image] %s missing=%u TLS=%u x18=%u CTR=%u SVC=%u trapped=%u refused=%u/%u/%u\n",path,n,s->tls_rewrites,s->x18_patched,s->ctr_patched,s->svc_sites,s->svc_trapped,s->tls_refused,s->x18_refused,s->ctr_refused);
++    if(n||s->svc_sites!=s->svc_trapped||s->tls_refused||s->x18_refused||s->ctr_refused) {
++        fprintf(stderr,"[constrained-image] unresolved imports or unsafe ABI translation; refusing constructors\n");
++        exit(3);
++    }
++}
++#endif
+ #include "kl_enginelog.h"
+ #include "kl_sdlshim.h"
+ #ifdef ALYX_CONSTRAINED_HOST
+@@ -132,12 +143,18 @@ int main(int argc, char **argv) {
+     atexit(host_atexit);
+     const char *game = NULL;
+     int do_probe = 0, first_lib = 0, engine_args = argc;
++#ifdef ALYX_CONSTRAINED_HOST
++    int run_constrained = 0;
++#endif
+     for (int i = 1; i < argc; i++) {
+ #ifdef ALYX_CONSTRAINED_HOST
+         if (!strcmp(argv[i], "--constrained-check") && argc == 2) {
+-            puts("constrained build: Lua/video text patch objects excluded; guest execution disabled");
++            puts("constrained build: Lua/video text patch objects excluded; guest execution disabled by default; --run-constrained required");
+             return 0;
+         }
++#endif
++#ifdef ALYX_CONSTRAINED_HOST
++        if (!strcmp(argv[i], "--run-constrained")) { run_constrained = 1; continue; }
+ #endif
+         if (!strcmp(argv[i], "--libdir") && i + 1 < argc) g_libdir = argv[++i];
+         else if (!strcmp(argv[i], "--game") && i + 1 < argc) game = argv[++i];
+@@ -146,11 +163,15 @@ int main(int argc, char **argv) {
+         else { fprintf(stderr, "unknown option %s\n", argv[i]); return 2; }
+     }
+ #ifdef ALYX_CONSTRAINED_HOST
+-    // Both --probe and gameplay execute guest constructors. Until the loader's
+-    // raw-SVC rewriting and Vulkan semantic substitutions are resolved, refuse
+-    // both before any guest image, registry, cache or runtime is touched.
+-    fprintf(stderr, "constrained host: guest execution blocked pending raw-SVC/ABI and Vulkan semantic audit\n");
+-    return 2;
++    if (!run_constrained) {
++        fprintf(stderr, "constrained host: guest execution requires explicit --run-constrained\n");
++        return 2;
++    }
++    setenv("KL_GUEST_PATCH","0",1); setenv("KL_SVC_POLICY","trap-code",1);
++    setenv("KL_VK_STRICT","1",1); setenv("KL_GUEST_THREAD_TRACKING","1",1);
++    setenv("KL_LOAD_NO_INIT","0",1); setenv("KL_TLS_REWRITE_FORCE","1",1);
++    setenv("KL_VK_ASYNC_PIPELINES","0",1);
++    unsetenv("KL_DYLIB_DIR"); unsetenv("KL_INIT_SKIP"); unsetenv("KL_INIT_SLEEP");
+ #endif
+     // The engine's console output goes through the guest's printf to our stdout
+     // and the process ends with _exit(); unbuffered, nothing is lost.
+@@ -173,8 +194,10 @@ int main(int argc, char **argv) {
+     // ...and take those compiles off the render thread: an object whose
+     // pipeline is still compiling is drawn a few frames late instead of the
+     // frame freezing (Klepton kl_vk_async.inc). VERANTYX_ASYNC_PIPELINES=0 off.
++#ifndef ALYX_CONSTRAINED_HOST
+     if (!getenv("VERANTYX_ASYNC_PIPELINES") || strcmp(getenv("VERANTYX_ASYNC_PIPELINES"), "0") != 0)
+         setenv("KL_VK_ASYNC_PIPELINES", "1", 0);
++#endif
+     kl_glibc_install(argv[0]);
+     kl_set_library_path(g_libdir);
+     kl_thread_init();
+@@ -190,6 +213,10 @@ int main(int argc, char **argv) {
+     setenv("SDL_VIDEODRIVER", "dummy", 0);
+     setenv("SDL_AUDIODRIVER", "dummy", 0);
+ 
++#ifdef ALYX_CONSTRAINED_HOST
++    kl_lua_builtin_install();
++    kl_image_loaded_hook = constrained_image_check;
++#endif
+     if (do_probe) return probe(argc - first_lib, argv + first_lib);
+ 
+     if (!game) { fprintf(stderr, "--game DIR (the Half-Life Alyx directory holding game/) is required to run\n"); return 2; }
+@@ -207,13 +234,17 @@ int main(int argc, char **argv) {
+     kl_guestfix_install();         // byte-checked repairs of guest code at load
+ #endif
+     kl_sdlaudio_install();         // SDL2 audio -> Core Audio (Linux SDL has no macOS backend)
+-#ifdef ALYX_CONSTRAINED_HOST
+-    kl_lua_builtin_install();      // exported allocator setter; no text patch
+-#else
++#ifndef ALYX_CONSTRAINED_HOST
+     kl_luafix_install();           // legacy Lua arena workaround
+ #endif
+     install_vr_path_registry();
++#ifdef ALYX_CONSTRAINED_HOST
++    setenv("VERANTYX_REQUIRE_STEAM","1",1);
++    unsetenv("VERANTYX_NO_STEAM");
++    if(!kl_steambridge_install())return 1;
++#else
+     kl_steambridge_install();      // steam_api -> the macOS Steam client
++#endif
+     // fontconfig wants a writable cache; keep it beside the game root.
+     { char cache[PATH_MAX]; snprintf(cache, sizeof cache, "%s/cache", game); mkdir(cache, 0755); setenv("XDG_CACHE_HOME", cache, 0); }
+     char hlvrdir[PATH_MAX];
+diff --git a/NativeARM/host/kl_glibc.c b/NativeARM/host/kl_glibc.c
+index 1d46fa6..028840b 100644
+--- a/NativeARM/host/kl_glibc.c
++++ b/NativeARM/host/kl_glibc.c
+@@ -652,6 +652,15 @@ static int klg_pthread_setaffinity_np(pthread_t t, size_t size, const void *set)
+ static int klg_pthread_getaffinity_np(pthread_t t, size_t size, uint64_t *set) { return klg_sched_getaffinity(0, size, set); }
+ static int klg_get_nprocs(void) { return ncpu(); }
+ static int klg_sched_getcpu(void) { return 0; }
++// Redirect guest-owned configuration without changing Darwin's HOME or Steam's
++// native client environment. Only the guest's imported getenv sees this value.
++static char *klg_getenv(const char *name) {
++    if (name && !strcmp(name,"HOME")) {
++        char *home=getenv("VERANTYX_GUEST_HOME");
++        if(home && *home)return home;
++    }
++    return getenv(name);
++}
+ static int klg_gettid(void) { kl_guest_thread_enter(); uint64_t t = 0; pthread_threadid_np(NULL, &t); return (int)t; }
+ static int klg_prctl(int opt, unsigned long a2, unsigned long a3, unsigned long a4, unsigned long a5) {
+     if (opt == 15) { pthread_setname_np((const char *)(uintptr_t)a2); return 0; }    // PR_SET_NAME
+@@ -1345,6 +1354,7 @@ static struct { const char *name; void *fn; } g_table[] = {
+     E("__sched_cpucount", klg___sched_cpucount), E("sched_getaffinity", klg_sched_getaffinity),
+     E("sched_setaffinity", klg_sched_setaffinity), E("pthread_setaffinity_np", klg_pthread_setaffinity_np),
+     E("pthread_getaffinity_np", klg_pthread_getaffinity_np), E("get_nprocs", klg_get_nprocs), E("get_nprocs_conf", klg_get_nprocs),
++    E("getenv", klg_getenv),
+     E("sched_getcpu", klg_sched_getcpu), E("gettid", klg_gettid), E("prctl", klg_prctl), E("pipe2", klg_pipe2), E("dup3", klg_dup3),
+     E("accept4", klg_accept4), E("getrandom", klg_getrandom), E("close_range", klg_close_range), E("mremap", klg_mremap),
+     E("memfd_create", klg_memfd_create),
+diff --git a/NativeARM/host/kl_steambridge.c b/NativeARM/host/kl_steambridge.c
+index 2511568..71fd95c 100644
+--- a/NativeARM/host/kl_steambridge.c
++++ b/NativeARM/host/kl_steambridge.c
+@@ -71,16 +71,22 @@ static const char *find_dylib(void) {
+     return NULL;
+ }
+ 
+-void kl_steambridge_install(void) {
+-    if (getenv("VERANTYX_NO_STEAM")) return;
++int kl_steambridge_install(void) {
++    if (getenv("VERANTYX_NO_STEAM")) return 0;
+     const char *dylib = find_dylib();
+     const char *home = getenv("HOME");
+-    if (!home) return;
++    if (!home) return 0;
++    const char *guest_home=getenv("VERANTYX_GUEST_HOME");
++    int required=getenv("VERANTYX_REQUIRE_STEAM") && !strcmp(getenv("VERANTYX_REQUIRE_STEAM"),"1");
++    pid_t pid=steam_pid();
++    if(required && (!pid || !dylib || !guest_home || !*guest_home)) {
++        fprintf(stderr,"[steam] constrained launch requires running native Steam, its real client library and an isolated guest home; sign in to Steam first\n");
++        return 0;
++    }
+     char dir[PATH_MAX], sub[PATH_MAX], f[PATH_MAX];
+-    snprintf(dir, sizeof dir, "%s/.steam", home);
++    snprintf(dir, sizeof dir, "%s/.steam", guest_home && *guest_home ? guest_home : home);
+     snprintf(sub, sizeof sub, "%s/.steam/sdkarm64", home);
+     mkdir(dir, 0755); mkdir(sub, 0755);
+-    pid_t pid = steam_pid();
+     snprintf(f, sizeof f, "%s/steam.pid", dir);
+     FILE *fp = fopen(f, "w");
+     if (fp) { fprintf(fp, "%d\n", (int)(pid ? pid : getpid())); fclose(fp); }
+@@ -96,4 +102,5 @@ void kl_steambridge_install(void) {
+     setenv("SteamAppId", "546560", 0);
+     setenv("SteamGameId", "546560", 0);
+     kl_dl_add_host_module("/steamclient.so", steamclient_sym);
++    return g_steamclient != NULL;
+ }
+diff --git a/NativeARM/host/kl_steambridge.h b/NativeARM/host/kl_steambridge.h
+index efbbc74..ba5877b 100644
+--- a/NativeARM/host/kl_steambridge.h
++++ b/NativeARM/host/kl_steambridge.h
+@@ -1,3 +1,3 @@
+ #pragma once
+ // Routes the Linux steam_api to the macOS Steam client (kl_steambridge.c).
+-void kl_steambridge_install(void);
++int kl_steambridge_install(void);
+diff --git a/NativeARM/host/tests/check_constrained.py b/NativeARM/host/tests/check_constrained.py
+index 725e217..e014ee9 100644
+--- a/NativeARM/host/tests/check_constrained.py
++++ b/NativeARM/host/tests/check_constrained.py
+@@ -17,8 +17,10 @@ for args in (
+     result = subprocess.run([str(host), *args], capture_output=True, text=True)
+     assert result.returncode == 2, result
+     assert 'Source2Main' not in result.stderr and 'loaded with dependencies' not in result.stdout
++enabled = subprocess.run([str(host), '--run-constrained', '--libdir', '/nonexistent-alyx', '--probe', 'missing.so'], capture_output=True, text=True)
++assert enabled.returncode == 1 and 'FAILED:' in enabled.stdout, enabled
+ symbols = subprocess.check_output(['nm', str(host)], text=True)
+ for symbol in ('_kl_luafix_install', '_kl_guestfix_install'):
+     assert symbol not in symbols, symbol
+ assert '_kl_lua_builtin_install' in symbols
+-print('PASS: constrained preflight, probe/game rejection and excluded patch symbols')
++print('PASS: constrained default rejection, explicit missing-file probe and excluded patch symbols')
+diff --git a/NativeARM/host/tests/guest_home.c b/NativeARM/host/tests/guest_home.c
+new file mode 100644
+index 0000000..b50dbd1
+--- /dev/null
++++ b/NativeARM/host/tests/guest_home.c
+@@ -0,0 +1,18 @@
++// SPDX-License-Identifier: BSL-1.0
++// Copyright 2026, Nick Kennedy
++#include "kl_glibc.h"
++#include <assert.h>
++#include <stdlib.h>
++#include <stdio.h>
++#include <string.h>
++extern void *kl_shim_lookup(const char *);
++int main(void) {
++ const char *home=getenv("HOME");assert(home);char *original=strdup(home);assert(original);
++ kl_glibc_install("guest-home-fixture");char *(*guest_getenv)(const char*)=kl_shim_lookup("getenv");assert(guest_getenv);
++ setenv("VERANTYX_GUEST_HOME","/private/tmp/owned-guest-home-fixture",1);
++ assert(!strcmp(guest_getenv("HOME"),"/private/tmp/owned-guest-home-fixture"));
++ assert(!strcmp(getenv("HOME"),original));
++ setenv("VALVE_HOME_FIXTURE","value",1);assert(!strcmp(guest_getenv("VALVE_HOME_FIXTURE"),"value"));
++ unsetenv("VERANTYX_GUEST_HOME");assert(!strcmp(guest_getenv("HOME"),original));free(original);
++ puts("PASS: guest HOME redirect leaves native HOME unchanged; other variables and default path preserve behaviour");
++}
+diff --git a/NativeARM/host/tests/svc_guard.c b/NativeARM/host/tests/svc_guard.c
+index ef4ca3e..cf9d587 100644
+--- a/NativeARM/host/tests/svc_guard.c
++++ b/NativeARM/host/tests/svc_guard.c
+@@ -24,6 +24,25 @@ static void check(uint32_t opcode,int malformed,const char *expect){
+  assert(write(fd,buf,size)==size);close(fd);
+  assert(!kl_load(path));assert(strstr(kl_error(),expect));unlink(path);
+ }
++typedef struct {uint32_t name,type;uint64_t flags,addr,offset,size;uint32_t link,info;uint64_t alignment,entry;} shdr;
++static void check_sections(int mode,const char *expected) {
++ uint8_t buf[320]={0};ehdr *e=(void*)buf;
++ memcpy(e->ident,"\177ELF\2\1\1",7);e->machine=183;e->type=3;e->version=1;
++ e->ehsize=sizeof *e;e->phoff=sizeof *e;e->phsize=sizeof(phdr);e->phnum=1;
++ e->shoff=128;e->shsize=sizeof(shdr);e->shnum=3;
++ phdr *p=(void*)(buf+e->phoff);p->type=1;p->flags=5;p->offset=120;p->va=0x1000;p->filesz=8;p->memsz=8;p->align=4;
++ uint32_t code=mode==1?0xd4000001:0xd503201f,data=0xd4000001;
++ memcpy(buf+120,&code,4);memcpy(buf+124,&data,4);
++ shdr *sh=(void*)(buf+128);
++ sh[1]=(shdr){.type=1,.flags=6,.addr=0x1000,.offset=120,.size=4};
++ sh[2]=(shdr){.type=1,.flags=2,.addr=0x1004,.offset=124,.size=4};
++ if(mode==2)e->shoff=10000;
++ if(mode==3)sh[1].offset=10000;
++ if(mode==4)sh[1].addr=0x2000;
++ char path[]="/private/tmp/kl-svc-sections.XXXXXX";int fd=mkstemp(path);assert(fd>=0);
++ assert(write(fd,buf,sizeof buf)==sizeof buf);close(fd);
++ assert(!kl_load(path));assert(strstr(kl_error(),expected));unlink(path);
++}
+ int main(void){
+  setenv("KL_SVC_POLICY","reject",1);
+  check(0xd4000001,0,"raw SVC instruction candidate");
+@@ -33,6 +52,13 @@ int main(void){
+  check(0xd503201f,3,"truncated ELF header");
+  assert(!kl_load_dylib("/nonexistent-translated-game.dylib"));
+  assert(strstr(kl_error(),"rejects pretranslated Mach-O"));
++ setenv("KL_SVC_POLICY","reject-code",1);
++ check_sections(0,"missing DT_SYMTAB/DT_STRTAB"); // passed preflight; deliberately not a runnable image
++ check_sections(1,"raw SVC instruction candidate");
++ check_sections(2,"requires valid section headers");
++ check_sections(3,"invalid executable section");
++ check_sections(4,"not mapped consistently");
++ check(0xd503201f,0,"requires valid section headers");
+  setenv("KL_SVC_POLICY","typo",1);check(0xd4000001,0,"unknown KL_SVC_POLICY");
+- puts("PASS: SVC #0/nonzero immediate, malformed headers/segments and unknown policy refuse before guest mapping");
++ puts("PASS: SVC #0/nonzero immediate, malformed headers/segments and unknown policy refuse; section-aware policy distinguishes executable code/data");
+ }
+diff --git a/NativeARM/host/tests/svc_trap.c b/NativeARM/host/tests/svc_trap.c
+new file mode 100644
+index 0000000..52fa147
+--- /dev/null
++++ b/NativeARM/host/tests/svc_trap.c
+@@ -0,0 +1,20 @@
++// SPDX-License-Identifier: BSL-1.0
++// Copyright 2026, Nick Kennedy
++#include "kl_svc.h"
++#include <assert.h>
++#include <signal.h>
++#include <stdio.h>
++#include <sys/resource.h>
++#include <sys/wait.h>
++#include <unistd.h>
++// Owned native code; no game instructions executed by this fixture.
++__attribute__((noinline)) static void stop_here(void) { __asm__ volatile(".inst 0xd4296980"); }
++int main(void) {
++ struct rlimit no_core={0,0};setrlimit(RLIMIT_CORE,&no_core);
++ uint32_t values[]={0xd4000001,0xd4001001,0xd41fffe1};
++ for(unsigned i=0;i<3;i++){assert(kl_svc_to_trap(&values[i]));assert(values[i]==KL_SVC_TRAP_WORD);}
++ uint32_t other=0xd503201f;assert(!kl_svc_to_trap(&other)&&other==0xd503201f);
++ pid_t p=fork();assert(p>=0);if(!p){stop_here();_exit(1);}
++ int status;assert(waitpid(p,&status,0)==p);assert(WIFSIGNALED(status)&&WTERMSIG(status)==SIGTRAP);
++ puts("PASS: SVC immediates become named BRK; unrelated instruction unchanged; owned native BRK stops with SIGTRAP");
++}
+diff --git a/NativeARM/host/tests/valve_lua.c b/NativeARM/host/tests/valve_lua.c
+new file mode 100644
+index 0000000..f16747c
+--- /dev/null
++++ b/NativeARM/host/tests/valve_lua.c
+@@ -0,0 +1,137 @@
++// SPDX-License-Identifier: BSL-1.0
++// Copyright 2026, Nick Kennedy
++// Explicitly invoked, headless test of the owner's Valve Lua shared library.
++// No engine entry point, OpenVR, Steam bridge or game-specific text repair.
++#include "klepton.h"
++#include "kl_glibc.h"
++#include "kl_lua_builtin.h"
++#include "kl_fault.h"
++#include <assert.h>
++#include <errno.h>
++#include <stdint.h>
++#include <stdio.h>
++#include <stdlib.h>
++#include <string.h>
++#include <sys/mman.h>
++#include <sys/resource.h>
++#include <unistd.h>
++extern void *kl_shim_lookup(const char *);
++static void *(*real_mmap)(void *,size_t,int,int,int,long);
++static int (*real_munmap)(void *,size_t);
++static void *(*real_remap)(void *,size_t,size_t,int,void *);
++static size_t maps, unmaps, remaps, failures;
++static int refuse_mapping, track;
++static size_t live_bytes, peak_bytes;
++static struct {void *address;size_t size;} allocations[1024];
++static void *watch_mmap(void *a,size_t n,int prot,int flags,int fd,long off) {
++    if (refuse_mapping && (flags & 0x20)) { failures++; errno=ENOMEM; return MAP_FAILED; }
++    void *p=real_mmap(a,n,prot,flags,fd,off);
++    if(p!=MAP_FAILED) {
++        maps++;
++        if(track) {
++            size_t i=0;while(i<1024 && allocations[i].address)i++;assert(i<1024);
++            allocations[i].address=p;allocations[i].size=n;
++            live_bytes+=n;if(live_bytes>peak_bytes)peak_bytes=live_bytes;
++        }
++        if(maps<=16) fprintf(stderr,"[lua-map] allocate bytes=%zu address=%p prot=%d flags=%#x\n",n,p,prot,flags);
++        assert(((uintptr_t)p>>47)==0);
++    } else failures++;
++    return p;
++}
++static int watch_unmap(void *a,size_t n) {
++    int r=real_munmap(a,n);
++    if(unmaps<16) fprintf(stderr,"[lua-map] release bytes=%zu address=%p result=%d\n",n,a,r);
++    if(!r) {
++        unmaps++;
++        if(track) {
++            size_t i=0;while(i<1024 && allocations[i].address!=a)i++;assert(i<1024);
++            assert(allocations[i].size==n);live_bytes-=n;allocations[i].address=NULL;
++        }
++    }
++    return r;
++}
++static void *watch_remap(void *a,size_t old,size_t n,int flags,void *next) {
++    remaps++;
++    void *result=real_remap(a,old,n,flags,next);
++    assert(result==MAP_FAILED && errno==ENOSYS);
++    return result;
++}
++static void safety(const char *path,kl_image *img) {
++    const char *b=strrchr(path,'/');b=b?b+1:path;
++    assert(!strcmp(b,"libtier0.so")||!strcmp(b,"libvstdlib.so")||!strcmp(b,"libvscript.so")||!strcmp(b,"libstdc++.so.6")||!strcmp(b,"libgcc_s.so.1"));
++    const kl_stats *s=kl_get_stats(img);
++    unsigned n=0;const char *const *missing=kl_missing_imports(img,&n);
++    fprintf(stderr,"[lua-image] %s TLS=%u x18=%u CTR=%u SVC=%u missing=%u refused=%u/%u/%u\n",
++        b,s->tls_rewrites,s->x18_patched,s->ctr_patched,s->svc_sites,n,s->tls_refused,s->x18_refused,s->ctr_refused);
++    for(unsigned i=0;i<n;i++)fprintf(stderr,"[lua-missing] %s\n",missing[i]);
++    if(n||s->svc_sites||s->tls_refused||s->x18_refused||s->ctr_refused) {
++        fprintf(stderr,"[lua-test] unsafe image refused before constructors\n");exit(3);
++    }
++}
++int main(int argc,char **argv) {
++    if(argc!=5) {fprintf(stderr,"usage: %s LIBDIR SETTER_GOT_VA RANGE_BRANCH_VA RANGE_BRANCH_WORD\n",argv[0]);return 2;}
++    setvbuf(stdout,NULL,_IONBF,0);setvbuf(stderr,NULL,_IONBF,0);
++    struct rlimit no_core={0,0};setrlimit(RLIMIT_CORE,&no_core);
++    setenv("KL_GUEST_PATCH","0",1);setenv("KL_SVC_POLICY","reject-code",1);
++    setenv("KL_VK_STRICT","1",1);setenv("KL_GUEST_THREAD_TRACKING","1",1);
++    setenv("KL_TLS_REWRITE_FORCE","1",1);
++    unsetenv("KL_DYLIB_DIR");
++    kl_glibc_install(argv[0]);kl_set_library_path(argv[1]);kl_thread_init();kl_fault_install();
++    double (*floor_fn)(double)=kl_shim_lookup("floor");
++    assert(floor_fn && floor_fn(-1.25)==-2.0 && floor_fn(1.75)==1.0);
++    real_mmap=kl_shim_lookup("mmap64");real_munmap=kl_shim_lookup("munmap");real_remap=kl_shim_lookup("mremap");
++    assert(real_mmap&&real_munmap&&real_remap);
++    kl_interpose("mmap",watch_mmap);kl_interpose("mmap64",watch_mmap);
++    kl_interpose("munmap",watch_unmap);kl_interpose("mremap",watch_remap);
++    kl_lua_builtin_install();kl_image_loaded_hook=safety;
++    char path[4096];snprintf(path,sizeof path,"%s/libvscript.so",argv[1]);
++    kl_image *image=kl_load_recursive(path);
++    if(!image) {fprintf(stderr,"[lua-test] load failed: %s\n",kl_error());return 3;}
++    void (*setter)(void*,void*,void*,void*,void*)=kl_interpose_lookup("lua_VALVE_OVERRIDE_MMAP");
++    uintptr_t got=strtoull(argv[2],NULL,0),branch=strtoull(argv[3],NULL,0);
++    uint32_t expected=(uint32_t)strtoul(argv[4],NULL,0);
++    assert(got+sizeof(void*)<=kl_span(image) && branch+4<=kl_span(image));
++    assert(*(void**)((char*)kl_base(image)+got)==(void*)setter);
++    assert(*(uint32_t*)((char*)kl_base(image)+branch)==expected);
++    puts("PASS Lua real ELF setter relocation binding; original Lua range branch unchanged");
++    setter(NULL,NULL,NULL,NULL,NULL);
++    void *(*newstate)(void)=kl_sym(image,"luaL_newstate");
++    void (*close_state)(void*)=kl_sym(image,"lua_close");
++    void (*push)(void*,const char*,size_t)=kl_sym(image,"lua_pushlstring");
++    void (*settop)(void*,int)=kl_sym(image,"lua_settop");
++    const char *(*tostring)(void*,int,size_t*)=kl_sym(image,"lua_tolstring");
++    int (*gc)(void*,int,int)=kl_sym(image,"lua_gc");
++    void (*table)(void*,int,int)=kl_sym(image,"lua_createtable");
++    void (*pushint)(void*,intptr_t)=kl_sym(image,"lua_pushinteger");
++    void (*rawset)(void*,int,int)=kl_sym(image,"lua_rawseti");
++    void (*rawget)(void*,int,int)=kl_sym(image,"lua_rawgeti");
++    intptr_t (*toint)(void*,int)=kl_sym(image,"lua_tointeger");
++    assert(newstate&&close_state&&push&&settop&&tostring&&gc&&table&&pushint&&rawset&&rawget&&toint);
++    track=1;
++    for(int round=0;round<3;round++) {
++        void *L=newstate();assert(L);
++        char *data=malloc(8*1024*1024);assert(data);
++        for(size_t i=0;i<8*1024*1024;i++)data[i]=(char)(i*31+round);
++        for(size_t size=1024;size<=8*1024*1024;size*=2) {
++            push(L,data,size);size_t n=0;const char *copy=tostring(L,-1,&n);
++            assert(n==size && !memcmp(copy,data,size));
++        }
++        settop(L,0);gc(L,2,0);
++        table(L,0,0);
++        for(int i=1;i<=262144;i++) {pushint(L,(i*17)^0x5a5a);rawset(L,-2,i);}
++        for(int i=1;i<=262144;i+=997) {
++            rawget(L,-1,i);assert(toint(L,-1)==((i*17)^0x5a5a));settop(L,-2);
++        }
++        int before=gc(L,3,0);settop(L,0);gc(L,2,0);int after=gc(L,3,0);assert(after<before);
++        free(data);close_state(L);assert(live_bytes==0);
++        printf("PASS Lua round=%d strings/table-resize/collect/close live-mapped-bytes=%zu peak=%zu\n",round,live_bytes,peak_bytes);
++    }
++    refuse_mapping=1;
++    void *failed=newstate();
++    refuse_mapping=0;
++    assert(!failed);puts("PASS Lua newstate returns NULL on injected anonymous mmap ENOMEM");
++    void *again=newstate();assert(again);close_state(again);assert(live_bytes==0);
++    assert(*(uint32_t*)((char*)kl_base(image)+branch)==expected);
++    printf("PASS Lua allocator maps=%zu unmaps=%zu mremap=%zu failures=%zu; recovered after ENOMEM\n",maps,unmaps,remaps,failures);
++    kl_glibc_report(stderr);return 0;
++}
+diff --git a/NativeARM/host/tests/valve_preflight.c b/NativeARM/host/tests/valve_preflight.c
+new file mode 100644
+index 0000000..daa8d71
+--- /dev/null
++++ b/NativeARM/host/tests/valve_preflight.c
+@@ -0,0 +1,35 @@
++// SPDX-License-Identifier: BSL-1.0
++// Copyright 2026, Nick Kennedy
++// Mapping/relocation diagnostic only. No guest constructors or entry points.
++#include "klepton.h"
++#include "kl_glibc.h"
++#include "kl_lua_builtin.h"
++#include <stdio.h>
++#include <stdlib.h>
++#include <string.h>
++static kl_image *images[512];static char names[512][128];static unsigned count;
++static void image_seen(const char *path,kl_image *img) {
++ if(count>=512)abort();images[count]=img;
++ const char *name=strrchr(path,'/');snprintf(names[count++],128,"%s",name?name+1:path);
++}
++int main(int argc,char **argv) {
++ if(argc!=3){fprintf(stderr,"usage: %s LIBDIR BASENAME.so\n",argv[0]);return 2;}
++ setvbuf(stdout,NULL,_IONBF,0);setvbuf(stderr,NULL,_IONBF,0);
++ setenv("KL_LOAD_NO_INIT","1",1);setenv("KL_SVC_POLICY","trap-code",1);
++ setenv("KL_GUEST_PATCH","0",1);setenv("KL_VK_STRICT","1",1);
++ setenv("KL_GUEST_THREAD_TRACKING","1",1);setenv("KL_TLS_REWRITE_FORCE","1",1);unsetenv("KL_DYLIB_DIR");
++ kl_glibc_install(argv[0]);kl_set_library_path(argv[1]);kl_thread_init();kl_lua_builtin_install();
++ kl_image_loaded_hook=image_seen;
++ char path[4096];snprintf(path,sizeof path,"%s/%s",argv[1],argv[2]);
++ kl_image *root=kl_load_recursive(path);int bad=!root;
++ if(!root)fprintf(stderr,"PREFLIGHT load failure: %s\n",kl_error());
++ for(unsigned i=0;i<count;i++) {
++  const kl_stats *s=kl_get_stats(images[i]);unsigned n=0;
++  const char *const *missing=kl_missing_imports(images[i],&n);
++  printf("PREFLIGHT %s imports=%u TLS=%u x18=%u CTR=%u SVC=%u trapped=%u refused=%u/%u/%u\n",names[i],n,s->tls_rewrites,s->x18_patched,s->ctr_patched,s->svc_sites,s->svc_trapped,s->tls_refused,s->x18_refused,s->ctr_refused);
++  for(unsigned k=0;k<n;k++)printf("UNRESOLVED %s %s\n",names[i],missing[k]);
++  if(n||s->svc_sites!=s->svc_trapped||s->tls_refused||s->x18_refused||s->ctr_refused)bad=1;
++ }
++ printf("PREFLIGHT result=%s loaded=%u no guest constructors/entry points executed\n",bad?"FAIL":"PASS",count);
++ return bad?3:0;
++}
+diff --git a/NativeARM/scripts/clone_game_root.py b/NativeARM/scripts/clone_game_root.py
+new file mode 100644
+index 0000000..27d1917
+--- /dev/null
++++ b/NativeARM/scripts/clone_game_root.py
+@@ -0,0 +1,63 @@
++#!/usr/bin/env python3
++# SPDX-License-Identifier: BSL-1.0
++# Copyright 2026, Nick Kennedy
++"""Create a NEW APFS copy-on-write Alyx root; never write through source links.
++No full-copy fallback or deletion of existing output. Existing game files are
++never modified. Input directories must contain ordinary files/directories.
++"""
++import argparse
++import ctypes
++import json
++import os
++from pathlib import Path
++
++libc = ctypes.CDLL('/usr/lib/libSystem.B.dylib', use_errno=True)
++libc.clonefile.argtypes = [ctypes.c_char_p, ctypes.c_char_p, ctypes.c_int]
++libc.clonefile.restype = ctypes.c_int
++
++def clone(source, target):
++    if libc.clonefile(os.fsencode(source), os.fsencode(target), 0):
++        code = ctypes.get_errno()
++        raise OSError(code, 'APFS clone failed; no full-copy fallback: ' + os.strerror(code), str(source))
++    assert source.stat().st_ino != target.stat().st_ino
++
++def overlay(source, target, counts):
++    if source.is_symlink():
++        raise ValueError('input symlink requires review: ' + str(source))
++    if source.is_dir():
++        target.mkdir(exist_ok=True)
++        for p in sorted(source.iterdir()):
++            if p.name != '.DS_Store': overlay(p, target / p.name, counts)
++    elif source.is_file():
++        if target.exists():
++            if target.is_symlink() or not target.is_file(): raise ValueError(str(target))
++            target.unlink()  # exclusively owned clone in this newly created root
++        clone(source, target)
++        counts['files'] += 1
++        counts['logical_bytes'] += source.stat().st_size
++    else:
++        raise ValueError('unsupported input: ' + str(source))
++
++def main():
++    parser = argparse.ArgumentParser(description=__doc__)
++    parser.add_argument('--content', type=Path, required=True)
++    parser.add_argument('--depot', type=Path, required=True)
++    parser.add_argument('--output', type=Path, required=True)
++    args = parser.parse_args()
++    content, depot, output = args.content.resolve(), args.depot.resolve(), args.output.resolve()
++    assert (content / 'game/hlvr/pak01_dir.vpk').is_file()
++    assert (depot / 'game/bin/linuxsteamrtarm64/libengine2.so').is_file()
++    for root in (content, depot):
++        assert not output.is_relative_to(root), 'output must be outside source tree'
++    output.mkdir(parents=True, exist_ok=False)
++    counts = {'files': 0, 'logical_bytes': 0}
++    overlay(content / 'game', output / 'game', counts)
++    overlay(depot / 'game', output / 'game', counts)
++    (output / 'cache').mkdir()
++    (output / 'steam_appid.txt').write_text('546560\n')
++    report = {'content': str(content), 'depot': str(depot), 'output': str(output),
++              'method': 'APFS clonefile; separate inodes; no symlink write-through', **counts}
++    (output / 'clone-manifest.json').write_text(json.dumps(report, indent=2) + '\n')
++    print(json.dumps(report, indent=2))
++
++if __name__ == '__main__': main()
+diff --git a/NativeARM/scripts/fetch_lua_runtime.py b/NativeARM/scripts/fetch_lua_runtime.py
+new file mode 100644
+index 0000000..f291e82
+--- /dev/null
++++ b/NativeARM/scripts/fetch_lua_runtime.py
+@@ -0,0 +1,51 @@
++#!/usr/bin/env python3
++# SPDX-License-Identifier: BSL-1.0
++# Copyright 2026, Nick Kennedy
++"""Fetch only GNU C++/unwind ARM64 runtime packages into a NEW test directory.
++No installation, maintainer scripts or game modifications. HTTPS index/package
++SHA256 verification; metadata/archives and copyright files retained for audit.
++"""
++import argparse
++import gzip
++import hashlib
++import json
++from pathlib import Path
++import subprocess
++import urllib.request
++
++parser = argparse.ArgumentParser(description=__doc__)
++parser.add_argument('output', type=Path)
++parser.add_argument('--packages', nargs='+', choices=['libstdc++6', 'libgcc-s1', 'libuuid1'], default=['libstdc++6', 'libgcc-s1'])
++args = parser.parse_args()
++args.output.mkdir(parents=True, exist_ok=False)
++mirror = 'https://deb.debian.org/debian/'
++index_url = mirror + 'dists/trixie/main/binary-arm64/Packages.gz'
++index_data = urllib.request.urlopen(index_url, timeout=60).read()
++(args.output / 'Packages.gz').write_bytes(index_data)
++packages = {}
++for block in gzip.decompress(index_data).decode().split('\n\n'):
++    fields = dict(line.split(': ', 1) for line in block.splitlines() if ': ' in line and not line.startswith(' '))
++    if fields.get('Package') in args.packages and fields.get('Architecture') == 'arm64':
++        packages[fields['Package']] = fields
++assert set(packages) == set(args.packages)
++manifest = {'index_url': index_url, 'index_sha256': hashlib.sha256(index_data).hexdigest(), 'packages': []}
++for name, fields in sorted(packages.items()):
++    url = mirror + fields['Filename']
++    data = urllib.request.urlopen(url, timeout=60).read()
++    assert len(data) == int(fields['Size'])
++    digest = hashlib.sha256(data).hexdigest()
++    assert digest == fields['SHA256']
++    deb = args.output / Path(fields['Filename']).name
++    deb.write_bytes(data)
++    members = subprocess.check_output(['ar', 't', str(deb)], text=True).splitlines()
++    payload = next(m for m in members if m.startswith('data.tar.'))
++    archive = args.output / (name + '-' + payload)
++    archive.write_bytes(subprocess.check_output(['ar', 'p', str(deb), payload]))
++    entries = subprocess.check_output(['/usr/bin/tar', '-tf', str(archive)], text=True).splitlines()
++    selected = [p for p in entries if '/..' not in p and not p.startswith('/') and
++                (p.startswith('./usr/lib/aarch64-linux-gnu/lib') or p == './usr/share/doc/' + name + '/copyright')]
++    assert selected
++    subprocess.run(['/usr/bin/tar', '-xf', str(archive), '-C', str(args.output), *selected], check=True)
++    manifest['packages'].append({'name': name, 'version': fields['Version'], 'url': url, 'sha256': digest, 'files': selected})
++    print(name, fields['Version'], digest)
++(args.output / 'manifest.json').write_text(json.dumps(manifest, indent=2) + '\n')
+diff --git a/NativeARM/scripts/launch_xrizer.py b/NativeARM/scripts/launch_xrizer.py
+new file mode 100644
+index 0000000..9d95083
+--- /dev/null
++++ b/NativeARM/scripts/launch_xrizer.py
+@@ -0,0 +1,89 @@
++#!/usr/bin/env python3
++# SPDX-License-Identifier: BSL-1.0
++# Copyright 2026, Nick Kennedy
++"""Launch the isolated constrained host with one recorded Vulkan ICD and xrizer.
++Requires native Steam running/signed in. --no-xr-runtime is a bounded headless
++startup diagnostic: the explicit invalid runtime override prevents Monado load.
++"""
++import argparse
++import json
++import os
++from pathlib import Path
++import signal
++import subprocess
++import time
++
++parser=argparse.ArgumentParser(description=__doc__)
++parser.add_argument('--root',type=Path,required=True)
++parser.add_argument('--libs',type=Path,required=True)
++parser.add_argument('--output',type=Path,required=True)
++parser.add_argument('--driver',choices=['moltenvk','kosmickrisp'],default='moltenvk')
++parser.add_argument('--icd',type=Path)
++parser.add_argument('--host',type=Path,default=Path('/private/tmp/alyx-constrained-host-build/alyx_host'))
++parser.add_argument('--xrizer',type=Path,default=Path('/private/tmp/xrizer-dual-vulkan'))
++parser.add_argument('--openxr-loader',type=Path,default=Path('/Users/nickkennedy/Code/OpenXR-SDK/build/macos/src/loader/Release/libopenxr_loader.dylib'))
++runtime=parser.add_mutually_exclusive_group(required=True)
++runtime.add_argument('--runtime-json',type=Path)
++runtime.add_argument('--no-xr-runtime',action='store_true')
++parser.add_argument('--timeout',type=int,default=120)
++parser.add_argument('--dry-run',action='store_true')
++parser.add_argument('engine_args',nargs=argparse.REMAINDER)
++args=parser.parse_args()
++assert args.timeout>0
++for name in ['root','libs','host','xrizer','openxr_loader']:
++    setattr(args,name,getattr(args,name).resolve(strict=True))
++args.output=args.output.resolve()
++assert not args.output.exists(), 'output must be new'
++assert '"' not in str(args.output) and '\\' not in str(args.output)
++assert (args.root/'clone-manifest.json').is_file(), 'use the isolated cloned root'
++assert (args.libs/'libraries.json').is_file()
++vrclient=args.xrizer/'target/debug/libxrizer.dylib';assert vrclient.is_file()
++backend=args.xrizer/'tools/macos/run-vulkan-backend.py';assert backend.is_file()
++if args.runtime_json:args.runtime_json=args.runtime_json.resolve(strict=True)
++extra=args.engine_args[1:] if args.engine_args[:1]==['--'] else args.engine_args
++settings={
++ 'VERANTYX_GUEST_HOME':str(args.output/'state/guest-home'),
++ 'VERANTYX_OPENVR_ROOT':str(args.output/'state/openvr'),
++ 'VERANTYX_REQUIRE_STEAM':'1',
++ 'XRIZER_VRCLIENT':str(vrclient),
++ 'XRIZER_OPENXR_LOADER':str(args.openxr_loader),
++ 'XR_RUNTIME_JSON':str(args.runtime_json or args.output/'deliberately-unavailable-openxr.json'),
++ 'XDG_CACHE_HOME':str(args.output/'cache'),
++ 'XDG_CONFIG_HOME':str(args.output/'config'),
++ 'KL_VK_FOVEATION_TRACE':'1',
++ 'ALYX_RESULT_FILE':str(args.output/'engine-result.log'),
++}
++command=['python3',str(backend),'--driver',args.driver,'--output',str(args.output/'backend')]
++if args.icd:command+=['--icd',str(args.icd.resolve(strict=True))]
++command+=['--',str(args.host),'--run-constrained','--libdir',str(args.libs),'--game',str(args.root),
++          '--','-vr','-steam','-vulkan','-nowindow','-console','+map','startup',*extra]
++manifest={'command':command,'environment':settings,'timeout':args.timeout,'headless':args.no_xr_runtime}
++if args.dry_run:
++ print(json.dumps(manifest,indent=2));raise SystemExit(0)
++args.output.mkdir(parents=True,exist_ok=False)
++for name in ['state/guest-home','state/openvr','cache','config']:(args.output/name).mkdir(parents=True,exist_ok=True)
++env={k:v for k,v in os.environ.items() if not k.startswith(('KL_','VERANTYX_','MVK_CONFIG_'))}
++env.update(settings)
++started=time.time()
++with (args.output/'launcher.log').open('w') as log:
++ child=subprocess.Popen(command,cwd=args.root,env=env,stdout=log,stderr=subprocess.STDOUT,start_new_session=True)
++ try:
++  code=child.wait(timeout=args.timeout)
++ except (subprocess.TimeoutExpired,KeyboardInterrupt) as error:
++  os.killpg(child.pid,signal.SIGTERM)
++  try:child.wait(timeout=5)
++  except subprocess.TimeoutExpired:os.killpg(child.pid,signal.SIGKILL);child.wait()
++  code=124 if isinstance(error,subprocess.TimeoutExpired) else 130
++log=args.output/'backend/run.log'
++text=log.read_text() if log.is_file() else ''
++checkpoint='ERROR_RUNTIME_UNAVAILABLE' in text
++manifest.update(exit_code=code,elapsed_seconds=time.time()-started,
++                source2_entry_observed='Source2Main(' in text,
++                openxr_unavailable_observed=checkpoint)
++if args.no_xr_runtime and code==0 and not checkpoint:
++    code=1;manifest['diagnostic_error']='startup ended without reaching the disabled OpenXR checkpoint'
++(args.output/'launch-manifest.json').write_text(json.dumps(manifest,indent=2)+'\n')
++print('exit:',code,'logs:',args.output)
++if args.no_xr_runtime:print('expected OpenXR-unavailable checkpoint:',checkpoint)
++if text:print(text[-10000:])
++raise SystemExit(code if code>=0 else 128-code)
+diff --git a/NativeARM/scripts/prepare_guest_dir.py b/NativeARM/scripts/prepare_guest_dir.py
+new file mode 100644
+index 0000000..98fb510
+--- /dev/null
++++ b/NativeARM/scripts/prepare_guest_dir.py
+@@ -0,0 +1,43 @@
++#!/usr/bin/env python3
++# SPDX-License-Identifier: BSL-1.0
++# Copyright 2026, Nick Kennedy
++"""Build a NEW read-only-input flat library search directory for an isolated root."""
++import argparse
++import hashlib
++import json
++from pathlib import Path
++import re
++import subprocess
++parser=argparse.ArgumentParser(description=__doc__)
++parser.add_argument('--game',type=Path,required=True)
++parser.add_argument('--runtime',type=Path,required=True)
++parser.add_argument('--output',type=Path,required=True)
++parser.add_argument('--extra-runtime',type=Path,nargs='*',default=[])
++args=parser.parse_args()
++args.output.mkdir(parents=True,exist_ok=False)
++sources=[args.game/'game/bin/linuxsteamrtarm64', args.game/'game/hlvr/bin/linuxsteamrtarm64',
++         args.runtime/'usr/lib/aarch64-linux-gnu'] + [p/'usr/lib/aarch64-linux-gnu' for p in args.extra_runtime]
++entries={}
++aliases={}
++for directory in sources:
++    for path in sorted(directory.glob('*.so*')):
++        if not path.is_file() or path.name in ('libvulkan_freedreno_hlvr.so','libmimalloc.so'):continue
++        with path.open('rb') as f:
++            if f.read(4)!=b'\x7fELF':continue
++        if path.name in entries and hashlib.sha256(entries[path.name].read_bytes()).digest()!=hashlib.sha256(path.read_bytes()).digest():
++            raise ValueError('conflicting exact library filename: '+path.name)
++        entries[path.name]=path
++        text=subprocess.check_output(['/opt/homebrew/opt/llvm/bin/llvm-readelf','-d',str(path)],text=True)
++        match=re.search(r'\(SONAME\).*?\[(.*?)\]',text)
++        names={path.name.split('.so')[0]+'.so'}
++        if match:names.add(match[1])
++        for name in names:
++            assert '/' not in name and name not in ('.','..')
++            aliases.setdefault(name,path)
++# An actual supplied filename always wins over a generated SONAME/bare alias.
++for name,path in aliases.items():entries.setdefault(name,path)
++manifest={}
++for name,path in sorted(entries.items()):
++    (args.output/name).symlink_to(path.resolve());manifest[name]=str(path.resolve())
++(args.output/'libraries.json').write_text(json.dumps(manifest,indent=2,sort_keys=True)+'\n')
++print('library names:',len(manifest))
+diff --git a/NativeARM/scripts/run_valve_lua.py b/NativeARM/scripts/run_valve_lua.py
+new file mode 100644
+index 0000000..d076a8c
+--- /dev/null
++++ b/NativeARM/scripts/run_valve_lua.py
+@@ -0,0 +1,81 @@
++#!/usr/bin/env python3
++# SPDX-License-Identifier: BSL-1.0
++# Copyright 2026, Nick Kennedy
++"""Run the explicitly built headless Valve Lua test in a NEW isolated directory."""
++import argparse
++import hashlib
++import json
++import os
++from pathlib import Path
++import subprocess
++import struct
++
++parser = argparse.ArgumentParser(description=__doc__)
++parser.add_argument('--executable', type=Path, required=True)
++parser.add_argument('--depot', type=Path, required=True)
++parser.add_argument('--runtime', type=Path, required=True)
++parser.add_argument('--output', type=Path, required=True)
++args = parser.parse_args()
++args.output = args.output.resolve()
++args.output.mkdir(parents=True, exist_ok=False)
++libs = args.output / 'lib'
++libs.mkdir()
++original = args.depot.resolve() / 'game/bin/linuxsteamrtarm64'
++files = [original / n for n in ('libvscript.so', 'libtier0.so', 'libvstdlib.so')]
++files += [args.runtime.resolve() / 'usr/lib/aarch64-linux-gnu' / n for n in ('libstdc++.so.6', 'libgcc_s.so.1')]
++for p in files:
++    assert p.is_file(), p
++    (libs / p.name).symlink_to(p)
++def hashes():
++    return {p.name: hashlib.sha256(p.read_bytes()).hexdigest() for p in files}
++# Discover binding/range-check locations from the actual input, not a fixed build offset.
++elf = files[0].read_bytes()
++shoff = struct.unpack_from('<Q', elf, 40)[0]
++shsize, shnum = struct.unpack_from('<HH', elf, 58)
++assert shsize == 64
++sections = [struct.unpack_from('<IIQQQQIIQQ', elf, shoff + i * shsize) for i in range(shnum)]
++slots = []
++for section in sections:
++    if section[1] != 4: continue
++    dynsym = sections[section[6]]
++    strings = sections[dynsym[6]]
++    for offset in range(section[4], section[4] + section[5], section[9]):
++        address, info, addend = struct.unpack_from('<QQq', elf, offset)
++        if (info & 0xffffffff) != 1026: continue
++        name_offset = struct.unpack_from('<I', elf, dynsym[4] + (info >> 32) * dynsym[9])[0]
++        begin = strings[4] + name_offset
++        if elf[begin:elf.index(b'\0', begin)] == b'lua_VALVE_OVERRIDE_MMAP': slots.append(address)
++assert len(slots) == 1
++pattern = struct.pack('<5I', 0xd2b00001, 0xa9025bf5, 0xaa0003f5, 0xcb130021, 0xeb01001f)
++branches = []
++for section in sections:
++    if not (section[2] & 4): continue
++    data = elf[section[4]:section[4] + section[5]]
++    start = 0
++    while True:
++        match = data.find(pattern, start)
++        if match < 0: break
++        branch = struct.unpack_from('<I', data, match + len(pattern))[0]
++        if (branch & 0xff00001f) == 0x54000008:
++            branches.append((section[3] + match + len(pattern), branch))
++        start = match + 4
++assert len(branches) == 1
++before = hashes()
++# Prevent inherited debug toggles from skipping constructors or enabling repairs.
++env = {k: v for k, v in os.environ.items() if not k.startswith(('KL_', 'VERANTYX_', 'MVK_CONFIG_'))}
++try:
++    with (args.output / 'run.log').open('w') as log:
++        try:
++            result = subprocess.run([str(args.executable.resolve()), str(libs), hex(slots[0]), hex(branches[0][0]), hex(branches[0][1])], cwd=args.output,
++                                    env=env, stdout=log, stderr=subprocess.STDOUT, timeout=30)
++            status = result.returncode
++        except subprocess.TimeoutExpired:
++            status = 'timeout'
++finally:
++    after = hashes()
++    (args.output / 'hashes.json').write_text(json.dumps({'before': before, 'after': after,
++                          'returncode': locals().get('status', 'exception')}, indent=2) + '\n')
++    assert before == after, 'input files changed'
++print('output:', args.output, 'returncode:', status, 'five input hashes unchanged')
++print((args.output / 'run.log').read_text()[-10000:])
++raise SystemExit(0 if status == 0 else 1)
+-- 
+2.54.0 (Apple Git-157)
+
+
+From ca6f3caff12878464fad0a1d3920e4d1f4764b89 Mon Sep 17 00:00:00 2001
+From: Nick Kennedy <nick@nick-kennedy.com>
+Date: Tue, 20 Oct 2026 08:48:51 +0200
+Subject: [PATCH 2/2] launch: record native runtime binary identities for
+ headset tests
+
+Signed-off-by: Nick Kennedy <nick@nick-kennedy.com>
+---
+ NativeARM/scripts/launch_xrizer.py | 11 ++++++++++-
+ 1 file changed, 10 insertions(+), 1 deletion(-)
+
+diff --git a/NativeARM/scripts/launch_xrizer.py b/NativeARM/scripts/launch_xrizer.py
+index 9d95083..1807333 100644
+--- a/NativeARM/scripts/launch_xrizer.py
++++ b/NativeARM/scripts/launch_xrizer.py
+@@ -7,6 +7,7 @@ startup diagnostic: the explicit invalid runtime override prevents Monado load.
+ """
+ import argparse
+ import json
++import hashlib
+ import os
+ from pathlib import Path
+ import signal
+@@ -57,7 +58,15 @@ command=['python3',str(backend),'--driver',args.driver,'--output',str(args.outpu
+ if args.icd:command+=['--icd',str(args.icd.resolve(strict=True))]
+ command+=['--',str(args.host),'--run-constrained','--libdir',str(args.libs),'--game',str(args.root),
+           '--','-vr','-steam','-vulkan','-nowindow','-console','+map','startup',*extra]
+-manifest={'command':command,'environment':settings,'timeout':args.timeout,'headless':args.no_xr_runtime}
++binaries={'host':args.host,'xrizer':vrclient,'openxr_loader':args.openxr_loader,
++          'engine':args.root/'game/bin/linuxsteamrtarm64/libengine2.so'}
++if args.runtime_json:
++    data=json.loads(args.runtime_json.read_text())
++    library=Path(data['runtime']['library_path'])
++    if not library.is_absolute():library=args.runtime_json.parent/library
++    binaries['monado_runtime']=library.resolve(strict=True)
++manifest={'command':command,'environment':settings,'timeout':args.timeout,'headless':args.no_xr_runtime,
++          'binaries':{name:{'path':str(path),'sha256':hashlib.sha256(path.read_bytes()).hexdigest()} for name,path in binaries.items()}}
+ if args.dry_run:
+  print(json.dumps(manifest,indent=2));raise SystemExit(0)
+ args.output.mkdir(parents=True,exist_ok=False)
+-- 
+2.54.0 (Apple Git-157)
+

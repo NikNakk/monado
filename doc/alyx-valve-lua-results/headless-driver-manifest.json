@@ -1,0 +1,40 @@
+{
+  "requested_driver": "moltenvk",
+  "icd": "/opt/homebrew/Cellar/molten-vk/1.4.2/etc/vulkan/icd.d/MoltenVK_icd.json",
+  "icd_contents": {
+    "file_format_version": "1.0.0",
+    "ICD": {
+      "library_path": "../../../lib/libMoltenVK.dylib",
+      "api_version": "1.4.0",
+      "is_portability_driver": true
+    }
+  },
+  "library": "/opt/homebrew/Cellar/molten-vk/1.4.2/lib/libMoltenVK.dylib",
+  "library_sha256": "05df2d2145b9ef5b86b08ed93a7a6e916815c2bbac244298a50b2d58061600d1",
+  "loader": "/opt/homebrew/Cellar/vulkan-loader/1.4.363.0/lib/libvulkan.1.4.363.dylib",
+  "command": [
+    "/private/tmp/alyx-constrained-host-build/alyx_host",
+    "--run-constrained",
+    "--libdir",
+    "/private/tmp/alyx-native-guest-libs-ready",
+    "--game",
+    "/private/tmp/alyx-native-game-root",
+    "--",
+    "-vr",
+    "-steam",
+    "-vulkan",
+    "-nowindow",
+    "-console",
+    "+map",
+    "startup"
+  ],
+  "selection": {
+    "VK_DRIVER_FILES": "/opt/homebrew/Cellar/molten-vk/1.4.2/etc/vulkan/icd.d/MoltenVK_icd.json",
+    "XRIZER_VULKAN_LIBRARY": "/opt/homebrew/Cellar/vulkan-loader/1.4.363.0/lib/libvulkan.1.4.363.dylib",
+    "KL_VULKAN_LIBRARY": "/opt/homebrew/Cellar/vulkan-loader/1.4.363.0/lib/libvulkan.1.4.363.dylib"
+  },
+  "started_unix": 1792478559.77053,
+  "observed_device": "device=Apple M5 vendor=0x106b deviceID=0x1a07020a api=1.2.357 driverVersion=10402 driverID=14 driver=MoltenVK info=1.4.2 UUID=0000106b1a07020a0000000000000000",
+  "exit_code": 0,
+  "elapsed_seconds": 1.140963077545166
+}

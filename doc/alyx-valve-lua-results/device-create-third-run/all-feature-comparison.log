@@ -1,0 +1,4 @@
+instance=0 api=4206592
+unsupported VkPhysicalDeviceExtendedDynamicState3FeaturesEXT.extendedDynamicState3ColorWriteMask
+original-request result=-8
+standalone-supported-subset result=0

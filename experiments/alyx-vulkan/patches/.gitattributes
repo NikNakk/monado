@@ -1,0 +1,2 @@
+# Patch context whitespace is significant.
+*.patch -whitespace

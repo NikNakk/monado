@@ -1,0 +1,295 @@
+  [vk] explicit Vulkan dispatch library: /private/tmp/klepton-vulkan-strict.UxIwet/driver.dylib
+  [vk] Vulkan dispatch loaded — instance API 1.0.0
+  [vk] fdm resolve=vkCreateDevice
+  [vk] fdm resolve=vkCreateInstance
+  [vk] fdm resolve=vkUnknownNeverProvided
+  [vk] fdm resolve=vkUnknownNeverProvided
+  [vk] fdm resolve=vkGetPhysicalDeviceFragmentShadingRatesKHR
+  [vk] fdm resolve=vkEnumerateInstanceExtensionProperties
+  [vk] fdm resolve=vkCreateGraphicsPipelines
+  [vk] fdm resolve=vkCreateGraphicsPipelines
+  [vk] fdm resolve=vkCreateShaderModule
+  [vk] fdm resolve=vkCreateShaderModule
+  [vk] fdm resolve=vkGetPhysicalDeviceFeatures2
+  [vk] fdm resolve=vkGetPhysicalDeviceFeatures2
+  [vk] fdm resolve=vkCmdBeginRenderPass
+  [vk] fdm resolve=vkCmdBeginRenderPass
+  [vk] fdm resolve=vkCreateImage
+  [vk] fdm resolve=vkCreateImage
+  [vk] fdm resolve=vkCreateInstance
+  [vk] fdm CreateInstance-request extension=VK_TEST_missing
+  [vk] fdm CreateInstance-request extension=VK_TEST_1
+  [vk] fdm CreateInstance-request extension=VK_TEST_2
+  [vk] fdm CreateInstance-request extension=VK_TEST_3
+  [vk] fdm CreateInstance-request extension=VK_TEST_4
+  [vk] fdm CreateInstance-request extension=VK_TEST_5
+  [vk] fdm CreateInstance-request extension=VK_TEST_6
+  [vk] fdm CreateInstance-request extension=VK_TEST_7
+  [vk] fdm CreateInstance-request extension=VK_TEST_8
+  [vk] fdm CreateInstance-request extension=VK_TEST_9
+  [vk] fdm CreateInstance-request extension=VK_TEST_10
+  [vk] fdm CreateInstance-request extension=VK_TEST_11
+  [vk] fdm CreateInstance-request extension=VK_TEST_12
+  [vk] fdm CreateInstance-request extension=VK_TEST_13
+  [vk] fdm CreateInstance-request extension=VK_TEST_14
+  [vk] fdm CreateInstance-request extension=VK_TEST_15
+  [vk] fdm CreateInstance-request extension=VK_TEST_16
+  [vk] fdm CreateInstance-request extension=VK_TEST_17
+  [vk] fdm CreateInstance-request extension=VK_TEST_18
+  [vk] fdm CreateInstance-request extension=VK_TEST_19
+  [vk] fdm CreateInstance-request extension=VK_TEST_20
+  [vk] fdm CreateInstance-request extension=VK_TEST_21
+  [vk] fdm CreateInstance-request extension=VK_TEST_22
+  [vk] fdm CreateInstance-request extension=VK_TEST_23
+  [vk] fdm CreateInstance-request extension=VK_TEST_24
+  [vk] fdm CreateInstance-request extension=VK_TEST_25
+  [vk] fdm CreateInstance-request extension=VK_TEST_26
+  [vk] fdm CreateInstance-request extension=VK_TEST_27
+  [vk] fdm CreateInstance-request extension=VK_TEST_28
+  [vk] fdm CreateInstance-request extension=VK_TEST_29
+  [vk] fdm CreateInstance-request extension=VK_TEST_30
+  [vk] fdm CreateInstance-request extension=VK_TEST_31
+  [vk] fdm CreateInstance-request extension=VK_TEST_32
+  [vk] fdm CreateInstance-request extension=VK_TEST_33
+  [vk] fdm CreateInstance-request extension=VK_TEST_34
+  [vk] fdm CreateInstance-request extension=VK_TEST_35
+  [vk] fdm CreateInstance-request extension=VK_TEST_36
+  [vk] fdm CreateInstance-request extension=VK_TEST_37
+  [vk] fdm CreateInstance-request extension=VK_TEST_38
+  [vk] fdm CreateInstance-request extension=VK_TEST_39
+  [vk] fdm CreateInstance-request extension=VK_TEST_40
+  [vk] fdm CreateInstance-request extension=VK_TEST_41
+  [vk] fdm CreateInstance-request extension=VK_TEST_42
+  [vk] fdm CreateInstance-request extension=VK_TEST_43
+  [vk] fdm CreateInstance-request extension=VK_TEST_44
+  [vk] fdm CreateInstance-request extension=VK_TEST_45
+  [vk] fdm CreateInstance-request extension=VK_TEST_46
+  [vk] fdm CreateInstance-request extension=VK_TEST_47
+  [vk] fdm CreateInstance-request extension=VK_TEST_48
+  [vk] fdm CreateInstance-request extension=VK_TEST_49
+  [vk] fdm CreateInstance-request extension=VK_TEST_50
+  [vk] fdm CreateInstance-request extension=VK_TEST_51
+  [vk] fdm CreateInstance-request extension=VK_TEST_52
+  [vk] fdm CreateInstance-request extension=VK_TEST_53
+  [vk] fdm CreateInstance-request extension=VK_TEST_54
+  [vk] fdm CreateInstance-request extension=VK_TEST_55
+  [vk] fdm CreateInstance-request extension=VK_TEST_56
+  [vk] fdm CreateInstance-request extension=VK_TEST_57
+  [vk] fdm CreateInstance-request extension=VK_TEST_58
+  [vk] fdm CreateInstance-request extension=VK_TEST_59
+  [vk] fdm CreateInstance-request extension=VK_TEST_60
+  [vk] fdm CreateInstance-request extension=VK_TEST_61
+  [vk] fdm CreateInstance-request extension=VK_TEST_62
+  [vk] fdm CreateInstance-request extension=VK_TEST_63
+  [vk] fdm CreateInstance-request extension=VK_TEST_64
+  [vk] fdm CreateInstance-request extension=VK_TEST_65
+  [vk] fdm CreateInstance-request extension=VK_TEST_66
+  [vk] fdm CreateInstance-request extension=VK_TEST_67
+  [vk] fdm CreateInstance-request extension=VK_TEST_68
+  [vk] fdm CreateInstance-request extension=VK_TEST_69
+  [vk] fdm CreateInstance-request extension=VK_KHR_xcb_surface
+  [vk] fdm strict-instance-forwarded extension=VK_TEST_missing
+  [vk] fdm strict-instance-forwarded extension=VK_TEST_1
+  [vk] fdm strict-instance-forwarded extension=VK_TEST_2
+  [vk] fdm strict-instance-forwarded extension=VK_TEST_3
+  [vk] fdm strict-instance-forwarded extension=VK_TEST_4
+  [vk] fdm strict-instance-forwarded extension=VK_TEST_5
+  [vk] fdm strict-instance-forwarded extension=VK_TEST_6
+  [vk] fdm strict-instance-forwarded extension=VK_TEST_7
+  [vk] fdm strict-instance-forwarded extension=VK_TEST_8
+  [vk] fdm strict-instance-forwarded extension=VK_TEST_9
+  [vk] fdm strict-instance-forwarded extension=VK_TEST_10
+  [vk] fdm strict-instance-forwarded extension=VK_TEST_11
+  [vk] fdm strict-instance-forwarded extension=VK_TEST_12
+  [vk] fdm strict-instance-forwarded extension=VK_TEST_13
+  [vk] fdm strict-instance-forwarded extension=VK_TEST_14
+  [vk] fdm strict-instance-forwarded extension=VK_TEST_15
+  [vk] fdm strict-instance-forwarded extension=VK_TEST_16
+  [vk] fdm strict-instance-forwarded extension=VK_TEST_17
+  [vk] fdm strict-instance-forwarded extension=VK_TEST_18
+  [vk] fdm strict-instance-forwarded extension=VK_TEST_19
+  [vk] fdm strict-instance-forwarded extension=VK_TEST_20
+  [vk] fdm strict-instance-forwarded extension=VK_TEST_21
+  [vk] fdm strict-instance-forwarded extension=VK_TEST_22
+  [vk] fdm strict-instance-forwarded extension=VK_TEST_23
+  [vk] fdm strict-instance-forwarded extension=VK_TEST_24
+  [vk] fdm strict-instance-forwarded extension=VK_TEST_25
+  [vk] fdm strict-instance-forwarded extension=VK_TEST_26
+  [vk] fdm strict-instance-forwarded extension=VK_TEST_27
+  [vk] fdm strict-instance-forwarded extension=VK_TEST_28
+  [vk] fdm strict-instance-forwarded extension=VK_TEST_29
+  [vk] fdm strict-instance-forwarded extension=VK_TEST_30
+  [vk] fdm strict-instance-forwarded extension=VK_TEST_31
+  [vk] fdm strict-instance-forwarded extension=VK_TEST_32
+  [vk] fdm strict-instance-forwarded extension=VK_TEST_33
+  [vk] fdm strict-instance-forwarded extension=VK_TEST_34
+  [vk] fdm strict-instance-forwarded extension=VK_TEST_35
+  [vk] fdm strict-instance-forwarded extension=VK_TEST_36
+  [vk] fdm strict-instance-forwarded extension=VK_TEST_37
+  [vk] fdm strict-instance-forwarded extension=VK_TEST_38
+  [vk] fdm strict-instance-forwarded extension=VK_TEST_39
+  [vk] fdm strict-instance-forwarded extension=VK_TEST_40
+  [vk] fdm strict-instance-forwarded extension=VK_TEST_41
+  [vk] fdm strict-instance-forwarded extension=VK_TEST_42
+  [vk] fdm strict-instance-forwarded extension=VK_TEST_43
+  [vk] fdm strict-instance-forwarded extension=VK_TEST_44
+  [vk] fdm strict-instance-forwarded extension=VK_TEST_45
+  [vk] fdm strict-instance-forwarded extension=VK_TEST_46
+  [vk] fdm strict-instance-forwarded extension=VK_TEST_47
+  [vk] fdm strict-instance-forwarded extension=VK_TEST_48
+  [vk] fdm strict-instance-forwarded extension=VK_TEST_49
+  [vk] fdm strict-instance-forwarded extension=VK_TEST_50
+  [vk] fdm strict-instance-forwarded extension=VK_TEST_51
+  [vk] fdm strict-instance-forwarded extension=VK_TEST_52
+  [vk] fdm strict-instance-forwarded extension=VK_TEST_53
+  [vk] fdm strict-instance-forwarded extension=VK_TEST_54
+  [vk] fdm strict-instance-forwarded extension=VK_TEST_55
+  [vk] fdm strict-instance-forwarded extension=VK_TEST_56
+  [vk] fdm strict-instance-forwarded extension=VK_TEST_57
+  [vk] fdm strict-instance-forwarded extension=VK_TEST_58
+  [vk] fdm strict-instance-forwarded extension=VK_TEST_59
+  [vk] fdm strict-instance-forwarded extension=VK_TEST_60
+  [vk] fdm strict-instance-forwarded extension=VK_TEST_61
+  [vk] fdm strict-instance-forwarded extension=VK_TEST_62
+  [vk] fdm strict-instance-forwarded extension=VK_TEST_63
+  [vk] fdm strict-instance-forwarded extension=VK_TEST_64
+  [vk] fdm strict-instance-forwarded extension=VK_TEST_65
+  [vk] fdm strict-instance-forwarded extension=VK_TEST_66
+  [vk] fdm strict-instance-forwarded extension=VK_TEST_67
+  [vk] fdm strict-instance-forwarded extension=VK_TEST_68
+  [vk] fdm strict-instance-forwarded extension=VK_TEST_69
+  [vk] fdm strict-instance-forwarded extension=VK_KHR_portability_enumeration
+  [vk] fdm resolve=vkCreateDevice
+  [vk] fdm strict-device-request extension=VK_TEST_missing
+  [vk] fdm strict-device-request pNext sType=1000218000
+  [vk] fdm strict-device-request features map=1 dynamic=1 nonSubsampled=0
+  [vk] device-request flags=0 queues=0 layers=1 coreFeatures=present
+  [vk] device-request core word=0 value=0
+  [vk] device-request core word=1 value=0
+  [vk] device-request core word=2 value=0
+  [vk] device-request core word=3 value=0
+  [vk] device-request core word=4 value=1
+  [vk] device-request core word=5 value=0
+  [vk] device-request core word=6 value=0
+  [vk] device-request core word=7 value=0
+  [vk] device-request core word=8 value=0
+  [vk] device-request core word=9 value=0
+  [vk] device-request core word=10 value=0
+  [vk] device-request core word=11 value=0
+  [vk] device-request core word=12 value=0
+  [vk] device-request core word=13 value=0
+  [vk] device-request core word=14 value=0
+  [vk] device-request core word=15 value=0
+  [vk] device-request core word=16 value=0
+  [vk] device-request core word=17 value=0
+  [vk] device-request core word=18 value=0
+  [vk] device-request core word=19 value=0
+  [vk] device-request core word=20 value=0
+  [vk] device-request core word=21 value=0
+  [vk] device-request core word=22 value=0
+  [vk] device-request core word=23 value=0
+  [vk] device-request core word=24 value=0
+  [vk] device-request core word=25 value=0
+  [vk] device-request core word=26 value=0
+  [vk] device-request core word=27 value=0
+  [vk] device-request core word=28 value=0
+  [vk] device-request core word=29 value=0
+  [vk] device-request core word=30 value=0
+  [vk] device-request core word=31 value=0
+  [vk] device-request core word=32 value=0
+  [vk] device-request core word=33 value=0
+  [vk] device-request core word=34 value=0
+  [vk] device-request core word=35 value=0
+  [vk] device-request core word=36 value=0
+  [vk] device-request core word=37 value=0
+  [vk] device-request core word=38 value=0
+  [vk] device-request core word=39 value=0
+  [vk] device-request core word=40 value=0
+  [vk] device-request core word=41 value=0
+  [vk] device-request core word=42 value=0
+  [vk] device-request core word=43 value=0
+  [vk] device-request core word=44 value=0
+  [vk] device-request core word=45 value=0
+  [vk] device-request core word=46 value=0
+  [vk] device-request core word=47 value=0
+  [vk] device-request core word=48 value=0
+  [vk] device-request core word=49 value=0
+  [vk] device-request core word=50 value=0
+  [vk] device-request core word=51 value=0
+  [vk] device-request core word=52 value=0
+  [vk] device-request core word=53 value=0
+  [vk] device-request core word=54 value=0
+  [vk] device-request VkPhysicalDeviceFragmentDensityMapFeaturesEXT payloadWord=0 value=1 (may include tail padding)
+  [vk] device-request VkPhysicalDeviceFragmentDensityMapFeaturesEXT payloadWord=1 value=1 (may include tail padding)
+  [vk] device-request VkPhysicalDeviceFragmentDensityMapFeaturesEXT payloadWord=2 value=0 (may include tail padding)
+  [vk] device-request VkPhysicalDeviceFragmentDensityMapFeaturesEXT payloadWord=3 value=0 (may include tail padding)
+  [vk] fdm strict-device-forwarded extension=VK_TEST_missing
+  [vk] fdm strict-device-forwarded extension=VK_KHR_portability_subset
+  [vk] strict vkCreateDevice driver result=-8
+  [vk] fdm strict-device-request extension=VK_TEST_missing
+  [vk] fdm strict-device-request pNext sType=1000218000
+  [vk] fdm strict-device-request features map=1 dynamic=1 nonSubsampled=0
+  [vk] device-request flags=0 queues=0 layers=1 coreFeatures=present
+  [vk] device-request core word=0 value=0
+  [vk] device-request core word=1 value=0
+  [vk] device-request core word=2 value=0
+  [vk] device-request core word=3 value=0
+  [vk] device-request core word=4 value=1
+  [vk] device-request core word=5 value=0
+  [vk] device-request core word=6 value=0
+  [vk] device-request core word=7 value=0
+  [vk] device-request core word=8 value=0
+  [vk] device-request core word=9 value=0
+  [vk] device-request core word=10 value=0
+  [vk] device-request core word=11 value=0
+  [vk] device-request core word=12 value=0
+  [vk] device-request core word=13 value=0
+  [vk] device-request core word=14 value=0
+  [vk] device-request core word=15 value=0
+  [vk] device-request core word=16 value=0
+  [vk] device-request core word=17 value=0
+  [vk] device-request core word=18 value=0
+  [vk] device-request core word=19 value=0
+  [vk] device-request core word=20 value=0
+  [vk] device-request core word=21 value=0
+  [vk] device-request core word=22 value=0
+  [vk] device-request core word=23 value=0
+  [vk] device-request core word=24 value=0
+  [vk] device-request core word=25 value=0
+  [vk] device-request core word=26 value=0
+  [vk] device-request core word=27 value=0
+  [vk] device-request core word=28 value=0
+  [vk] device-request core word=29 value=0
+  [vk] device-request core word=30 value=0
+  [vk] device-request core word=31 value=0
+  [vk] device-request core word=32 value=0
+  [vk] device-request core word=33 value=0
+  [vk] device-request core word=34 value=0
+  [vk] device-request core word=35 value=0
+  [vk] device-request core word=36 value=0
+  [vk] device-request core word=37 value=0
+  [vk] device-request core word=38 value=0
+  [vk] device-request core word=39 value=0
+  [vk] device-request core word=40 value=0
+  [vk] device-request core word=41 value=0
+  [vk] device-request core word=42 value=0
+  [vk] device-request core word=43 value=0
+  [vk] device-request core word=44 value=0
+  [vk] device-request core word=45 value=0
+  [vk] device-request core word=46 value=0
+  [vk] device-request core word=47 value=0
+  [vk] device-request core word=48 value=0
+  [vk] device-request core word=49 value=0
+  [vk] device-request core word=50 value=0
+  [vk] device-request core word=51 value=0
+  [vk] device-request core word=52 value=0
+  [vk] device-request core word=53 value=0
+  [vk] device-request core word=54 value=0
+  [vk] device-request VkPhysicalDeviceFragmentDensityMapFeaturesEXT payloadWord=0 value=1 (may include tail padding)
+  [vk] device-request VkPhysicalDeviceFragmentDensityMapFeaturesEXT payloadWord=1 value=1 (may include tail padding)
+  [vk] device-request VkPhysicalDeviceFragmentDensityMapFeaturesEXT payloadWord=2 value=0 (may include tail padding)
+  [vk] device-request VkPhysicalDeviceFragmentDensityMapFeaturesEXT payloadWord=3 value=0 (may include tail padding)
+  [vk] fdm strict-device-forwarded extension=VK_TEST_missing
+  [vk] strict vkCreateDevice extension enumeration result=-3
+PASS: strict Vulkan preserves >64 extensions, layers/API/features/pNext; no retry, null substitution, graphics repair or success stub
+PASS: exact feature payload and driver/enumeration failure diagnostics

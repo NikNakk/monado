@@ -1,0 +1,29 @@
+{
+  "source_revisions": {
+    "performance_xrizer": "5c2b9c0",
+    "working_xrizer_wrapper": "a8feb75",
+    "verantyx": "aa6ea3f",
+    "klepton": "44985ec"
+  },
+  "files": {
+    "optimized": {
+      "path": "/private/tmp/xrizer-perf-target/release/libxrizer.dylib",
+      "sha256": "481a91a66da8c93f3aa4edc47e45218a145582a52ce52f4ca42fd0525b8478eb"
+    },
+    "instrumented_debug": {
+      "path": "/private/tmp/xrizer-perf-target/debug/libxrizer.dylib",
+      "sha256": "1848012568498646677caba50a70b0a10a85927996b4c5afc413a07e1eea4fd3"
+    },
+    "preserved_crashing_optimized": {
+      "path": "/private/tmp/xrizer-perf-66399cb-release.dylib",
+      "sha256": "ae6fd321f7298aec52dd7bed1e2954b7e8d11373527cc3245ccdb101b6ad5a9b"
+    },
+    "working_debug": {
+      "path": "/private/tmp/xrizer-dual-vulkan/target/debug/libxrizer.dylib",
+      "sha256": "24b28582ece09b1758203311f98437e85d37365ecf705d2fce53ccc5698ecfb8"
+    }
+  },
+  "working_debug_and_host_hashes_unchanged": true,
+  "build": "CARGO_TARGET_DIR=/private/tmp/xrizer-perf-target XRIZER_VERSION=5c2b9c0 cargo build --offline [--release] -p xrizer",
+  "new_game_run_performed": false
+}

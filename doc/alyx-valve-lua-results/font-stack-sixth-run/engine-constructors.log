@@ -1,0 +1,8 @@
+  libgcc_s.so.1                    relocs 71 (tlsdesc 1 tprel 0)  imports bound 26  UNRESOLVED 0
+  libstdc++.so.6                   relocs 5407 (tlsdesc 3 tprel 0)  imports bound 185  UNRESOLVED 0
+  libuuid.so.1                     relocs 54 (tlsdesc 3 tprel 0)  imports bound 43  UNRESOLVED 0
+  libtier0.so                      relocs 1606 (tlsdesc 6 tprel 0)  imports bound 349  UNRESOLVED 0
+  libvstdlib.so                    relocs 1695 (tlsdesc 2 tprel 0)  imports bound 380  UNRESOLVED 0
+  libsteam_api.so                  relocs 517 (tlsdesc 2 tprel 0)  imports bound 90  UNRESOLVED 0
+  libengine2.so                    relocs 78308 (tlsdesc 3 tprel 0)  imports bound 3042  UNRESOLVED 0
+  [glibc] 506 table entries, 62 aliases, 0 stub calls

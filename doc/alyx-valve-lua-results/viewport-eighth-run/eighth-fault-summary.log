@@ -1,0 +1,2 @@
+[klepton] fault: signal 11 at 0x0, pc <host>+0x0 (0x0), thread 15662343 (a guest worker thread)
+    lr (who called it): librendersystemvulkan.so+0x26d374

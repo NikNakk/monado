@@ -1,0 +1,28 @@
+  [vk] fdm strict-device-forwarded extension=VK_KHR_swapchain
+  [vk] fdm strict-device-forwarded extension=VK_KHR_dedicated_allocation
+  [vk] fdm strict-device-forwarded extension=VK_KHR_external_fence
+  [vk] fdm strict-device-forwarded extension=VK_KHR_external_memory
+  [vk] fdm strict-device-forwarded extension=VK_KHR_external_semaphore
+  [vk] fdm strict-device-forwarded extension=VK_KHR_get_memory_requirements2
+  [vk] fdm strict-device-forwarded extension=VK_KHR_image_format_list
+  [vk] fdm strict-device-forwarded extension=VK_EXT_metal_objects
+  [vk] fdm strict-device-forwarded extension=VK_KHR_descriptor_update_template
+  [vk] fdm strict-device-forwarded extension=VK_KHR_image_format_list
+  [vk] fdm strict-device-forwarded extension=VK_KHR_maintenance1
+  [vk] fdm strict-device-forwarded extension=VK_KHR_maintenance2
+  [vk] fdm strict-device-forwarded extension=VK_EXT_separate_stencil_usage
+  [vk] fdm strict-device-forwarded extension=VK_KHR_swapchain_mutable_format
+  [vk] fdm strict-device-forwarded extension=VK_KHR_dynamic_rendering
+  [vk] fdm strict-device-forwarded extension=VK_KHR_dynamic_rendering_local_read
+  [vk] fdm strict-device-forwarded extension=VK_KHR_depth_stencil_resolve
+  [vk] fdm strict-device-forwarded extension=VK_KHR_create_renderpass2
+  [vk] fdm strict-device-forwarded extension=VK_EXT_host_image_copy
+  [vk] fdm strict-device-forwarded extension=VK_KHR_multiview
+  [vk] fdm strict-device-forwarded extension=VK_KHR_portability_subset
+  [vk] fdm strict-device-forwarded pNext sType=1000053001
+  [vk] fdm strict-device-forwarded pNext sType=1000044003
+  [vk] fdm strict-device-forwarded pNext sType=1000232000
+  [vk] fdm strict-device-forwarded pNext sType=1000270000
+  [vk] strict vkCreateDevice driver result=0
+VALVE-DISPATCH profile=0 real-slot-available=0
+VALVE-DISPATCH PASS: exact captured request and caller structures preserved

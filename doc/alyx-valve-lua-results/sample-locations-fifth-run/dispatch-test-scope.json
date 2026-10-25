@@ -1,0 +1,18 @@
+{
+  "renderer_sha256": "02edbf8f2040cd8a3103038583447865ca7d34f36f13daacab9d4d194cb9d04d",
+  "original_and_clone_unchanged_after_test": true,
+  "constructors": false,
+  "game_entry_point": false,
+  "Steam_path": false,
+  "OpenXR_path": false,
+  "private_entry_rvas": [
+    "0x2d24e0",
+    "0x2d264c",
+    "0x2d26ac"
+  ],
+  "entry_scope": "Only hash-checked generated Vulkan dispatch-table loaders; generic private-memory Linux-to-macOS ABI translation remains enabled. No game-specific logic patches.",
+  "device_request": "Exactly the fifth user run core features, four feature structures, 20 extension entries and queue request, replayed under a standalone Vulkan 1.2 instance.",
+  "profile_off": "Device creates, actual renderer sample-location slot is NULL.",
+  "profile_on": "Device creates, actual renderer slot equals native driver proc address; enable/disable commands through that slot record, submit and complete.",
+  "limitation": "No render pipeline, game frame or headset presentation tested."
+}

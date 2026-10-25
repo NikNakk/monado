@@ -1,0 +1,16 @@
+  [vk] Alyx compatibility: enabled real extendedDynamicState and sample-location state; caller features preserved
+VALVE-DISPATCH profile=1 real-slot-available=1
+VALVE-DISPATCH vkCmdBindVertexBuffers2EXT available=1
+VALVE-DISPATCH vkCmdSetCullModeEXT available=1
+VALVE-DISPATCH vkCmdSetDepthBoundsTestEnableEXT available=1
+VALVE-DISPATCH vkCmdSetDepthCompareOpEXT available=1
+VALVE-DISPATCH vkCmdSetDepthTestEnableEXT available=1
+VALVE-DISPATCH vkCmdSetDepthWriteEnableEXT available=1
+VALVE-DISPATCH vkCmdSetFrontFaceEXT available=1
+VALVE-DISPATCH vkCmdSetPrimitiveTopologyEXT available=1
+VALVE-DISPATCH vkCmdSetScissorWithCountEXT available=1
+VALVE-DISPATCH vkCmdSetStencilOpEXT available=1
+VALVE-DISPATCH vkCmdSetStencilTestEnableEXT available=1
+VALVE-DISPATCH vkCmdSetViewportWithCountEXT available=1
+VALVE-DISPATCH PASS: all 12 real EDS1 slots plus sample-location commands record, submit and complete
+VALVE-DISPATCH PASS: exact captured request and caller structures preserved

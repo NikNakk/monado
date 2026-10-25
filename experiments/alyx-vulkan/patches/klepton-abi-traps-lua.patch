@@ -1,0 +1,260 @@
+From fa65227a78c8a8267b0abb9dd5c8b2de60decc5c Mon Sep 17 00:00:00 2001
+From: Nick Kennedy <nick@nick-kennedy.com>
+Date: Tue, 20 Oct 2026 08:43:20 +0200
+Subject: [PATCH 1/3] libc: forward floor through the shared AArch64
+ floating-point ABI
+
+Signed-off-by: Nick Kennedy <nick@nick-kennedy.com>
+---
+ runtime/libc/kl_shim.c | 2 ++
+ 1 file changed, 2 insertions(+)
+
+diff --git a/runtime/libc/kl_shim.c b/runtime/libc/kl_shim.c
+index dc35d2f..979f54d 100644
+--- a/runtime/libc/kl_shim.c
++++ b/runtime/libc/kl_shim.c
+@@ -2113,6 +2113,8 @@ static const kl_entry g_shim[] = {
+     E("__libc_current_sigrtmin", klb___libc_current_sigrtmin),
+     E("__libc_current_sigrtmax", klb___libc_current_sigrtmax),
+     E("sincosf", klb_sincosf), E("sincos", klb_sincos),
++    // Linux/Darwin AArch64 share the double -> double C ABI.
++    E("floor", floor),
+     E("putchar", klb_putchar), E("getchar", klb_getchar),
+     E("fdatasync", klb_fdatasync),
+     E("__cmsg_nxthdr", klb___cmsg_nxthdr),
+-- 
+2.54.0 (Apple Git-157)
+
+
+From b29292ebe085824f5c4666e4e5b623dacdff02e7 Mon Sep 17 00:00:00 2001
+From: Nick Kennedy <nick@nick-kennedy.com>
+Date: Tue, 20 Oct 2026 08:45:34 +0200
+Subject: [PATCH 2/3] loader: validate code SVC sites and add fail-closed
+ private-memory traps
+
+Signed-off-by: Nick Kennedy <nick@nick-kennedy.com>
+---
+ SVC_POLICY.md      | 34 ++++++++++++++++++++++++++++++++++
+ runtime/kl_fault.c | 10 ++++++++++
+ runtime/kl_image.c | 40 +++++++++++++++++++++++++++++++++++++++-
+ runtime/kl_svc.h   | 11 +++++++++++
+ runtime/klepton.h  |  1 +
+ 5 files changed, 95 insertions(+), 1 deletion(-)
+ create mode 100644 runtime/kl_svc.h
+
+diff --git a/SVC_POLICY.md b/SVC_POLICY.md
+index 4f8bae5..5e92de8 100644
+--- a/SVC_POLICY.md
++++ b/SVC_POLICY.md
+@@ -24,3 +24,37 @@ boundary, audit the actual syscall sites and implement explicit translation or
+ refusal of operations required by those sites. Broadly NOPing candidates is not
+ a correct general Linux syscall strategy. This guard is deliberately unable to
+ run images that contain candidates, even if a particular path never reaches one.
++
++## Section-aware refusal and fail-closed execution
++
++The user authorized required private-memory ABI translation on 20 October 2026,
++with installed game binaries unchanged and game-specific logic patches disabled.
++
++`reject-code` validates section headers and scans SHF_EXECINSTR PROGBITS sections
++which must map consistently into executable LOAD segments. It requires usable
++section metadata and refuses any code SVC. This avoids a confirmed false positive
++in Debian libstdc++'s .gcc_except_table, which is data in an executable LOAD.
++`reject` retains its broader segment scan. Owned fixtures cover malformed and
++inconsistently mapped sections, sectionless refusal and an SVC-shaped data word
++which passes code preflight but reaches the deliberate missing-dynamic-table
++failure of that non-runnable fixture.
++
++`trap-code` uses the same validated section boundary and translates each SVC
++in code chunks into a reserved `BRK #0x4b4c` before execution. It never executes
++the original SVC, returns success or NOPs it. All SVC immediates are handled.
++The image census distinguishes total and trapped counts. The fault reporter
++names this marker and prints image/offset, Linux x8 and Darwin x16 before the
++normal fatal SIGTRAP termination. There is no recovery or syscall emulation.
++This is an explicit unsupported-operation stop; it is NOT working raw-syscall
++compatibility. It may also stop on a debug-break site. No assumption that every
++un-numbered SVC is a harmless debug break is used.
++
++Owned native tests verify the encoding, preservation of unrelated instructions
++and fatal SIGTRAP behaviour. Actual libvideo relocation census reports
++1703 SVC sites, all trapped. No such trap was reached in its constructor probe
++or the initial headless engine startup; video playback remains unverified.
++
++`KL_LOAD_NO_INIT=1` is a separate relocation diagnostic: recursive loading skips
++constructors and JNI entry points, while retaining normal binding/rebinding.
++It must not be used to run a game. The constrained host explicitly forces it off
++when --run-constrained authorizes execution.
+diff --git a/runtime/kl_fault.c b/runtime/kl_fault.c
+index a4824b6..39016f0 100644
+--- a/runtime/kl_fault.c
++++ b/runtime/kl_fault.c
+@@ -15,6 +15,7 @@
+ #include <mach/mach.h>
+ #include "klepton.h"
+ #include "kl_fault.h"
++#include "kl_svc.h"
+ #include "kl_egl.h"
+ #include "kl_opensl.h"
+ #include "kl_ovrp.h"
+@@ -190,6 +191,15 @@ static void report_fault(int sig, siginfo_t *si, void *uctx) {
+     }
+ 
+     char buf[256];
++    if (sig == SIGTRAP && uc && kl_addr_image(pc, NULL) &&
++        *(const uint32_t *)pc == KL_SVC_TRAP_WORD) {
++        int note = snprintf(buf, sizeof buf,
++            "[klepton] UNSUPPORTED RAW SVC: stopped at %s+0x%zx; Linux x8=%llu Darwin x16=%llu; no syscall executed\n",
++            img ? img : "?", off,
++            (unsigned long long)uc->uc_mcontext->__ss.__x[8],
++            (unsigned long long)uc->uc_mcontext->__ss.__x[16]);
++        if (note > 0) klf_emit(buf, (size_t)note < sizeof buf ? (size_t)note : sizeof buf - 1);
++    }
+     int  n = snprintf(buf, sizeof buf,
+                       "\n[klepton] fault: signal %d at %p, pc %s+0x%zx (%p), thread %llu%s\n",
+                       sig, si ? si->si_addr : NULL, img ? img : "<host>", off, pc,
+diff --git a/runtime/kl_image.c b/runtime/kl_image.c
+index 0534e0f..5226d16 100644
+--- a/runtime/kl_image.c
++++ b/runtime/kl_image.c
+@@ -25,6 +25,7 @@
+ #include "klepton.h"
+ #include "kl_x18.h"
+ #include "kl_guestpatch.h"
++#include "kl_svc.h"
+ 
+ 
+ // ---------- ELF64 subset ----------
+@@ -356,7 +357,13 @@ static void rewrite_tls(uint8_t *p, size_t n, uint64_t va, const char *path,
+                         kl_stats *st) {
+     uint32_t *w = (uint32_t *)p;
+     size_t words = n / 4;
++    const char *svc_policy = getenv("KL_SVC_POLICY");
++    int trap_svc = svc_policy && !strcmp(svc_policy, "trap-code");
+     for (size_t i = 0; i < words; i++) {
++        if (trap_svc && kl_svc_to_trap(&w[i])) {
++            st->svc_sites++; st->svc_trapped++;
++            continue;
++        }
+         if (w[i] == 0xd4000001u && kl_svc_is_bare(w, i)) {
+             static int said;
+             if (!said++) fprintf(stderr, "  [klepton] %s: bare svc #0 (no syscall number) at +0x%llx and "
+@@ -1057,7 +1064,9 @@ static int protect_pages(kl_image *img, const Elf64_Ehdr *eh, const Elf64_Phdr *
+ static int reject_raw_svc(const uint8_t *file, size_t size, const Elf64_Ehdr *eh) {
+     const char *policy = getenv("KL_SVC_POLICY");
+     if (!policy || !strcmp(policy, "legacy")) return 0;
+-    if (strcmp(policy, "reject")) { err("unknown KL_SVC_POLICY (use legacy or reject)"); return -1; }
++    int trap = !strcmp(policy, "trap-code");
++    int code_only = !strcmp(policy, "reject-code") || trap;
++    if (strcmp(policy, "reject") && !code_only) { err("unknown KL_SVC_POLICY (use legacy, reject, reject-code or trap-code)"); return -1; }
+     if (eh->e_phentsize != sizeof(Elf64_Phdr) || eh->e_phoff > size ||
+         eh->e_phnum > (size - eh->e_phoff) / sizeof(Elf64_Phdr)) {
+         err("SVC preflight: invalid program headers"); return -1;
+@@ -1068,6 +1077,7 @@ static int reject_raw_svc(const uint8_t *file, size_t size, const Elf64_Ehdr *eh
+         if (ph[i].p_offset > size || ph[i].p_filesz > size - ph[i].p_offset) {
+             err("SVC preflight: invalid executable segment"); return -1;
+         }
++        if (code_only) continue;
+         for (uint64_t off = (4 - (ph[i].p_vaddr & 3)) & 3; off + 4 <= ph[i].p_filesz; off += 4) {
+             uint32_t word; memcpy(&word, file + ph[i].p_offset + off, sizeof word);
+             if ((word & 0xffe0001fu) == 0xd4000001u) {
+@@ -1077,6 +1087,34 @@ static int reject_raw_svc(const uint8_t *file, size_t size, const Elf64_Ehdr *eh
+             }
+         }
+     }
++    if (code_only) {
++        if (!eh->e_shnum || eh->e_shentsize != sizeof(Elf64_Shdr) || eh->e_shoff > size ||
++            eh->e_shnum > (size - eh->e_shoff) / sizeof(Elf64_Shdr)) {
++            err("SVC preflight: reject-code requires valid section headers"); return -1;
++        }
++        const Elf64_Shdr *sh = (const Elf64_Shdr *)(file + eh->e_shoff);
++        for (unsigned i = 0; i < eh->e_shnum; ++i) {
++            if (!(sh[i].sh_flags & SHF_EXECINSTR)) continue;
++            if (sh[i].sh_type != SHT_PROGBITS || sh[i].sh_offset > size || sh[i].sh_size > size - sh[i].sh_offset) {
++                err("SVC preflight: invalid executable section"); return -1;
++            }
++            int mapped = 0;
++            for (unsigned j = 0; j < eh->e_phnum; ++j) {
++                if (ph[j].p_type != PT_LOAD || !(ph[j].p_flags & PF_X) || sh[i].sh_offset < ph[j].p_offset) continue;
++                uint64_t delta = sh[i].sh_offset - ph[j].p_offset;
++                if (delta <= ph[j].p_filesz && sh[i].sh_size <= ph[j].p_filesz - delta &&
++                    sh[i].sh_addr >= ph[j].p_vaddr && sh[i].sh_addr - ph[j].p_vaddr == delta) mapped = 1;
++            }
++            if (!mapped) { err("SVC preflight: executable section not mapped consistently"); return -1; }
++            for (uint64_t off = (4 - (sh[i].sh_addr & 3)) & 3; off + 4 <= sh[i].sh_size; off += 4) {
++                uint32_t word; memcpy(&word, file + sh[i].sh_offset + off, sizeof word);
++                if (!trap && (word & 0xffe0001fu) == 0xd4000001u) {
++                    err("raw SVC instruction candidate at VA %#llx refused by KL_SVC_POLICY=reject-code (before guest mapping)",
++                        (unsigned long long)(sh[i].sh_addr + off)); return -1;
++                }
++            }
++        }
++    }
+     return 0;
+ }
+ 
+diff --git a/runtime/kl_svc.h b/runtime/kl_svc.h
+new file mode 100644
+index 0000000..bd7d4eb
+--- /dev/null
++++ b/runtime/kl_svc.h
+@@ -0,0 +1,11 @@
++// SPDX-License-Identifier: MIT
++// Copyright 2026, Nick Kennedy
++#pragma once
++#include <stdint.h>
++// Fail-closed private-memory ABI translation. This does NOT emulate a syscall.
++#define KL_SVC_TRAP_WORD (0xd4200000u | (0x4b4cu << 5))
++static inline int kl_svc_to_trap(uint32_t *word) {
++    if ((*word & 0xffe0001fu) != 0xd4000001u) return 0;
++    *word = KL_SVC_TRAP_WORD;
++    return 1;
++}
+diff --git a/runtime/klepton.h b/runtime/klepton.h
+index 72d5972..b75ae2b 100644
+--- a/runtime/klepton.h
++++ b/runtime/klepton.h
+@@ -70,6 +70,7 @@ typedef struct {
+     // kernel clobbers. Nonzero
+     // here is a finding, not a statistic — rewrite_tls names each one.
+     unsigned tls_refused;
++    unsigned svc_trapped;                            // replaced with fatal BRK, never success/NOP
+     unsigned svc_sites;                              // inline syscalls found
+     unsigned imports_bound, imports_missing;
+     // ...and the undefined imports that are WEAK, which is a different answer
+-- 
+2.54.0 (Apple Git-157)
+
+
+From 2ba3b7f949e22f2b4d2249705cdf6bd3dbb9b23c Mon Sep 17 00:00:00 2001
+From: Nick Kennedy <nick@nick-kennedy.com>
+Date: Tue, 20 Oct 2026 08:45:35 +0200
+Subject: [PATCH 3/3] loader: add explicit recursive relocation-only diagnostic
+ mode
+
+Signed-off-by: Nick Kennedy <nick@nick-kennedy.com>
+---
+ runtime/kl_dl.c | 8 ++++++--
+ 1 file changed, 6 insertions(+), 2 deletions(-)
+
+diff --git a/runtime/kl_dl.c b/runtime/kl_dl.c
+index 538c9df..b3936b9 100644
+--- a/runtime/kl_dl.c
++++ b/runtime/kl_dl.c
+@@ -468,8 +468,12 @@ static kl_image *kl_load_recursive_inner(const char *path) {
+     kl_image *img = kl_load_auto(path);
+     if (!img) return NULL;
+     kl_register_image(path, img);
+-    kl_run_init(img);
+-    kl_maybe_jni_onload(path, img);
++    if (kl_env_on("KL_LOAD_NO_INIT", 0)) {
++        fprintf(stderr, "  [dl] diagnostic KL_LOAD_NO_INIT: no constructors/JNI for %s\n", path);
++    } else {
++        kl_run_init(img);
++        kl_maybe_jni_onload(path, img);
++    }
+     return img;
+ }
+ 
+-- 
+2.54.0 (Apple Git-157)
+

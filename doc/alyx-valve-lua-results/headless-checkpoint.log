@@ -1,0 +1,13 @@
+  [steam] macOS steamclient /Users/nickkennedy/Library/Application Support/Steam/Steam.AppBundle/Steam/Contents/MacOS/steamclient.dylib: loaded; Steam.app running
+OpenVR: native xrizer /private/tmp/xrizer-dual-vulkan/target/debug/libxrizer.dylib (no VeRantyx renderer)
+Source2Main(1, 0, "-vr -steam -vulkan -nowindow -console +map startup", 0, "/private/tmp/alyx-native-game-root/game/bin/linuxsteamrtarm64", "hlvr")
+[S_API] SteamAPI_Init(): Loaded '/private/tmp/alyx-headless-first/state/guest-home/.steam/sdkarm64/steamclient.so' OK.
+[engine ch2] SteamAPI_Init not yet successful.
+[S_API] SteamAPI_Init(): Loaded '/private/tmp/alyx-headless-first/state/guest-home/.steam/sdkarm64/steamclient.so' OK.
+Error [GENERAL |  | OpenXR-Loader] : failed to open /private/tmp/alyx-headless-first/deliberately-unavailable-openxr.json.  Does it exist?
+Error [GENERAL | xrEnumerateInstanceExtensionProperties | OpenXR-Loader] : RuntimeInterface::LoadRuntimes - failed to load a runtime
+Error [GENERAL | xrEnumerateInstanceExtensionProperties | OpenXR-Loader] : Failed to find default runtime with RuntimeInterface::LoadRuntime()
+Error [GENERAL | xrEnumerateInstanceExtensionProperties | OpenXR-Loader] : Failed querying extension properties
+[2026-10-20T08:42:40.906 ERROR xrizer::clientcore ThreadId(1)] Creating OpenXR data failed: EnumeratingExtensionsFailed(ERROR_RUNTIME_UNAVAILABLE)
+[engine ch23 warn] VR - Error! SteamVR failed initialization with error code VRInitError_Init_VRServiceStartupFailed: "VRInitError_Init_VRServiceStartupFailed"
+[engine messagebox] SteamVR initialization failed!: SteamVR failed initialization with error code VRInitError_Init_VRServiceStartupFailed: "VRInitError_Init_VRServiceStartupFailed"

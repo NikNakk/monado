@@ -1,0 +1,19 @@
+{
+  "revisions": {
+    "verantyx": "b8b3ccf17ddddef8dd7eb6fb8276e424899bb9b3",
+    "klepton": "44985ecdc4b07d0aee048942b3dc76232b1c7cab",
+    "xrizer": "8417a1df4a43304fa6ed53ea929879efcc025432"
+  },
+  "sha256": {
+    "host": "e09474df969b96362181065192ac268680039fc9cc11be1ed0718ead5d7c18b4",
+    "tier0": "1e51a94385ea01e61ac87d087efc5a30255ef08656a0bdd6faca008012adbb5d",
+    "panorama": "3bab83b040a8553dc131ca7e2bcaa787f3d792437c402d453870b404d6e93c98",
+    "xrizer": "24b28582ece09b1758203311f98437e85d37365ecf705d2fce53ccc5698ecfb8"
+  },
+  "build": "make -C /private/tmp/alyx-verantyx/NativeARM/host KL=/private/tmp/alyx-klepton OUT=/private/tmp/alyx-constrained-host-build HOST_MODE=constrained VR_RUNTIME=xrizer valve-vm-pages valve-panorama-runtime valve-lua-test all -j4",
+  "hardware_run": "tenth run predates VM adapter; no new headset run performed",
+  "panorama_import_slots": {
+    "Plat_VirtualAlloc": "0x596298",
+    "Plat_VirtualFree": "0x5960e8"
+  }
+}

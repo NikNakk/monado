@@ -1,0 +1,2 @@
+  [vk] explicit Vulkan dispatch library: /missing-vulkan.dylib
+  [vk] Vulkan dispatch library could not be loaded — run 'make mvk' (BUILDING.md).

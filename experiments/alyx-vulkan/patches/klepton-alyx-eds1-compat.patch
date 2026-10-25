@@ -1,0 +1,143 @@
+From 44985ecdc4b07d0aee048942b3dc76232b1c7cab Mon Sep 17 00:00:00 2001
+From: Nick Kennedy <nick@nick-kennedy.com>
+Date: Tue, 20 Oct 2026 09:52:34 +0200
+Subject: [PATCH] vulkan: enable supported EDS1 commands for the Alyx fallback
+ profile
+
+Signed-off-by: Nick Kennedy <nick@nick-kennedy.com>
+---
+ runtime/gfx/kl_vulkan.c           | 39 ++++++++++++++++++++++---------
+ tests/t_vulkan_sample_locations.c | 12 +++++++++-
+ 2 files changed, 39 insertions(+), 12 deletions(-)
+
+diff --git a/runtime/gfx/kl_vulkan.c b/runtime/gfx/kl_vulkan.c
+index 010e94d..090627a 100644
+--- a/runtime/gfx/kl_vulkan.c
++++ b/runtime/gfx/kl_vulkan.c
+@@ -121,7 +121,7 @@ void *kl_vulkan_xr_image_mtl(unsigned long long img) { (void)img; return NULL; }
+ 
+ // Opt-in: preserve graphics semantics; only synthetic desktop WSI and
+ // Vulkan portability requirements are adapted at this boundary. The separate
+-// KL_VK_SAMPLE_LOCATIONS_COMPAT opt-in can enable one supported driver feature
++// KL_VK_SAMPLE_LOCATIONS_COMPAT opt-in can enable supported driver features
+ // for native Alyx; it never removes requested features or installs graphics stubs.
+ static int strict_enabled;
+ static pthread_once_t strict_once = PTHREAD_ONCE_INIT;
+@@ -555,7 +555,7 @@ static int synthetic_wsi(const char *name) {
+ static const char **strict_extensions(uint32_t n, const char *const *names,
+                                       int instance, uint32_t *used, int *portability) {
+     *used = 0; *portability = 0;
+-    const char **result = calloc((size_t)n + 3, sizeof *result);
++    const char **result = calloc((size_t)n + 4, sizeof *result);
+     if (!result) return NULL;
+     for (uint32_t i = 0; i < n; ++i)
+         if (!instance || !synthetic_wsi(names[i])) result[(*used)++] = names[i];
+@@ -884,22 +884,26 @@ static void trace_device_request(const VkDeviceCreateInfo *ci) {
+ }
+ 
+ // Explicit native-Alyx compatibility profile. Its state3-disable option still
+-// emits vkCmdSetSampleLocationsEnableEXT. Enable the real supported feature so
++// emits sample-location and viewport/scissor dynamic-state commands. Enable
++// their real supported features so
+ // that command resolves and executes in the driver. Alyx's broad disable switch
+ // removes both sample-location extensions, so absence from the request is not
+ // a reason to skip this explicit profile. Never remove a request,
+ // claim color-write-mask support, duplicate a feature struct or install a stub.
+-static VkResult sample_locations_compat(VkPhysicalDevice phys, VkDeviceCreateInfo *copy,
++static VkResult alyx_dynamic_state_compat(VkPhysicalDevice phys, VkDeviceCreateInfo *copy,
+                                         const VkExtensionProperties *props, uint32_t count,
+                                         const char **names, uint32_t *n,
++                                        VkPhysicalDeviceExtendedDynamicStateFeaturesEXT *extra1,
+                                         VkPhysicalDeviceExtendedDynamicState3FeaturesEXT *extra) {
+     if (!kl_env_on("KL_VK_SAMPLE_LOCATIONS_COMPAT", 0)) return VK_SUCCESS;
+-    int sample_locations = 0, state3 = 0;
++    int sample_locations = 0, state3 = 0, state1 = 0;
+     for (uint32_t i = 0; i < *n; i++) {
+         sample_locations |= !strcmp(names[i], "VK_EXT_sample_locations");
+         state3 |= !strcmp(names[i], "VK_EXT_extended_dynamic_state3");
++        state1 |= !strcmp(names[i], "VK_EXT_extended_dynamic_state");
+     }
+-    if (!ext_supported(props, count, "VK_EXT_sample_locations") ||
++    if (!ext_supported(props, count, "VK_EXT_extended_dynamic_state") ||
++        !ext_supported(props, count, "VK_EXT_sample_locations") ||
+         !ext_supported(props, count, "VK_EXT_extended_dynamic_state3"))
+         return VK_ERROR_EXTENSION_NOT_PRESENT;
+     PFN_vkGetPhysicalDeviceFeatures2 query = (PFN_vkGetPhysicalDeviceFeatures2)
+@@ -909,16 +913,23 @@ static VkResult sample_locations_compat(VkPhysicalDevice phys, VkDeviceCreateInf
+     if (!query) return VK_ERROR_INITIALIZATION_FAILED;
+     VkPhysicalDeviceExtendedDynamicState3FeaturesEXT supported = {
+         .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_EXTENDED_DYNAMIC_STATE_3_FEATURES_EXT };
++    VkPhysicalDeviceExtendedDynamicStateFeaturesEXT supported1 = {
++        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_EXTENDED_DYNAMIC_STATE_FEATURES_EXT, .pNext = &supported };
+     VkPhysicalDeviceFeatures2 features = {
+-        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2, .pNext = &supported };
++        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2, .pNext = &supported1 };
+     query(phys, &features);
+-    if (!supported.extendedDynamicState3SampleLocationsEnable)
++    if (!supported1.extendedDynamicState || !supported.extendedDynamicState3SampleLocationsEnable)
+         return VK_ERROR_FEATURE_NOT_PRESENT;
+     const VkPhysicalDeviceExtendedDynamicState3FeaturesEXT *existing = NULL;
+-    for (const VkBaseInStructure *p = copy->pNext; p; p = p->pNext)
++    const VkPhysicalDeviceExtendedDynamicStateFeaturesEXT *existing1 = NULL;
++    for (const VkBaseInStructure *p = copy->pNext; p; p = p->pNext) {
+         if (p->sType == supported.sType) existing = (const void *)p;
++        if (p->sType == supported1.sType) existing1 = (const void *)p;
++    }
++    if (existing1 && !existing1->extendedDynamicState) return VK_ERROR_FEATURE_NOT_PRESENT;
+     if (existing && !existing->extendedDynamicState3SampleLocationsEnable)
+         return VK_ERROR_FEATURE_NOT_PRESENT;
++    if (!state1) names[(*n)++] = "VK_EXT_extended_dynamic_state";
+     if (!sample_locations) names[(*n)++] = "VK_EXT_sample_locations";
+     if (!state3) names[(*n)++] = "VK_EXT_extended_dynamic_state3";
+     if (!existing) {
+@@ -927,7 +938,12 @@ static VkResult sample_locations_compat(VkPhysicalDevice phys, VkDeviceCreateInf
+             .extendedDynamicState3SampleLocationsEnable = VK_TRUE };
+         copy->pNext = extra;
+     }
+-    VKI("Alyx compatibility: enabled real sample-locations extension and extendedDynamicState3SampleLocationsEnable; caller features preserved\n");
++    if (!existing1) {
++        *extra1 = (VkPhysicalDeviceExtendedDynamicStateFeaturesEXT) {
++            .sType = supported1.sType, .pNext = (void *)copy->pNext, .extendedDynamicState = VK_TRUE };
++        copy->pNext = extra1;
++    }
++    VKI("Alyx compatibility: enabled real extendedDynamicState and sample-location state; caller features preserved\n");
+     return VK_SUCCESS;
+ }
+ 
+@@ -947,8 +963,9 @@ static VkResult strict_device(VkPhysicalDevice phys, const VkDeviceCreateInfo *c
+     if (r == VK_SUCCESS && !portability && ext_supported(props, count, "VK_KHR_portability_subset"))
+         names[n++] = "VK_KHR_portability_subset";
+     VkDeviceCreateInfo copy = *ci;
++    VkPhysicalDeviceExtendedDynamicStateFeaturesEXT extra1;
+     VkPhysicalDeviceExtendedDynamicState3FeaturesEXT extra;
+-    if (r == VK_SUCCESS) r = sample_locations_compat(phys, &copy, props, count, names, &n, &extra);
++    if (r == VK_SUCCESS) r = alyx_dynamic_state_compat(phys, &copy, props, count, names, &n, &extra1, &extra);
+     copy.enabledExtensionCount = n; copy.ppEnabledExtensionNames = names;
+     trace_extensions("strict-device-request", ci->enabledExtensionCount, ci->ppEnabledExtensionNames);
+     trace_chain("strict-device-request", ci->pNext);
+diff --git a/tests/t_vulkan_sample_locations.c b/tests/t_vulkan_sample_locations.c
+index 55a416f..60c8451 100644
+--- a/tests/t_vulkan_sample_locations.c
++++ b/tests/t_vulkan_sample_locations.c
+@@ -67,7 +67,17 @@ int main(int argc,char **argv) {
+         existing.extendedDynamicState3ColorWriteMask=VK_TRUE;
+         assert(create(pd,&dc,0,&device)==VK_ERROR_FEATURE_NOT_PRESENT);
+         assert(existing.extendedDynamicState3ColorWriteMask==VK_TRUE);
+-        puts("PASS: existing feature chains preserved; unsupported color-write-mask requests still fail");
++        existing.extendedDynamicState3ColorWriteMask=VK_FALSE;
++        VkPhysicalDeviceExtendedDynamicStateFeaturesEXT state1={
++            .sType=VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_EXTENDED_DYNAMIC_STATE_FEATURES_EXT,.pNext=&existing};
++        dc.pNext=&state1;
++        assert(create(pd,&dc,0,&device)==VK_ERROR_FEATURE_NOT_PRESENT);
++        assert(!state1.extendedDynamicState && state1.pNext==&existing);
++        state1.extendedDynamicState=VK_TRUE;
++        assert(create(pd,&dc,0,&device)==VK_SUCCESS);
++        assert(state1.extendedDynamicState && state1.pNext==&existing && existing.pNext==NULL);
++        ((PFN_vkDestroyDevice)gdpa(device,"vkDestroyDevice"))(device,0);
++        puts("PASS: existing EDS1/EDS3 feature chains preserved; unsupported color-write-mask requests still fail");
+     }
+     ((PFN_vkDestroyInstance)gipa(instance,"vkDestroyInstance"))(instance,0);
+     return 0;
+-- 
+2.54.0 (Apple Git-157)
+

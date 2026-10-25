@@ -1,0 +1,6 @@
+running 1 test
+native overlay device: "Apple M5", driverVersion=109457507
+native overlay pipeline passed: R8G8B8A8_UNORM -> R8G8B8A8_SRGB, samples=1
+native overlay pipeline passed: B8G8R8A8_UNORM -> B8G8R8A8_SRGB, samples=1
+test graphics_backends::vulkan::native_overlay_pipeline_tests::native_overlay_pipeline ... ok
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 86 filtered out; finished in 0.89s

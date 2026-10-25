@@ -1,0 +1,55 @@
+LOG in xrCreateInstance: Instance created
+	createInfo->applicationInfo.applicationName: vulkan_submit_probe
+	createInfo->applicationInfo.applicationVersion: 0
+	createInfo->applicationInfo.engineName: XRizer
+	createInfo->applicationInfo.engineVersion: 5000
+	createInfo->applicationInfo.apiVersion: 1.0.0
+	appinfo.detected.engine.name: (null)
+	appinfo.detected.engine.version: 0.0.0
+	quirks.disable_vulkan_format_depth: false
+	quirks.disable_vulkan_format_depth_stencil: false
+	quirks.disable_quad_views: false
+	quirks.no_validation_error_in_create_ref_space: true
+	quirks.skip_end_session: false
+	quirks.parallel_views: false
+	quirks.no_texture_source_alpha: false
+	quirks.ignore_invalid_swapchain_usage_bits: false
+
+LOG in xrGetSystem: Selected devices
+	Head: 'Qwerty HMD'
+	Eyes: '<none>'
+	Left: 'Qwerty Left Controller'
+	Right: 'Qwerty Right Controller'
+	Gamepad: '<none>'
+	Hand-Tracking Left (unobstructed): '<none>'
+	Hand-Tracking Right (unobstructed): '<none>'
+	Hand-Tracking Left (conforming): '<none>'
+	Hand-Tracking Right (conforming): '<none>'
+WARNING in xrGetVulkanGraphicsDeviceKHR: Did not find runtime suggested GPU, fall back to GPU 0
+	uuid: 00 00 10 6b 1a 07 02 0a 00 00 00 00 00 00 00 00 
+[2026-10-19T23:39:18.069 ERROR xrizer ThreadId(1)] panicked at src/graphics_backends/vulkan.rs:592:18:
+Could not create temporary vulkan device: ERROR_EXTENSION_NOT_PRESENT
+[2026-10-19T23:39:18.072 ERROR xrizer ThreadId(1)] Backtrace: 
+   0: <std::backtrace::Backtrace>::create
+   1: xrizer::init_logging::{closure#0}::{closure#2}
+             at /private/tmp/xrizer-dual-vulkan/src/lib.rs:159:33
+   2: std::panicking::panic_with_hook
+   3: std::panicking::panic_handler::{closure#0}
+   4: std::sys::backtrace::__rust_end_short_backtrace::<std::panicking::panic_handler::{closure#0}, !>
+   5: __rustc::rust_begin_unwind
+   6: core::panicking::panic_fmt
+   7: core::result::unwrap_failed
+   8: <core::result::Result<ash::device::Device, ash::vk::enums::Result>>::expect
+             at /opt/homebrew/Cellar/rust/1.99.1/lib/rustlib/src/rust/library/core/src/result.rs:1184:23
+   9: <xrizer::graphics_backends::vulkan::VulkanData>::new_temporary
+             at /private/tmp/xrizer-dual-vulkan/src/graphics_backends/vulkan.rs:592:18
+  10: <xrizer::openxr_data::SessionData>::new
+             at /private/tmp/xrizer-dual-vulkan/src/openxr_data.rs:549:26
+  11: <xrizer::openxr_data::OpenXrData<xrizer::compositor::Compositor>>::new
+             at /private/tmp/xrizer-dual-vulkan/src/openxr_data.rs:218:13
+  12: <xrizer::clientcore::ClientCore as openvr::bindings::vr::IVRClientCore003_Interface>::Init
+             at /private/tmp/xrizer-dual-vulkan/src/clientcore.rs:171:15
+  13: openvr::bindings::vr::ivrclientcore003::Init::<xrizer::clientcore::ClientCore>
+             at /private/tmp/xrizer-dual-vulkan/target/debug/build/openvr-dc23d47162f89d36/out/bindings.rs:207567:22
+  14: _main
+

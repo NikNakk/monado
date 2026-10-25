@@ -1,0 +1,29 @@
+{
+  "buildid": [
+    "25487405"
+  ],
+  "TargetBuildID": [
+    "25487405"
+  ],
+  "StateFlags": [
+    "4"
+  ],
+  "BytesToDownload": [
+    "1454181648"
+  ],
+  "BytesDownloaded": [
+    "1454181648"
+  ],
+  "BytesToStage": [
+    "3285081966"
+  ],
+  "BytesStaged": [
+    "3285081966"
+  ],
+  "BetaKey": [
+    "public",
+    "public"
+  ],
+  "linux_depot_manifest": "9198205754520568813",
+  "windows_content_manifest": "1436897171613240821"
+}

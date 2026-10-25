@@ -1,0 +1,4 @@
+FONT-SHAPE text=0 size=83x15 unknown=0
+FONT-SHAPE text=1 size=71x16 unknown=0
+  [glibc] 506 table entries, 62 aliases, 0 stub calls
+PASS: real Pango/FreeType/HarfBuzz ASCII and mixed-script font layout, constructor/import guards retained

@@ -1,0 +1,3 @@
+  [dl] libcycle_a.so is already being loaded (dependency cycle) — bound late
+  [dl] /private/tmp/alyx-owned-cycle-elf/libcycle_b.so: 1 import(s) bound late (dependency cycle)
+PASS: actual cyclic ELF imports bind before all validation hooks and dependency-ordered constructors; repeat load does not reinitialize

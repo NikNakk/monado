@@ -1,0 +1,12 @@
+{
+  "date": "2026-10-20",
+  "method": "Static ELF inspection only; no game loaded/executed/translated; disassembly retained only in private tmp directory",
+  "hashes": {
+    "lua-callback-evidence.json": "44d8c36fd6055e24af8821c4590e74731648d3d5e4819c88b429e7051ff375d5",
+    "steam-version-snapshot.json": "afb83c85878f073d8ce22f458b2fdf894e49fa9c44fccc14e2a39a8e5b60b0e3",
+    "fdm-structure-candidates.json": "4bed04290495729ba4f6a805f9a842a46122e593083fa979da440ab940e730ed",
+    "patch-audit.json": "7b6882dc4f6a7226c87fd2d029e0b6fbca9a85aa977f75a4a99bd04798c52033",
+    "unchanged.json": "176a9acf333d8708933fe3ebd3f929c0313f19b1099762cd78acf7ac44c78ea6",
+    "inventory.json": "c94dc5796134f615e816c731a7cb32e5b3da6f6123768ca363e7a8bbc5ff9b12"
+  }
+}

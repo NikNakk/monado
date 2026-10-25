@@ -1,0 +1,14 @@
+{
+  "relocations": [
+    {
+      "va": 1046256,
+      "symbol_index": 397
+    }
+  ],
+  "plt_entries": [
+    "0x49ad0"
+  ],
+  "call_sites": [
+    "0x4f618"
+  ]
+}

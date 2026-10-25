@@ -1,0 +1,370 @@
+From 28ca4de43d40e8c5359f6769b373c229ecb140e1 Mon Sep 17 00:00:00 2001
+From: Nick Kennedy <nick@nick-kennedy.com>
+Date: Tue, 20 Oct 2026 00:28:06 +0200
+Subject: [PATCH 1/3] tls: avoid reading uninitialized key during slot
+ allocation
+
+Signed-off-by: Nick Kennedy <nick@nick-kennedy.com>
+---
+ runtime/kl_tls.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/runtime/kl_tls.c b/runtime/kl_tls.c
+index 98185cd..c615e3c 100644
+--- a/runtime/kl_tls.c
++++ b/runtime/kl_tls.c
+@@ -54,7 +54,7 @@ static int claim_slot(unsigned slot, void (*dtor)(void *)) {
+     int got = 0;
+     for (unsigned i = 0; i < 768; i++) {
+         pthread_key_t k;
+-        if (pthread_key_create(&k, (unsigned)k == slot ? dtor : NULL) != 0) break;
++        if (pthread_key_create(&k, NULL) != 0) break;
+         if ((unsigned)k == slot) {
+             // Created without the destructor above (k was unknown before the
+             // call); recreate with it when one is wanted.
+-- 
+2.54.0 (Apple Git-157)
+
+
+From 1b05bbf30d339e803cf85116591d0dbfb104d334 Mon Sep 17 00:00:00 2001
+From: Nick Kennedy <nick@nick-kennedy.com>
+Date: Tue, 20 Oct 2026 00:28:32 +0200
+Subject: [PATCH 2/3] pthread: track managed guest lifetime through destructor
+ completion
+
+Signed-off-by: Nick Kennedy <nick@nick-kennedy.com>
+---
+ GUEST_THREADS.md           | 50 ++++++++++++++++++++++
+ Makefile                   |  2 +-
+ runtime/kl_guest_threads.c | 85 ++++++++++++++++++++++++++++++++++++++
+ runtime/kl_guest_threads.h | 13 ++++++
+ runtime/kl_tls.c           |  3 ++
+ runtime/libc/kl_libc.c     |  3 +-
+ runtime/libc/kl_pthread.c  | 20 +++++++--
+ 7 files changed, 170 insertions(+), 6 deletions(-)
+ create mode 100644 GUEST_THREADS.md
+ create mode 100644 runtime/kl_guest_threads.c
+ create mode 100644 runtime/kl_guest_threads.h
+
+diff --git a/GUEST_THREADS.md b/GUEST_THREADS.md
+new file mode 100644
+index 0000000..6b8e3c9
+--- /dev/null
++++ b/GUEST_THREADS.md
+@@ -0,0 +1,50 @@
++# Experimental guest thread lifetime tracking
++
++`KL_GUEST_THREAD_TRACKING=1` enables a process-local registry. Default is off.
++The native Alyx host consumes it for `tkill`/`tgkill` signal-zero queries. This
++is not a complete Linux threading or syscall implementation.
++
++Managed pthreads enter before guest execution. A bottom cleanup handler marks
++the body finished on return, pthread_exit or deferred cancellation, after nested
++cleanup handlers. Guest pthread-key tables and ELF/C++ TLS blocks hold the entry
++until their destructor domains have drained. Dead entries are removed; unknown
++IDs are not inferred live from macOS kernel thread existence. gettid entry paths
++also register the calling thread, including the process entry thread.
++
++The registry uses a mutex and a list keyed by the current native thread ID. It
++has no fixed thread ceiling or growing tombstone list. It does not store state
++in C `_Thread_local` storage: Darwin can dismantle that storage before pthread
++key destructors, which must still access the registry. Allocation failure aborts
++rather than silently providing incomplete liveness information.
++
++The diagnostic mutex-owner registry remains separate. Its trampoline cleanup now
++also unregisters cancelled threads. TLS key allocation no longer reads the
++uninitialized output key when choosing a destructor.
++
++Tests in VeRantyx `NativeARM/host/tests/guest_threads.c` link the real runtime
++and host shims, using host-owned callbacks. They exercise normal return,
++pthread_exit, deferred cancellation, C++ TLS + pthread-key destructors, repeated
++key destructors, detach, interposed syscall(exit), signal-zero tkill/tgkill,
++unknown IDs and sequential fast return/exit cycles. No ELF/game is loaded.
++
++Limits before gameplay:
++
++- Only managed guest entry/teardown paths are covered. Host-created callbacks
++  that enter guest code need explicit entry/exit bracketing. Native gettid-only
++  entries without a managed exit can remain conservatively live.
++- Tests use host-owned C callbacks. Guest glibc cancellation/unwind/cleanup ABI,
++  asynchronous cancellation and fork are not validated.
++- Native IDs currently share the existing gettid ABI, including its int-width
++  limitation. No virtual Linux TID namespace is implemented.
++- Queries define completion of managed guest work/destructors, not the final
++  kernel teardown instruction. No raw clone, clear_child_tid or robust-futex
++  exit semantics are added.
++- The host supports signal-zero queries only for its own process in tracking
++  mode. Other tgkill process targets return explicit ENOSYS. Nonzero-signal
++  translation remains a separate audit.
++- Host interposed syscall(exit) follows pthread_exit when tracking is enabled;
++  inline raw SVC execution/translation is not addressed by that change.
++
++Keep the constrained host's guest-execution gate until the remaining syscall,
++Vulkan and Lua lifecycle audits pass. Passing these fixtures does not establish
++that the legacy video text patch is safe to retire for actual Alyx playback.
+diff --git a/Makefile b/Makefile
+index fa75fd2..617ed5f 100644
+--- a/Makefile
++++ b/Makefile
+@@ -44,7 +44,7 @@ RUNTIME_JNI := runtime/kl_jni.c \
+            runtime/jni/kl_jni_prefs.c runtime/jni/kl_jni_sdl.c \
+            runtime/jni/kl_jni_ue4.c runtime/jni/kl_jni_electra.c runtime/jni/kl_jni_fmod.c runtime/jni/kl_jni_jkxr.c
+ 
+-RUNTIME_SHIP := runtime/kl_env.c runtime/kl_image.c runtime/kl_tls.c runtime/kl_tls.S runtime/kl_stub_cells.S runtime/libc/kl_shim.c runtime/libc/kl_va.c \
++RUNTIME_SHIP := runtime/kl_guest_threads.c runtime/kl_env.c runtime/kl_image.c runtime/kl_tls.c runtime/kl_tls.S runtime/kl_stub_cells.S runtime/libc/kl_shim.c runtime/libc/kl_va.c \
+            runtime/libc/kl_va_handlers.c runtime/libc/kl_va_thunks.S \
+            runtime/libc/kl_libc.c runtime/libc/kl_libc_slink.c runtime/libc/kl_pthread.c runtime/kl_dl.c \
+            runtime/guest/kl_ndk.c runtime/kl_x18.c runtime/kl_target.c \
+diff --git a/runtime/kl_guest_threads.c b/runtime/kl_guest_threads.c
+new file mode 100644
+index 0000000..448f877
+--- /dev/null
++++ b/runtime/kl_guest_threads.c
+@@ -0,0 +1,85 @@
++// SPDX-License-Identifier: MIT
++// Copyright 2026, Nick Kennedy
++#include "kl_guest_threads.h"
++#include "kl_env.h"
++#include <pthread.h>
++#include <stdio.h>
++#include <stdlib.h>
++
++typedef struct entry {
++    struct entry *next;
++    uint64_t tid;
++    unsigned holds;
++    int body_done;
++} entry;
++static pthread_mutex_t mutex = PTHREAD_MUTEX_INITIALIZER;
++static pthread_once_t once = PTHREAD_ONCE_INIT;
++static int enabled;
++static entry *live;
++static uint64_t self_id(void) {
++    uint64_t tid = 0;
++    if (pthread_threadid_np(NULL, &tid) || !tid) abort();
++    return tid;
++}
++// Avoid Darwin C thread-local storage here: its storage can be torn down
++// before pthread-key destructors, which still need this bookkeeping.
++static entry *find(uint64_t tid) {
++    for (entry *e = live; e; e = e->next) if (e->tid == tid) return e;
++    return NULL;
++}
++static void configure(void) { enabled = kl_env_on("KL_GUEST_THREAD_TRACKING", 0); }
++int kl_guest_thread_tracking(void) { pthread_once(&once, configure); return enabled; }
++
++void kl_guest_thread_enter(void) {
++    if (!kl_guest_thread_tracking()) return;
++    uint64_t tid = self_id();
++    pthread_mutex_lock(&mutex);
++    if (!find(tid)) {
++        entry *e = calloc(1, sizeof *e);
++        if (!e) {
++            fprintf(stderr, "[guest-threads] cannot register thread; refusing incomplete tracking\n");
++            abort();
++        }
++        e->tid = tid; e->next = live; live = e;
++    }
++    pthread_mutex_unlock(&mutex);
++}
++// Called with mutex held; no tombstones or fixed thread-count ceiling.
++static void finish(entry *e) {
++    if (!e->body_done || e->holds) return;
++    entry **p = &live;
++    while (*p != e) p = &(*p)->next;
++    *p = e->next;
++    free(e);
++}
++void kl_guest_thread_body_done(void) {
++    if (!kl_guest_thread_tracking()) return;
++    uint64_t tid = self_id();
++    pthread_mutex_lock(&mutex);
++    entry *e = find(tid);
++    if (e) { e->body_done = 1; finish(e); }
++    pthread_mutex_unlock(&mutex);
++}
++void kl_guest_thread_hold(void) {
++    if (!kl_guest_thread_tracking()) return;
++    kl_guest_thread_enter();
++    uint64_t tid = self_id();
++    pthread_mutex_lock(&mutex); find(tid)->holds++; pthread_mutex_unlock(&mutex);
++}
++void kl_guest_thread_drop(void) {
++    if (!kl_guest_thread_tracking()) return;
++    uint64_t tid = self_id();
++    pthread_mutex_lock(&mutex);
++    entry *e = find(tid);
++    if (!e || !e->holds) abort();
++    e->holds--; finish(e);
++    pthread_mutex_unlock(&mutex);
++}
++int kl_guest_thread_alive(uint64_t tid) {
++    if (!kl_guest_thread_tracking() || !tid) return 0;
++    pthread_mutex_lock(&mutex);
++    int found = 0;
++    for (entry *e = live; e; e = e->next) if (e->tid == tid) { found = 1; break; }
++    pthread_mutex_unlock(&mutex);
++    return found;
++}
+diff --git a/runtime/kl_guest_threads.h b/runtime/kl_guest_threads.h
+new file mode 100644
+index 0000000..3a72422
+--- /dev/null
++++ b/runtime/kl_guest_threads.h
+@@ -0,0 +1,13 @@
++// SPDX-License-Identifier: MIT
++// Copyright 2026, Nick Kennedy
++#pragma once
++#include <stdint.h>
++// Opt-in through KL_GUEST_THREAD_TRACKING=1. Call enter before guest execution,
++// body_done on return/exit/cancellation, and hold/drop around guest destructor
++// domains. Unknown IDs are never inferred alive from retained kernel threads.
++void kl_guest_thread_enter(void);
++void kl_guest_thread_body_done(void);
++void kl_guest_thread_hold(void);
++void kl_guest_thread_drop(void);
++int kl_guest_thread_tracking(void);
++int kl_guest_thread_alive(uint64_t tid);
+diff --git a/runtime/kl_tls.c b/runtime/kl_tls.c
+index c615e3c..b0ff1f1 100644
+--- a/runtime/kl_tls.c
++++ b/runtime/kl_tls.c
+@@ -1,3 +1,4 @@
++#include "kl_guest_threads.h"
+ // ELF TLS for glibc guests — see kl_tls.h.
+ #include <stdio.h>
+ #include <stdlib.h>
+@@ -90,6 +91,7 @@ static void block_destroy(void *p) {
+     g_nblocks--;
+     pthread_mutex_unlock(&g_mu);
+     munmap(b, KL_TLS_BLOCK_BYTES);
++    kl_guest_thread_drop();
+ }
+ 
+ static int init_once(void) {
+@@ -128,6 +130,7 @@ static struct block *block_get_locked(void) {
+     // pthread_setspecific writes the same slot and lets the key's destructor
+     // see the value at thread exit.
+     pthread_setspecific((pthread_key_t)KL_TLS_BLOCK_SLOT, b);
++    kl_guest_thread_hold();
+     return b;
+ }
+ 
+diff --git a/runtime/libc/kl_libc.c b/runtime/libc/kl_libc.c
+index 916f297..3497cea 100644
+--- a/runtime/libc/kl_libc.c
++++ b/runtime/libc/kl_libc.c
+@@ -1,3 +1,4 @@
++#include "kl_guest_threads.h"
+ // libc entry points that cannot be forwarded: divergent struct layouts, Android-only
+ // APIs, and functions whose ABI differs between Linux/aarch64 and Darwin/arm64.
+ // Everything whose signature *and* layout match is in kl_libc_table.h instead.
+@@ -142,7 +143,7 @@ extern char **environ;
+ char ***klb_environ_ptr(void) { return &environ; }   // registered as data below
+ 
+ // ---------- Android-only ----------
+-int  klb_gettid(void) { uint64_t t = 0; pthread_threadid_np(NULL, &t); return (int)t; }
++int  klb_gettid(void) { kl_guest_thread_enter(); uint64_t t = 0; pthread_threadid_np(NULL, &t); return (int)t; }
+ // ---- __system_property_* ----
+ //
+ // Answering empty for everything is not a neutral answer, it is a SECOND answer
+diff --git a/runtime/libc/kl_pthread.c b/runtime/libc/kl_pthread.c
+index aef7e05..491e579 100644
+--- a/runtime/libc/kl_pthread.c
++++ b/runtime/libc/kl_pthread.c
+@@ -32,6 +32,7 @@
+ #include <time.h>
+ #include <dispatch/dispatch.h>
+ #include "klepton.h"
++#include "kl_guest_threads.h"
+ #include "kl_env.h"
+ #include "kl_x18.h"
+ 
+@@ -1013,6 +1014,7 @@ static void tsd_thread_exit(void *p) {
+     }
+     pthread_setspecific(g_tsd_key, NULL);
+     free(s);
++    kl_guest_thread_drop();
+ }
+ static void tsd_init(void) { pthread_key_create(&g_tsd_key, tsd_thread_exit); }
+ // No pthread_once here on purpose: every caller has already passed key_live(),
+@@ -1023,7 +1025,10 @@ static kl_tsd_slot *tsd_table(int make) {
+     kl_tsd_slot *s = pthread_getspecific(g_tsd_key);
+     if (!s && make) {
+         s = calloc(KL_MAX_KEYS, sizeof *s);
+-        if (s) pthread_setspecific(g_tsd_key, s);
++        if (s) {
++            if (pthread_setspecific(g_tsd_key, s)) { free(s); return NULL; }
++            kl_guest_thread_hold();
++        }
+     }
+     return s;
+ }
+@@ -1213,8 +1218,15 @@ void kl_pthread_boost_qos(uint64_t threadid) {
+ }
+ 
+ typedef struct { void *(*fn)(void *); void *arg; } tramp;
++static void guest_thread_cleanup(void *unused) {
++    thread_unregister(pthread_self());
++    kl_guest_thread_body_done();
++}
+ static void *thread_tramp(void *p) {
+     tramp t = *(tramp *)p; free(p);
++    void *r;
++    kl_guest_thread_enter();
++    pthread_cleanup_push(guest_thread_cleanup, NULL);
+     kl_thread_init();
+     // KL_GUEST_QOS=1: every guest thread at USER_INITIATED instead of default.
+     // On visionOS a default-QoS thread is scheduled behind the compositor's
+@@ -1261,8 +1273,8 @@ static void *thread_tramp(void *p) {
+             pthread_setspecific(KLX_TSD_SLOT, NULL);
+         }
+     }
+-    void *r = t.fn(t.arg);
+-    thread_unregister(pthread_self());
++    r = t.fn(t.arg);
++    pthread_cleanup_pop(1);
+     return r;
+ }
+ int klb_pthread_create(pthread_t *out, const bionic_attr *ga,
+@@ -1306,7 +1318,7 @@ int klb_pthread_create(pthread_t *out, const bionic_attr *ga,
+ }
+ int   klb_pthread_join(pthread_t t, void **r)  { return px(pthread_join(t, r)); }
+ int   klb_pthread_detach(pthread_t t)          { return px(pthread_detach(t)); }
+-void  klb_pthread_exit(void *r)                { thread_unregister(pthread_self()); pthread_exit(r); }
++void  klb_pthread_exit(void *r)                { pthread_exit(r); }
+ pthread_t klb_pthread_self(void)               { return pthread_self(); }
+ int   klb_pthread_equal(pthread_t a, pthread_t b) { return pthread_equal(a, b); }
+ int   klb_pthread_kill(pthread_t t, int sig)   {
+-- 
+2.54.0 (Apple Git-157)
+
+
+From e7c22d90226b2826a589f8268b26bc8379952627 Mon Sep 17 00:00:00 2001
+From: Nick Kennedy <nick@nick-kennedy.com>
+Date: Tue, 20 Oct 2026 00:29:04 +0200
+Subject: [PATCH 3/3] doc: record nested destructor coverage for guest thread
+ registry
+
+Signed-off-by: Nick Kennedy <nick@nick-kennedy.com>
+---
+ GUEST_THREADS.md | 3 ++-
+ 1 file changed, 2 insertions(+), 1 deletion(-)
+
+diff --git a/GUEST_THREADS.md b/GUEST_THREADS.md
+index 6b8e3c9..d80d7ec 100644
+--- a/GUEST_THREADS.md
++++ b/GUEST_THREADS.md
+@@ -24,7 +24,8 @@ uninitialized output key when choosing a destructor.
+ Tests in VeRantyx `NativeARM/host/tests/guest_threads.c` link the real runtime
+ and host shims, using host-owned callbacks. They exercise normal return,
+ pthread_exit, deferred cancellation, C++ TLS + pthread-key destructors, repeated
+-key destructors, detach, interposed syscall(exit), signal-zero tkill/tgkill,
++key destructors, nested/cross-domain destructor registration, detach,
++interposed syscall(exit), signal-zero tkill/tgkill,
+ unknown IDs and sequential fast return/exit cycles. No ELF/game is loaded.
+ 
+ Limits before gameplay:
+-- 
+2.54.0 (Apple Git-157)
+

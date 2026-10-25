@@ -1,0 +1,8 @@
+RUNTIME constructors pass: libpanorama_text_pango.so
+RUNTIME constructors pass: libharfbuzz-icu.so
+RUNTIME constructors pass: libvorbisfile.so
+  [glibc] guest crash handlers are not installed (KL_GLIBC_GUEST_CRASH_HANDLERS=1 to install)
+RUNTIME constructors pass: libpanorama.so
+RUNTIME OpenSSL: OpenSSL 3.5.7 9 Jun 2026
+  [glibc] 506 table entries, 62 aliases, 0 stub calls
+PASS: Panorama constructors, OpenSSL SHA256/RNG/TLS object lifecycle, ICU67 integration and Vorbis dependencies; no network or authentication tests

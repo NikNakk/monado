@@ -1,0 +1,17 @@
+{
+  "game/bin/linuxsteamrtarm64/libengine2.so": true,
+  "game/bin/linuxsteamrtarm64/libharfbuzz.so.0.61010.0": true,
+  "game/bin/linuxsteamrtarm64/libmaterialsystem2.so": true,
+  "game/bin/linuxsteamrtarm64/libparticles.so": true,
+  "game/bin/linuxsteamrtarm64/librenderingpipelines.so": true,
+  "game/bin/linuxsteamrtarm64/librendersystemempty.so": true,
+  "game/bin/linuxsteamrtarm64/librendersystemgl.so": true,
+  "game/bin/linuxsteamrtarm64/librendersystemvulkan.so": true,
+  "game/bin/linuxsteamrtarm64/libtier0.so": true,
+  "game/bin/linuxsteamrtarm64/libv8_icuuc.so": true,
+  "game/bin/linuxsteamrtarm64/libvideo.so": true,
+  "game/bin/linuxsteamrtarm64/libvr.so": true,
+  "game/bin/linuxsteamrtarm64/libvscript.so": true,
+  "game/bin/linuxsteamrtarm64/libvulkan_freedreno_hlvr.so": true,
+  "game/hlvr/bin/linuxsteamrtarm64/libclient.so": true
+}

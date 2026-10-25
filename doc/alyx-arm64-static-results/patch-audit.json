@@ -1,0 +1,68 @@
+{
+  "libvscript.so": {
+    "counts": {
+      "tls_read_candidates": 1,
+      "ctr_read_candidates": 1,
+      "svc_candidates": 0,
+      "bare_svc_heuristic_candidates": 0
+    },
+    "lua_range_pattern_vas": [
+      "0x4dfc4"
+    ],
+    "symbols": [
+      {
+        "name": "Plat_VirtualAlloc",
+        "value": 0,
+        "size": 0,
+        "defined": false,
+        "type": 2
+      },
+      {
+        "name": "lua_VALVE_HOOK_ALLOCATIONS",
+        "value": 824704,
+        "size": 48,
+        "defined": true,
+        "type": 2
+      },
+      {
+        "name": "lua_VALVE_OVERRIDE_MMAP",
+        "value": 824224,
+        "size": 24,
+        "defined": true,
+        "type": 2
+      }
+    ]
+  },
+  "libvideo.so": {
+    "counts": {
+      "tls_read_candidates": 35,
+      "ctr_read_candidates": 0,
+      "svc_candidates": 1703,
+      "bare_svc_heuristic_candidates": 1641
+    },
+    "lua_range_pattern_vas": [],
+    "symbols": [],
+    "video_guard_va": "0x1180a0",
+    "expected_fnv": "4dd69d9ecfed2441",
+    "observed_fnv": "4dd69d9ecfed2441",
+    "guard_matches": true
+  },
+  "libtier0.so": {
+    "counts": {
+      "tls_read_candidates": 63,
+      "ctr_read_candidates": 0,
+      "svc_candidates": 0,
+      "bare_svc_heuristic_candidates": 0
+    },
+    "lua_range_pattern_vas": [],
+    "symbols": [
+      {
+        "name": "Plat_VirtualAlloc",
+        "value": 462112,
+        "size": 708,
+        "defined": true,
+        "type": 2
+      }
+    ]
+  }
+}

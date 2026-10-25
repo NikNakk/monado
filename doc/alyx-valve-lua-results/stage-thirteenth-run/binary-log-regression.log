@@ -1,0 +1,1 @@
+PASS: both real wrappers preserve child exit7 and raw non-UTF-8 bytes, render replacement text, and retain manifests; inert fixtures only

@@ -1,0 +1,14 @@
+VALVE-DISPATCH profile=0 real-slot-available=0
+VALVE-DISPATCH vkCmdBindVertexBuffers2EXT available=0
+VALVE-DISPATCH vkCmdSetCullModeEXT available=0
+VALVE-DISPATCH vkCmdSetDepthBoundsTestEnableEXT available=0
+VALVE-DISPATCH vkCmdSetDepthCompareOpEXT available=0
+VALVE-DISPATCH vkCmdSetDepthTestEnableEXT available=0
+VALVE-DISPATCH vkCmdSetDepthWriteEnableEXT available=0
+VALVE-DISPATCH vkCmdSetFrontFaceEXT available=0
+VALVE-DISPATCH vkCmdSetPrimitiveTopologyEXT available=0
+VALVE-DISPATCH vkCmdSetScissorWithCountEXT available=0
+VALVE-DISPATCH vkCmdSetStencilOpEXT available=0
+VALVE-DISPATCH vkCmdSetStencilTestEnableEXT available=0
+VALVE-DISPATCH vkCmdSetViewportWithCountEXT available=0
+VALVE-DISPATCH PASS: exact captured request and caller structures preserved

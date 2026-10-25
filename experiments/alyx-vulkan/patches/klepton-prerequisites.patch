@@ -1,0 +1,1811 @@
+From 67ef51f10c5e5aa14bb9e1a68625d95ab7302d00 Mon Sep 17 00:00:00 2001
+From: Nick Kennedy <nick@nick-kennedy.com>
+Date: Mon, 19 Oct 2026 23:33:38 +0200
+Subject: [PATCH] Apply VeRantyx native ARM64 compatibility prerequisites
+
+Signed-off-by: Nick Kennedy <nick@nick-kennedy.com>
+---
+ Makefile                    |   2 +-
+ runtime/gfx/kl_vk_async.inc | 408 ++++++++++++++++++++++++++++++++++++
+ runtime/gfx/kl_vulkan.c     | 169 ++++++++++++++-
+ runtime/kl_dl.c             |  89 +++++++-
+ runtime/kl_image.c          | 182 +++++++++++++++-
+ runtime/kl_tls.S            |  91 ++++++++
+ runtime/kl_tls.c            | 249 ++++++++++++++++++++++
+ runtime/kl_tls.h            |  58 +++++
+ runtime/kl_x18.c            |  79 +++++++
+ runtime/kl_x18.h            |   2 +-
+ runtime/klepton.h           |  13 ++
+ runtime/libc/kl_libc.c      |  42 +++-
+ runtime/libc/kl_shim.c      |   1 +
+ tools/klepton_ld.c          |   2 +-
+ 14 files changed, 1369 insertions(+), 18 deletions(-)
+ create mode 100644 runtime/gfx/kl_vk_async.inc
+ create mode 100644 runtime/kl_tls.S
+ create mode 100644 runtime/kl_tls.c
+ create mode 100644 runtime/kl_tls.h
+
+diff --git a/Makefile b/Makefile
+index 4668313..fa75fd2 100644
+--- a/Makefile
++++ b/Makefile
+@@ -44,7 +44,7 @@ RUNTIME_JNI := runtime/kl_jni.c \
+            runtime/jni/kl_jni_prefs.c runtime/jni/kl_jni_sdl.c \
+            runtime/jni/kl_jni_ue4.c runtime/jni/kl_jni_electra.c runtime/jni/kl_jni_fmod.c runtime/jni/kl_jni_jkxr.c
+ 
+-RUNTIME_SHIP := runtime/kl_env.c runtime/kl_image.c runtime/kl_stub_cells.S runtime/libc/kl_shim.c runtime/libc/kl_va.c \
++RUNTIME_SHIP := runtime/kl_env.c runtime/kl_image.c runtime/kl_tls.c runtime/kl_tls.S runtime/kl_stub_cells.S runtime/libc/kl_shim.c runtime/libc/kl_va.c \
+            runtime/libc/kl_va_handlers.c runtime/libc/kl_va_thunks.S \
+            runtime/libc/kl_libc.c runtime/libc/kl_libc_slink.c runtime/libc/kl_pthread.c runtime/kl_dl.c \
+            runtime/guest/kl_ndk.c runtime/kl_x18.c runtime/kl_target.c \
+diff --git a/runtime/gfx/kl_vk_async.inc b/runtime/gfx/kl_vk_async.inc
+new file mode 100644
+index 0000000..da13adb
+--- /dev/null
++++ b/runtime/gfx/kl_vk_async.inc
+@@ -0,0 +1,408 @@
++// kl_vk_async.inc — asynchronous graphics-pipeline creation (VeRantyx).
++// Included into kl_vulkan.c by klepton-patches/apply.py.
++//
++// MoltenVK compiles a pipeline inside vkCreateGraphicsPipelines; the first
++// time Source 2 meets a material that is 250-500 ms on its render thread (the
++// hitches when characters or new areas appear). With KL_VK_ASYNC_PIPELINES=1
++// the create info is deep-copied, the guest gets a placeholder handle at once,
++// and worker threads compile. Binding a placeholder that is not ready yet makes
++// the command buffer skip draws until its next bind: the object appears a few
++// frames late instead of the whole frame freezing. Anything the copy does not
++// understand (an unknown pNext) is compiled synchronously as before.
++//
++// While compiles are in flight, destroys of shader modules, pipeline layouts,
++// render passes and descriptor-set layouts are deferred (the pending compiles
++// still reference them); they run when the queue drains.
++
++#include <pthread.h>
++#include <stdatomic.h>
++
++#define KVA_MAGIC 0x4b4c41535950524full   /* "ORPYSALK" — never an MVK vtable */
++
++typedef struct kva_chunk { struct kva_chunk *next; size_t used, cap; char data[]; } kva_chunk;
++typedef struct { kva_chunk *head; } kva_arena;
++
++static void *kva_alloc(kva_arena *a, size_t n) {
++    n = (n + 15) & ~(size_t)15;
++    if (!a->head || a->head->used + n > a->head->cap) {
++        size_t cap = n > 4096 ? n : 4096;
++        kva_chunk *c = (kva_chunk *)malloc(sizeof *c + cap);
++        if (!c) return NULL;
++        c->next = a->head; c->used = 0; c->cap = cap; a->head = c;
++    }
++    void *p = a->head->data + a->head->used;
++    a->head->used += n;
++    return p;
++}
++static void *kva_dup(kva_arena *a, const void *p, size_t n) {
++    if (!p || !n) return NULL;
++    void *d = kva_alloc(a, n);
++    if (d) memcpy(d, p, n);
++    return d;
++}
++static void kva_free(kva_arena *a) {
++    kva_chunk *c = a->head;
++    while (c) { kva_chunk *n = c->next; free(c); c = n; }
++    a->head = NULL;
++}
++
++// pNext chains: known, pointer-free (or handled) structures only; 0 = give up.
++static int kva_copy_chain(kva_arena *a, const void *src, const void **dst) {
++    const VkBaseInStructure *s = (const VkBaseInStructure *)src;
++    VkBaseOutStructure *head = NULL, *tail = NULL;
++    for (; s; s = s->pNext) {
++        size_t sz = 0;
++        switch ((int)s->sType) {
++        case VK_STRUCTURE_TYPE_PIPELINE_CREATION_FEEDBACK_CREATE_INFO:
++            continue;   // output pointers: meaningless after the call returns
++        case VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO: sz = sizeof(VkPipelineRenderingCreateInfo); break;
++        case VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_DEPTH_CLIP_STATE_CREATE_INFO_EXT: sz = sizeof(VkPipelineRasterizationDepthClipStateCreateInfoEXT); break;
++        case VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_PROVOKING_VERTEX_STATE_CREATE_INFO_EXT: sz = sizeof(VkPipelineRasterizationProvokingVertexStateCreateInfoEXT); break;
++        case VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_LINE_STATE_CREATE_INFO_EXT: sz = sizeof(VkPipelineRasterizationLineStateCreateInfoEXT); break;
++        case VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_CONSERVATIVE_STATE_CREATE_INFO_EXT: sz = sizeof(VkPipelineRasterizationConservativeStateCreateInfoEXT); break;
++        case VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_REQUIRED_SUBGROUP_SIZE_CREATE_INFO: sz = sizeof(VkPipelineShaderStageRequiredSubgroupSizeCreateInfo); break;
++        case VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_DIVISOR_STATE_CREATE_INFO_EXT: sz = sizeof(VkPipelineVertexInputDivisorStateCreateInfoEXT); break;
++        default: {
++            static int said; if (said < 8) { said++;
++                VKI("[async] pipeline pNext sType %d not copied: that pipeline compiles synchronously\n", (int)s->sType); }
++            return 0;
++        }
++        }
++        VkBaseOutStructure *c = (VkBaseOutStructure *)kva_dup(a, s, sz);
++        if (!c) return 0;
++        c->pNext = NULL;
++        if ((int)s->sType == VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO) {
++            VkPipelineRenderingCreateInfo *r = (VkPipelineRenderingCreateInfo *)c;
++            r->pColorAttachmentFormats = (const VkFormat *)kva_dup(a, r->pColorAttachmentFormats, r->colorAttachmentCount * sizeof(VkFormat));
++        } else if ((int)s->sType == VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_DIVISOR_STATE_CREATE_INFO_EXT) {
++            VkPipelineVertexInputDivisorStateCreateInfoEXT *d = (VkPipelineVertexInputDivisorStateCreateInfoEXT *)c;
++            d->pVertexBindingDivisors = (const VkVertexInputBindingDivisorDescriptionEXT *)kva_dup(a, d->pVertexBindingDivisors,
++                d->vertexBindingDivisorCount * sizeof(VkVertexInputBindingDivisorDescriptionEXT));
++        }
++        if (tail) tail->pNext = c; else head = c;
++        tail = c;
++    }
++    *dst = head;
++    return 1;
++}
++
++#define KVA_STATE(T, field)                                                           \
++    if (ci->field) {                                                                  \
++        T *x = (T *)kva_dup(a, ci->field, sizeof(T));                                 \
++        if (!x || !kva_copy_chain(a, ci->field->pNext, &x->pNext)) return NULL;       \
++        c->field = x;                                                                 \
++    }
++
++static VkGraphicsPipelineCreateInfo *kva_copy_gpci(kva_arena *a, const VkGraphicsPipelineCreateInfo *ci) {
++    VkGraphicsPipelineCreateInfo *c = (VkGraphicsPipelineCreateInfo *)kva_dup(a, ci, sizeof *ci);
++    if (!c || !kva_copy_chain(a, ci->pNext, &c->pNext)) return NULL;
++    if (ci->stageCount) {
++        VkPipelineShaderStageCreateInfo *st = (VkPipelineShaderStageCreateInfo *)kva_dup(a, ci->pStages, ci->stageCount * sizeof *st);
++        if (!st) return NULL;
++        for (uint32_t i = 0; i < ci->stageCount; i++) {
++            if (!kva_copy_chain(a, ci->pStages[i].pNext, &st[i].pNext)) return NULL;
++            if (!st[i].module) return NULL;   // inline code (maintenance5): not handled
++            const char *nm = ci->pStages[i].pName ? ci->pStages[i].pName : "main";
++            st[i].pName = (const char *)kva_dup(a, nm, strlen(nm) + 1);
++            const VkSpecializationInfo *sp = ci->pStages[i].pSpecializationInfo;
++            if (sp) {
++                VkSpecializationInfo *spc = (VkSpecializationInfo *)kva_dup(a, sp, sizeof *sp);
++                if (!spc) return NULL;
++                spc->pMapEntries = (const VkSpecializationMapEntry *)kva_dup(a, sp->pMapEntries, sp->mapEntryCount * sizeof(VkSpecializationMapEntry));
++                spc->pData = kva_dup(a, sp->pData, sp->dataSize);
++                st[i].pSpecializationInfo = spc;
++            }
++        }
++        c->pStages = st;
++    }
++    KVA_STATE(VkPipelineVertexInputStateCreateInfo, pVertexInputState)
++    if (c->pVertexInputState) {
++        VkPipelineVertexInputStateCreateInfo *v = (VkPipelineVertexInputStateCreateInfo *)c->pVertexInputState;
++        v->pVertexBindingDescriptions = (const VkVertexInputBindingDescription *)kva_dup(a, v->pVertexBindingDescriptions,
++            v->vertexBindingDescriptionCount * sizeof(VkVertexInputBindingDescription));
++        v->pVertexAttributeDescriptions = (const VkVertexInputAttributeDescription *)kva_dup(a, v->pVertexAttributeDescriptions,
++            v->vertexAttributeDescriptionCount * sizeof(VkVertexInputAttributeDescription));
++    }
++    KVA_STATE(VkPipelineInputAssemblyStateCreateInfo, pInputAssemblyState)
++    KVA_STATE(VkPipelineTessellationStateCreateInfo, pTessellationState)
++    KVA_STATE(VkPipelineViewportStateCreateInfo, pViewportState)
++    if (c->pViewportState) {
++        VkPipelineViewportStateCreateInfo *v = (VkPipelineViewportStateCreateInfo *)c->pViewportState;
++        v->pViewports = (const VkViewport *)kva_dup(a, v->pViewports, v->viewportCount * sizeof(VkViewport));
++        v->pScissors = (const VkRect2D *)kva_dup(a, v->pScissors, v->scissorCount * sizeof(VkRect2D));
++    }
++    KVA_STATE(VkPipelineRasterizationStateCreateInfo, pRasterizationState)
++    KVA_STATE(VkPipelineMultisampleStateCreateInfo, pMultisampleState)
++    if (c->pMultisampleState && c->pMultisampleState->pSampleMask) {
++        VkPipelineMultisampleStateCreateInfo *m = (VkPipelineMultisampleStateCreateInfo *)c->pMultisampleState;
++        uint32_t words = ((uint32_t)m->rasterizationSamples + 31) / 32;
++        m->pSampleMask = (const VkSampleMask *)kva_dup(a, m->pSampleMask, words * sizeof(VkSampleMask));
++    }
++    KVA_STATE(VkPipelineDepthStencilStateCreateInfo, pDepthStencilState)
++    KVA_STATE(VkPipelineColorBlendStateCreateInfo, pColorBlendState)
++    if (c->pColorBlendState) {
++        VkPipelineColorBlendStateCreateInfo *b = (VkPipelineColorBlendStateCreateInfo *)c->pColorBlendState;
++        b->pAttachments = (const VkPipelineColorBlendAttachmentState *)kva_dup(a, b->pAttachments,
++            b->attachmentCount * sizeof(VkPipelineColorBlendAttachmentState));
++    }
++    KVA_STATE(VkPipelineDynamicStateCreateInfo, pDynamicState)
++    if (c->pDynamicState) {
++        VkPipelineDynamicStateCreateInfo *d = (VkPipelineDynamicStateCreateInfo *)c->pDynamicState;
++        d->pDynamicStates = (const VkDynamicState *)kva_dup(a, d->pDynamicStates, d->dynamicStateCount * sizeof(VkDynamicState));
++    }
++    // Derivatives of a placeholder: drop the derivative link (an optimisation hint).
++    c->flags &= ~(VkPipelineCreateFlags)VK_PIPELINE_CREATE_DERIVATIVE_BIT;
++    c->basePipelineHandle = VK_NULL_HANDLE;
++    c->basePipelineIndex = -1;
++    return c;
++}
++
++typedef struct kva_pipe {
++    uint64_t magic;
++    _Atomic uint64_t real;          // the MoltenVK pipeline once compiled
++    _Atomic int state;              // 0 pending, 1 ready, 2 failed
++    int destroy_requested;          // under g_kva_mu
++    VkDevice dev;
++    kva_arena arena;
++    VkGraphicsPipelineCreateInfo *ci;
++    struct kva_pipe *next_job;
++    double queued_ms;
++} kva_pipe;
++
++static pthread_mutex_t g_kva_mu = PTHREAD_MUTEX_INITIALIZER;
++static pthread_cond_t g_kva_cv = PTHREAD_COND_INITIALIZER;
++static kva_pipe *g_kva_head, *g_kva_tail;
++static int g_kva_pending;                   // queued + compiling
++static unsigned long long g_kva_done, g_kva_failed, g_kva_sync, g_kva_skipped_binds;
++static double g_kva_ms;
++static PFN_vkCreateGraphicsPipelines g_kva_create;
++static PFN_vkDestroyPipeline g_kva_destroy_pipeline;
++
++typedef struct { int kind; VkDevice dev; uint64_t h; } kva_deferred;   // kind: 0 module 1 layout 2 renderpass 3 dsl
++static kva_deferred *g_kva_def; static size_t g_kva_ndef, g_kva_capdef;
++
++static int kva_on(void) {
++    static int on = -1;
++    if (on < 0) on = kl_env_on("KL_VK_ASYNC_PIPELINES", 0);
++    return on;
++}
++static inline kva_pipe *kva_of(uint64_t h) {
++    if (!h) return NULL;
++    const kva_pipe *p = (const kva_pipe *)(uintptr_t)h;
++    return p->magic == KVA_MAGIC ? (kva_pipe *)p : NULL;
++}
++
++static void kva_flush_deferred_locked(void);
++
++static void *kva_worker(void *arg) {
++    (void)arg;
++    pthread_setname_np("kl-pipeline-compile");
++    for (;;) {
++        pthread_mutex_lock(&g_kva_mu);
++        while (!g_kva_head) pthread_cond_wait(&g_kva_cv, &g_kva_mu);
++        kva_pipe *p = g_kva_head;
++        g_kva_head = p->next_job;
++        if (!g_kva_head) g_kva_tail = NULL;
++        pthread_mutex_unlock(&g_kva_mu);
++
++        double t0 = kl_pipe_ms();
++        VkPipeline real = VK_NULL_HANDLE;
++        VkResult r = g_kva_create(p->dev, VK_NULL_HANDLE, 1, p->ci, NULL, &real);
++        double dt = kl_pipe_ms() - t0;
++
++        pthread_mutex_lock(&g_kva_mu);
++        kva_free(&p->arena); p->ci = NULL;
++        g_kva_ms += dt;
++        if (r == VK_SUCCESS && real) { atomic_store(&p->real, (uint64_t)real); atomic_store(&p->state, 1); g_kva_done++; }
++        else { atomic_store(&p->state, 2); g_kva_failed++; }
++        int destroy = p->destroy_requested;
++        g_kva_pending--;
++        if (g_kva_pending == 0) kva_flush_deferred_locked();
++        unsigned long long done = g_kva_done;
++        pthread_mutex_unlock(&g_kva_mu);
++        if (destroy) {
++            if (real && g_kva_destroy_pipeline) g_kva_destroy_pipeline(p->dev, real, NULL);
++            p->magic = 0; free(p);
++        }
++        if (done % 50 == 0 && done) {
++            VKI("[async] %llu pipelines compiled off the render thread (%.1f s), %llu failed, %llu compiled inline, "
++                "%llu binds skipped while compiling, %d pending\n",
++                done, g_kva_ms / 1000.0, g_kva_failed, g_kva_sync, g_kva_skipped_binds, g_kva_pending);
++        }
++    }
++    return NULL;
++}
++
++static void kva_spawn_workers(void) {
++    const char *e = getenv("KL_VK_ASYNC_THREADS");
++    int n = e && *e ? atoi(e) : 3;
++    if (n < 1) n = 1;
++    if (n > 8) n = 8;
++    for (int i = 0; i < n; i++) { pthread_t t; pthread_create(&t, NULL, kva_worker, NULL); pthread_detach(t); }
++    VKI("[async] pipeline compiles moved off the render thread (%d workers)\n", n);
++}
++static void kva_start_workers(void) {
++    static pthread_once_t once = PTHREAD_ONCE_INIT;
++    pthread_once(&once, kva_spawn_workers);
++}
++
++// Returns 1 and fills out[i] with placeholders when it took the pipelines.
++static int kva_create(VkDevice dev, uint32_t n, const VkGraphicsPipelineCreateInfo *ci, VkPipeline *out,
++                      PFN_vkCreateGraphicsPipelines real) {
++    if (!kva_on() || !real || !ci || !n || !out) return 0;
++    for (uint32_t i = 0; i < n; i++)   // a batch with an in-batch base index: keep it synchronous
++        if ((ci[i].flags & VK_PIPELINE_CREATE_DERIVATIVE_BIT) && ci[i].basePipelineIndex >= 0) return 0;
++    kva_pipe **made = (kva_pipe **)calloc(n, sizeof *made);
++    if (!made) return 0;
++    for (uint32_t i = 0; i < n; i++) {
++        kva_pipe *p = (kva_pipe *)calloc(1, sizeof *p);
++        if (!p) goto fail;
++        p->magic = KVA_MAGIC; p->dev = dev;
++        p->ci = kva_copy_gpci(&p->arena, &ci[i]);
++        if (!p->ci) { kva_free(&p->arena); free(p); goto fail; }
++        made[i] = p;
++    }
++    g_kva_create = real;
++    if (!g_kva_destroy_pipeline && real_gdpa) g_kva_destroy_pipeline = (PFN_vkDestroyPipeline)real_gdpa(dev, "vkDestroyPipeline");
++    kva_start_workers();
++    pthread_mutex_lock(&g_kva_mu);
++    for (uint32_t i = 0; i < n; i++) {
++        kva_pipe *p = made[i];
++        out[i] = (VkPipeline)(uintptr_t)p;
++        if (g_kva_tail) g_kva_tail->next_job = p; else g_kva_head = p;
++        g_kva_tail = p;
++        g_kva_pending++;
++    }
++    pthread_cond_broadcast(&g_kva_cv);
++    pthread_mutex_unlock(&g_kva_mu);
++    free(made);
++    return 1;
++fail:
++    for (uint32_t i = 0; i < n; i++) if (made[i]) { kva_free(&made[i]->arena); free(made[i]); }
++    free(made);
++    __atomic_add_fetch(&g_kva_sync, 1, __ATOMIC_RELAXED);
++    return 0;
++}
++
++// Per-command-buffer "skip draws" flag (open addressing, never shrinks).
++#define KVA_CB_SLOTS 8192
++static struct { _Atomic(uintptr_t) cb; _Atomic int skip; } g_kva_cb[KVA_CB_SLOTS];
++static inline int kva_cb_slot(void *cb, int insert) {
++    uintptr_t k = (uintptr_t)cb;
++    unsigned h = (unsigned)((k >> 4) * 2654435761u) & (KVA_CB_SLOTS - 1);
++    for (unsigned i = 0; i < KVA_CB_SLOTS; i++, h = (h + 1) & (KVA_CB_SLOTS - 1)) {
++        uintptr_t cur = atomic_load(&g_kva_cb[h].cb);
++        if (cur == k) return (int)h;
++        if (cur == 0) {
++            if (!insert) return -1;
++            uintptr_t z = 0;
++            if (atomic_compare_exchange_strong(&g_kva_cb[h].cb, &z, k) || z == k) return (int)h;
++        }
++    }
++    return -1;
++}
++static inline void kva_set_skip(void *cb, int skip) {
++    int s = kva_cb_slot(cb, skip);   // clearing a never-seen cb needs no slot
++    if (s >= 0) atomic_store(&g_kva_cb[s].skip, skip);
++}
++static inline int kva_skip(void *cb) {
++    if (!kva_on()) return 0;
++    int s = kva_cb_slot(cb, 0);
++    return s >= 0 && atomic_load(&g_kva_cb[s].skip);
++}
++// Bind: returns the handle to bind, or 0 to bind nothing (draws skipped).
++static inline uint64_t kva_bind(void *cb, uint32_t bindPoint, uint64_t pipeline) {
++    if (!kva_on() || bindPoint != VK_PIPELINE_BIND_POINT_GRAPHICS) return pipeline;
++    kva_pipe *p = kva_of(pipeline);
++    if (!p) { kva_set_skip(cb, 0); return pipeline; }
++    if (atomic_load(&p->state) == 1) { kva_set_skip(cb, 0); return atomic_load(&p->real); }
++    kva_set_skip(cb, 1);
++    __atomic_add_fetch(&g_kva_skipped_binds, 1, __ATOMIC_RELAXED);
++    return 0;
++}
++// DestroyPipeline: returns 1 when it handled a placeholder.
++static int kva_destroy_pipeline(VkDevice dev, uint64_t pipeline, PFN_vkDestroyPipeline real) {
++    kva_pipe *p = kva_of(pipeline);
++    if (!p) return 0;
++    pthread_mutex_lock(&g_kva_mu);
++    int st = atomic_load(&p->state);
++    if (st == 0) { p->destroy_requested = 1; pthread_mutex_unlock(&g_kva_mu); return 1; }
++    pthread_mutex_unlock(&g_kva_mu);
++    uint64_t r = atomic_load(&p->real);
++    if (r && real) real(dev, (VkPipeline)r, NULL);
++    p->magic = 0; free(p);
++    return 1;
++}
++// Destroys of objects pending compiles may use: deferred while any are pending.
++static int kva_defer_destroy(int kind, VkDevice dev, uint64_t h) {
++    if (!kva_on() || !h) return 0;
++    pthread_mutex_lock(&g_kva_mu);
++    if (g_kva_pending == 0) { pthread_mutex_unlock(&g_kva_mu); return 0; }
++    if (g_kva_ndef == g_kva_capdef) {
++        size_t cap = g_kva_capdef ? g_kva_capdef * 2 : 64;
++        kva_deferred *n = (kva_deferred *)realloc(g_kva_def, cap * sizeof *n);
++        if (!n) { pthread_mutex_unlock(&g_kva_mu); return 0; }
++        g_kva_def = n; g_kva_capdef = cap;
++    }
++    g_kva_def[g_kva_ndef++] = (kva_deferred){ kind, dev, h };
++    pthread_mutex_unlock(&g_kva_mu);
++    return 1;
++}
++static void kva_flush_deferred_locked(void) {
++    static const char *names[] = { "vkDestroyShaderModule", "vkDestroyPipelineLayout", "vkDestroyRenderPass", "vkDestroyDescriptorSetLayout" };
++    for (size_t i = 0; i < g_kva_ndef; i++) {
++        kva_deferred *d = &g_kva_def[i];
++        void (*fn)(VkDevice, uint64_t, const void *) = real_gdpa ? (void (*)(VkDevice, uint64_t, const void *))real_gdpa(d->dev, names[d->kind]) : NULL;
++        if (fn) fn(d->dev, d->h, NULL);
++    }
++    g_kva_ndef = 0;
++}
++
++// ---- entry points (added to kl_vulkan.c's dispatch table by apply.py) ----
++typedef void (*kva_draw_fn)(void *, uint32_t, uint32_t, uint32_t, uint32_t);
++typedef void (*kva_indirect_fn)(void *, uint64_t, uint64_t, uint32_t, uint32_t);
++typedef void (*kva_count_fn)(void *, uint64_t, uint64_t, uint64_t, uint64_t, uint32_t, uint32_t);
++#define KVA_CMD_REAL(T, name) \
++    static T real; if (!real && real_gdpa) real = (T)real_gdpa(g_devs[0] ? g_devs[0]->dev : NULL, name)
++static void VKAPI_CALL klvk_CmdDraw(void *cb, uint32_t vc, uint32_t ic, uint32_t fv, uint32_t fi) {
++    KVA_CMD_REAL(kva_draw_fn, "vkCmdDraw");
++    if (kva_skip(cb)) return;
++    if (real) real(cb, vc, ic, fv, fi);
++}
++static void VKAPI_CALL klvk_CmdDrawIndirect(void *cb, uint64_t buf, uint64_t off, uint32_t n, uint32_t stride) {
++    KVA_CMD_REAL(kva_indirect_fn, "vkCmdDrawIndirect");
++    if (kva_skip(cb)) return;
++    if (real) real(cb, buf, off, n, stride);
++}
++static void VKAPI_CALL klvk_CmdDrawIndexedIndirect(void *cb, uint64_t buf, uint64_t off, uint32_t n, uint32_t stride) {
++    KVA_CMD_REAL(kva_indirect_fn, "vkCmdDrawIndexedIndirect");
++    if (kva_skip(cb)) return;
++    if (real) real(cb, buf, off, n, stride);
++}
++static void VKAPI_CALL klvk_CmdDrawIndirectCount(void *cb, uint64_t buf, uint64_t off, uint64_t cbuf, uint64_t coff, uint32_t max, uint32_t stride) {
++    KVA_CMD_REAL(kva_count_fn, "vkCmdDrawIndirectCount");
++    if (kva_skip(cb)) return;
++    if (real) real(cb, buf, off, cbuf, coff, max, stride);
++}
++static void VKAPI_CALL klvk_CmdDrawIndexedIndirectCount(void *cb, uint64_t buf, uint64_t off, uint64_t cbuf, uint64_t coff, uint32_t max, uint32_t stride) {
++    KVA_CMD_REAL(kva_count_fn, "vkCmdDrawIndexedIndirectCount");
++    if (kva_skip(cb)) return;
++    if (real) real(cb, buf, off, cbuf, coff, max, stride);
++}
++static void VKAPI_CALL klvk_DestroyPipeline(VkDevice dev, uint64_t p, const VkAllocationCallbacks *a) {
++    static PFN_vkDestroyPipeline real;
++    if (!real && real_gdpa) real = (PFN_vkDestroyPipeline)real_gdpa(dev, "vkDestroyPipeline");
++    if (kva_destroy_pipeline(dev, p, real)) return;
++    if (real) real(dev, (VkPipeline)p, a);
++}
++#define KVA_DEFERRED_DESTROY(fn, kind, name)                                              \
++    static void VKAPI_CALL klvk_##fn(VkDevice dev, uint64_t h, const VkAllocationCallbacks *a) { \
++        static void (*real)(VkDevice, uint64_t, const VkAllocationCallbacks *);            \
++        if (!real && real_gdpa) real = (void (*)(VkDevice, uint64_t, const VkAllocationCallbacks *))real_gdpa(dev, name); \
++        if (kva_defer_destroy(kind, dev, h)) return;                                       \
++        if (real) real(dev, h, a);                                                         \
++    }
++KVA_DEFERRED_DESTROY(DestroyShaderModule, 0, "vkDestroyShaderModule")
++KVA_DEFERRED_DESTROY(DestroyPipelineLayout, 1, "vkDestroyPipelineLayout")
++KVA_DEFERRED_DESTROY(DestroyRenderPass, 2, "vkDestroyRenderPass")
++KVA_DEFERRED_DESTROY(DestroyDescriptorSetLayout, 3, "vkDestroyDescriptorSetLayout")
+diff --git a/runtime/gfx/kl_vulkan.c b/runtime/gfx/kl_vulkan.c
+index 73854cc..7df6cdf 100644
+--- a/runtime/gfx/kl_vulkan.c
++++ b/runtime/gfx/kl_vulkan.c
+@@ -443,7 +443,7 @@ static VkResult klvk_EnumerateInstanceExtensionProperties(
+ 
+     uint32_t n = 0;
+     real(layer, &n, NULL);
+-    VkExtensionProperties *tmp = calloc(n + 2, sizeof *tmp);
++    VkExtensionProperties *tmp = calloc(n + 8, sizeof *tmp);
+     if (!tmp) return VK_ERROR_OUT_OF_HOST_MEMORY;
+     real(layer, &n, tmp);
+ 
+@@ -456,6 +456,18 @@ static VkResult klvk_EnumerateInstanceExtensionProperties(
+         tmp[n].specVersion = 6;
+         n++;
+     }
++    // ...and the Linux window-system surfaces, for a Linux guest (Source 2 asks
++    // for xcb/xlib/wayland and fails Vulkan init without one). Same synthetic
++    // surface behind all of them.
++    if (!layer) {
++        static const char *linux_wsi[] = { "VK_KHR_xcb_surface", "VK_KHR_xlib_surface", "VK_KHR_wayland_surface" };
++        for (unsigned k = 0; k < 3; k++)
++            if (!ext_supported(tmp, n, linux_wsi[k])) {
++                snprintf(tmp[n].extensionName, sizeof tmp[n].extensionName, "%s", linux_wsi[k]);
++                tmp[n].specVersion = 6;
++                n++;
++            }
++    }
+ 
+     VkResult r = VK_SUCCESS;
+     if (!props) *count = n;
+@@ -488,7 +500,8 @@ static VkResult klvk_CreateInstance(const VkInstanceCreateInfo *ci,
+     extlist keep = {{0}, 0};
+     for (uint32_t i = 0; ci && i < ci->enabledExtensionCount; i++) {
+         const char *e = ci->ppEnabledExtensionNames[i];
+-        if (!strcmp(e, VK_KHR_ANDROID_SURFACE_EXTENSION_NAME)) {
++        if (!strcmp(e, VK_KHR_ANDROID_SURFACE_EXTENSION_NAME) || !strcmp(e, "VK_KHR_xcb_surface") ||
++            !strcmp(e, "VK_KHR_xlib_surface") || !strcmp(e, "VK_KHR_wayland_surface")) {
+             VKT("instance ext %s -> ours (MoltenVK has no Android WSI)\n", e);
+             continue;
+         }
+@@ -571,6 +584,117 @@ static void dev_resolve(klvk_device *d) {
+ #undef R
+ }
+ 
++// Every feature struct is { sType, pNext, VkBool32... }; knowing a struct's size
++// is enough to query what the device supports (vkGetPhysicalDeviceFeatures2 with
++// a zeroed copy chained) and AND the request against it.
++static const struct { VkStructureType st; size_t size; const char *name; } klvk_feature_structs[] = {
++#define FS(T, ST) { ST, sizeof(T), #T }
++    FS(VkPhysicalDeviceVulkan11Features, VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_1_FEATURES),
++    FS(VkPhysicalDeviceVulkan12Features, VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES),
++    FS(VkPhysicalDeviceVulkan13Features, VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES),
++    FS(VkPhysicalDeviceMultiviewFeatures, VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MULTIVIEW_FEATURES),
++    FS(VkPhysicalDevice16BitStorageFeatures, VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_16BIT_STORAGE_FEATURES),
++    FS(VkPhysicalDevice8BitStorageFeatures, VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_8BIT_STORAGE_FEATURES),
++    FS(VkPhysicalDeviceShaderFloat16Int8Features, VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_FLOAT16_INT8_FEATURES),
++    FS(VkPhysicalDeviceDynamicRenderingFeatures, VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DYNAMIC_RENDERING_FEATURES),
++    FS(VkPhysicalDeviceDynamicRenderingLocalReadFeatures, VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DYNAMIC_RENDERING_LOCAL_READ_FEATURES),
++    FS(VkPhysicalDeviceExtendedDynamicStateFeaturesEXT, VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_EXTENDED_DYNAMIC_STATE_FEATURES_EXT),
++    FS(VkPhysicalDeviceExtendedDynamicState2FeaturesEXT, VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_EXTENDED_DYNAMIC_STATE_2_FEATURES_EXT),
++    FS(VkPhysicalDeviceExtendedDynamicState3FeaturesEXT, VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_EXTENDED_DYNAMIC_STATE_3_FEATURES_EXT),
++    FS(VkPhysicalDeviceHostImageCopyFeatures, VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_HOST_IMAGE_COPY_FEATURES),
++    FS(VkPhysicalDeviceSeparateDepthStencilLayoutsFeatures, VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SEPARATE_DEPTH_STENCIL_LAYOUTS_FEATURES),
++    FS(VkPhysicalDeviceImagelessFramebufferFeatures, VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_IMAGELESS_FRAMEBUFFER_FEATURES),
++    FS(VkPhysicalDeviceDescriptorIndexingFeatures, VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_INDEXING_FEATURES),
++    FS(VkPhysicalDeviceBufferDeviceAddressFeatures, VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_BUFFER_DEVICE_ADDRESS_FEATURES),
++    FS(VkPhysicalDeviceTimelineSemaphoreFeatures, VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_TIMELINE_SEMAPHORE_FEATURES),
++    FS(VkPhysicalDeviceShaderDrawParametersFeatures, VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_DRAW_PARAMETERS_FEATURES),
++    FS(VkPhysicalDeviceSamplerYcbcrConversionFeatures, VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SAMPLER_YCBCR_CONVERSION_FEATURES),
++    FS(VkPhysicalDeviceVariablePointersFeatures, VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VARIABLE_POINTERS_FEATURES),
++    FS(VkPhysicalDeviceUniformBufferStandardLayoutFeatures, VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_UNIFORM_BUFFER_STANDARD_LAYOUT_FEATURES),
++    FS(VkPhysicalDeviceScalarBlockLayoutFeatures, VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SCALAR_BLOCK_LAYOUT_FEATURES),
++    FS(VkPhysicalDeviceHostQueryResetFeatures, VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_HOST_QUERY_RESET_FEATURES),
++    FS(VkPhysicalDeviceVulkanMemoryModelFeatures, VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_MEMORY_MODEL_FEATURES),
++    FS(VkPhysicalDeviceShaderSubgroupExtendedTypesFeatures, VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_SUBGROUP_EXTENDED_TYPES_FEATURES),
++    FS(VkPhysicalDeviceShaderAtomicInt64Features, VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_ATOMIC_INT64_FEATURES),
++    FS(VkPhysicalDeviceFragmentDensityMapFeaturesEXT, VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FRAGMENT_DENSITY_MAP_FEATURES_EXT),
++    FS(VkPhysicalDeviceMemoryPriorityFeaturesEXT, VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MEMORY_PRIORITY_FEATURES_EXT),
++    FS(VkPhysicalDeviceRobustness2FeaturesEXT, VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ROBUSTNESS_2_FEATURES_EXT),
++    FS(VkPhysicalDeviceSynchronization2Features, VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SYNCHRONIZATION_2_FEATURES),
++    FS(VkPhysicalDeviceMaintenance4Features, VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MAINTENANCE_4_FEATURES),
++    FS(VkPhysicalDeviceShaderDemoteToHelperInvocationFeatures, VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_DEMOTE_TO_HELPER_INVOCATION_FEATURES),
++    FS(VkPhysicalDeviceImageRobustnessFeatures, VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_IMAGE_ROBUSTNESS_FEATURES),
++    FS(VkPhysicalDeviceInlineUniformBlockFeatures, VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_INLINE_UNIFORM_BLOCK_FEATURES),
++    FS(VkPhysicalDevicePipelineCreationCacheControlFeatures, VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PIPELINE_CREATION_CACHE_CONTROL_FEATURES),
++    FS(VkPhysicalDevicePrivateDataFeatures, VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PRIVATE_DATA_FEATURES),
++    FS(VkPhysicalDeviceShaderIntegerDotProductFeatures, VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_INTEGER_DOT_PRODUCT_FEATURES),
++    FS(VkPhysicalDeviceShaderTerminateInvocationFeatures, VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_TERMINATE_INVOCATION_FEATURES),
++    FS(VkPhysicalDeviceSubgroupSizeControlFeatures, VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SUBGROUP_SIZE_CONTROL_FEATURES),
++    FS(VkPhysicalDeviceZeroInitializeWorkgroupMemoryFeatures, VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ZERO_INITIALIZE_WORKGROUP_MEMORY_FEATURES),
++    FS(VkPhysicalDeviceCustomBorderColorFeaturesEXT, VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_CUSTOM_BORDER_COLOR_FEATURES_EXT),
++    FS(VkPhysicalDeviceIndexTypeUint8Features, VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_INDEX_TYPE_UINT8_FEATURES),
++    FS(VkPhysicalDeviceLineRasterizationFeatures, VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_LINE_RASTERIZATION_FEATURES),
++    FS(VkPhysicalDeviceVertexAttributeDivisorFeatures, VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VERTEX_ATTRIBUTE_DIVISOR_FEATURES),
++    FS(VkPhysicalDeviceDepthClipEnableFeaturesEXT, VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DEPTH_CLIP_ENABLE_FEATURES_EXT),
++    FS(VkPhysicalDeviceFragmentShaderInterlockFeaturesEXT, VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FRAGMENT_SHADER_INTERLOCK_FEATURES_EXT),
++    FS(VkPhysicalDeviceSwapchainMaintenance1FeaturesEXT, VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SWAPCHAIN_MAINTENANCE_1_FEATURES_EXT),
++    FS(VkPhysicalDeviceGraphicsPipelineLibraryFeaturesEXT, VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_GRAPHICS_PIPELINE_LIBRARY_FEATURES_EXT),
++    FS(VkPhysicalDeviceTextureCompressionASTCHDRFeatures, VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_TEXTURE_COMPRESSION_ASTC_HDR_FEATURES),
++    FS(VkPhysicalDeviceMultiDrawFeaturesEXT, VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MULTI_DRAW_FEATURES_EXT),
++    FS(VkPhysicalDeviceDepthClampZeroOneFeaturesKHR, VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DEPTH_CLAMP_ZERO_ONE_FEATURES_KHR),
++    FS(VkPhysicalDeviceShaderClockFeaturesKHR, VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_CLOCK_FEATURES_KHR),
++    FS(VkPhysicalDeviceConditionalRenderingFeaturesEXT, VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_CONDITIONAL_RENDERING_FEATURES_EXT),
++    FS(VkPhysicalDeviceTransformFeedbackFeaturesEXT, VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_TRANSFORM_FEEDBACK_FEATURES_EXT),
++    FS(VkPhysicalDeviceShaderImageAtomicInt64FeaturesEXT, VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_IMAGE_ATOMIC_INT64_FEATURES_EXT),
++    FS(VkPhysicalDeviceShaderAtomicFloatFeaturesEXT, VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_ATOMIC_FLOAT_FEATURES_EXT),
++    FS(VkPhysicalDeviceMaintenance5Features, VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MAINTENANCE_5_FEATURES),
++    FS(VkPhysicalDeviceMaintenance6Features, VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MAINTENANCE_6_FEATURES),
++#undef FS
++};
++static size_t klvk_feature_struct_size(VkStructureType st, const char **name) {
++    for (size_t i = 0; i < sizeof klvk_feature_structs / sizeof *klvk_feature_structs; i++)
++        if (klvk_feature_structs[i].st == st) { if (name) *name = klvk_feature_structs[i].name; return klvk_feature_structs[i].size; }
++    return 0;
++}
++// AND the requested features (pEnabledFeatures and every known feature struct in
++// the pNext chain, which is modified in place: it is the guest's memory, but a
++// bit the device lacks could never have been honoured) against what MoltenVK
++// reports. Returns the number of features turned off.
++static unsigned klvk_clamp_features(VkPhysicalDevice phys, VkDeviceCreateInfo *ci) {
++    PFN_vkGetPhysicalDeviceFeatures gf = (PFN_vkGetPhysicalDeviceFeatures)real_gipa(g_instance, "vkGetPhysicalDeviceFeatures");
++    PFN_vkGetPhysicalDeviceFeatures2 gf2 = (PFN_vkGetPhysicalDeviceFeatures2)real_gipa(g_instance, "vkGetPhysicalDeviceFeatures2");
++    if (!gf2) gf2 = (PFN_vkGetPhysicalDeviceFeatures2)real_gipa(g_instance, "vkGetPhysicalDeviceFeatures2KHR");
++    unsigned off = 0;
++    VkPhysicalDeviceFeatures have; memset(&have, 0, sizeof have);
++    if (gf) gf(phys, &have);
++    VkBool32 *hb = (VkBool32 *)&have;
++    if (ci->pEnabledFeatures && gf) {
++        VkBool32 *rb = (VkBool32 *)ci->pEnabledFeatures;
++        for (size_t i = 0; i < sizeof have / sizeof(VkBool32); i++)
++            if (rb[i] && !hb[i]) { rb[i] = VK_FALSE; off++; VKI("device feature #%zu (VkPhysicalDeviceFeatures) not supported — turned off\n", i); }
++    }
++    for (VkBaseOutStructure *p = (VkBaseOutStructure *)ci->pNext; p; p = p->pNext) {
++        if (p->sType == VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2) {
++            VkBool32 *rb = (VkBool32 *)&((VkPhysicalDeviceFeatures2 *)p)->features;
++            for (size_t i = 0; gf && i < sizeof have / sizeof(VkBool32); i++)
++                if (rb[i] && !hb[i]) { rb[i] = VK_FALSE; off++; VKI("device feature #%zu (VkPhysicalDeviceFeatures2) not supported — turned off\n", i); }
++            continue;
++        }
++        const char *name = NULL;
++        size_t size = klvk_feature_struct_size(p->sType, &name);
++        if (!size || !gf2) continue;
++        uint8_t *probe = calloc(1, size);
++        if (!probe) continue;
++        ((VkBaseOutStructure *)probe)->sType = p->sType;
++        VkPhysicalDeviceFeatures2 q = { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2, probe };
++        gf2(phys, &q);
++        VkBool32 *rb = (VkBool32 *)((uint8_t *)p + 16), *sb = (VkBool32 *)(probe + 16);
++        for (size_t i = 0; i < (size - 16) / sizeof(VkBool32); i++)
++            if (rb[i] && !sb[i]) { rb[i] = VK_FALSE; off++; VKI("device feature %s field #%zu not supported — turned off\n", name, i); }
++        free(probe);
++    }
++    return off;
++}
++
+ static VkResult klvk_CreateDevice(VkPhysicalDevice phys, const VkDeviceCreateInfo *ci,
+                                   const VkAllocationCallbacks *alloc, VkDevice *out) {
+     PFN_vkCreateDevice real = (PFN_vkCreateDevice)real_gipa(g_instance, "vkCreateDevice");
+@@ -622,6 +746,13 @@ static VkResult klvk_CreateDevice(VkPhysicalDevice phys, const VkDeviceCreateInf
+     mine.ppEnabledLayerNames = NULL;
+ 
+     VkResult r = real(phys, &mine, alloc, out);
++    if (r == VK_ERROR_FEATURE_NOT_PRESENT) {
++        // Source 2 asks for a superset of features and copes with what it
++        // gets; a feature MoltenVK lacks is turned off and the create retried.
++        unsigned off = klvk_clamp_features(phys, &mine);
++        VKI("vkCreateDevice: VK_ERROR_FEATURE_NOT_PRESENT — %u feature(s) turned off, retrying\n", off);
++        r = real(phys, &mine, alloc, out);
++    }
+     free(have);
+     if (r != VK_SUCCESS) { VKI("vkCreateDevice FAILED %d\n", r); return r; }
+ 
+@@ -665,6 +796,18 @@ static VkResult klvk_CreateAndroidSurfaceKHR(VkInstance inst,
+     return VK_SUCCESS;
+ }
+ 
++// The Linux WSI entry points: the create-info is window-system specific and
++// ignored; the surface is the same synthetic one.
++static VkResult klvk_CreateLinuxSurfaceKHR(VkInstance inst, const void *ci,
++        const VkAllocationCallbacks *alloc, VkSurfaceKHR *out) {
++    (void)ci;
++    return klvk_CreateAndroidSurfaceKHR(inst, NULL, alloc, out);
++}
++static VkBool32 klvk_GetPhysicalDeviceLinuxPresentationSupportKHR(VkPhysicalDevice p, uint32_t fam, void *a, void *b) {
++    (void)p; (void)fam; (void)a; (void)b;
++    return VK_TRUE;
++}
++
+ static klvk_surface *surf_of(VkSurfaceKHR h) {
+     klvk_surface *s = (klvk_surface *)h;
+     return (s && s->magic == KLVK_SURF_MAGIC) ? s : NULL;
+@@ -3118,6 +3261,8 @@ static void kl_pipe_report(const char *kind, unsigned n, double dt_ms) {
+             g_pipe_gfx, g_pipe_comp, tot, (double)g_pipe_ns / 1e9, kind, n, dt_ms);
+     }
+ }
++#include "kl_vk_async.inc"
++
+ static VkResult VKAPI_CALL klvk_CreateGraphicsPipelines(VkDevice dev,
+         VkPipelineCache cache, uint32_t n, const VkGraphicsPipelineCreateInfo *ci,
+         const VkAllocationCallbacks *alloc, VkPipeline *out) {
+@@ -3189,6 +3334,7 @@ static VkResult VKAPI_CALL klvk_CreateGraphicsPipelines(VkDevice dev,
+         }
+         fflush(stderr);
+     }
++    if (kva_create(dev, n, use, out, real)) { free(mod); free(ias); g_pipe_gfx += n; return VK_SUCCESS; }
+     double t0 = kl_pipe_ms();
+     VkResult r = real ? real(dev, cache, n, use, alloc, out)
+                       : VK_ERROR_INITIALIZATION_FAILED;
+@@ -4186,6 +4332,7 @@ static VkResult VKAPI_CALL klvk_BeginCommandBuffer(void *cb, const void *bi) {
+     static VkResult (*real)(void *, const void *);
+     if (!real && real_gdpa) real = (VkResult (*)(void *, const void *))
+         real_gdpa(g_devs[0] ? g_devs[0]->dev : NULL, "vkBeginCommandBuffer");
++    kva_set_skip(cb, 0);
+     klvk_cb_set_idx(cb, 0);
+     return real ? real(cb, bi) : VK_ERROR_INITIALIZATION_FAILED;
+ }
+@@ -4217,6 +4364,7 @@ static void VKAPI_CALL klvk_CmdDrawIndexed(void *cb, uint32_t indexCount,
+     static void (*real)(void *, uint32_t, uint32_t, uint32_t, int32_t, uint32_t);
+     if (!real && real_gdpa) real = (void (*)(void *, uint32_t, uint32_t, uint32_t, int32_t, uint32_t))
+         real_gdpa(g_devs[0] ? g_devs[0]->dev : NULL, "vkCmdDrawIndexed");
++    if (kva_skip(cb)) return;
+     // KL_VK_DRAW_GUARD (default OFF): the skip below drops a draw whenever it
+     // cannot find a live MTLBuffer for the index binding. That decision rests on
+     // g_cb_idx, a 64-slot, UNLOCKED table that is never drained (no
+@@ -4257,6 +4405,11 @@ static void VKAPI_CALL klvk_CmdBindPipeline(void *cb, uint32_t bindPoint, uint64
+     static void (*real)(void *, uint32_t, uint64_t);
+     if (!real && real_gdpa) real = (void (*)(void *, uint32_t, uint64_t))
+         real_gdpa(g_devs[0] ? g_devs[0]->dev : NULL, "vkCmdBindPipeline");
++    {   // async pipelines: a placeholder still compiling binds nothing (draws skipped)
++        uint64_t b = kva_bind(cb, bindPoint, pipeline);
++        if (!b && pipeline && kva_of(pipeline)) return;
++        pipeline = b;
++    }
+     if (!pipeline) { static int said; if (said < 8) { said++;
+         VKI("vkCmdBindPipeline: NULL pipeline bound (bindPoint %u) — a following "
+             "draw will dereference null in MoltenVK\n", bindPoint); } }
+@@ -5895,6 +6048,12 @@ static const entry g_ours[] = {
+     E(EnumeratePhysicalDevices),
+     E(CreateDevice),
+     E(CreateAndroidSurfaceKHR), E(DestroySurfaceKHR),
++    { "vkCreateXcbSurfaceKHR", (PFN_vkVoidFunction)klvk_CreateLinuxSurfaceKHR },
++    { "vkCreateXlibSurfaceKHR", (PFN_vkVoidFunction)klvk_CreateLinuxSurfaceKHR },
++    { "vkCreateWaylandSurfaceKHR", (PFN_vkVoidFunction)klvk_CreateLinuxSurfaceKHR },
++    { "vkGetPhysicalDeviceXcbPresentationSupportKHR", (PFN_vkVoidFunction)klvk_GetPhysicalDeviceLinuxPresentationSupportKHR },
++    { "vkGetPhysicalDeviceXlibPresentationSupportKHR", (PFN_vkVoidFunction)klvk_GetPhysicalDeviceLinuxPresentationSupportKHR },
++    { "vkGetPhysicalDeviceWaylandPresentationSupportKHR", (PFN_vkVoidFunction)klvk_GetPhysicalDeviceLinuxPresentationSupportKHR },
+     E(GetPhysicalDeviceSurfaceSupportKHR), E(GetPhysicalDeviceSurfaceCapabilitiesKHR),
+     E(GetPhysicalDeviceSurfaceFormatsKHR), E(GetPhysicalDeviceSurfacePresentModesKHR),
+     E(CreateSwapchainKHR), E(DestroySwapchainKHR), E(GetSwapchainImagesKHR),
+@@ -5934,6 +6093,12 @@ static const entry g_ours[] = {
+     E(CmdBlitImage), E(CmdResolveImage), E(CmdClearColorImage),
+     E(CmdCopyBufferToImage), E(CmdCopyImageToBuffer), E(CmdPipelineBarrier),
+     E(CreateGraphicsPipelines), E(CreateComputePipelines),
++    E(CmdDraw), E(CmdDrawIndirect), E(CmdDrawIndexedIndirect),
++    E(CmdDrawIndirectCount), E(CmdDrawIndexedIndirectCount),
++    { "vkCmdDrawIndirectCountKHR", (PFN_vkVoidFunction)klvk_CmdDrawIndirectCount },
++    { "vkCmdDrawIndexedIndirectCountKHR", (PFN_vkVoidFunction)klvk_CmdDrawIndexedIndirectCount },
++    E(DestroyPipeline), E(DestroyShaderModule), E(DestroyPipelineLayout),
++    E(DestroyRenderPass), E(DestroyDescriptorSetLayout),
+     E(CreateFramebuffer), E(CmdBeginRenderPass),
+     E(CmdBeginRenderPass2),
+     { "vkCmdBeginRenderPass2KHR", (PFN_vkVoidFunction)klvk_CmdBeginRenderPass2 },
+diff --git a/runtime/kl_dl.c b/runtime/kl_dl.c
+index eb300fb..538c9df 100644
+--- a/runtime/kl_dl.c
++++ b/runtime/kl_dl.c
+@@ -20,8 +20,9 @@
+ #include "kl_aaudio.h"
+ #include "kl_openxr.h"
+ 
+-#define KL_MAX_IMAGES 64
+-typedef struct { char soname[128]; kl_image *img; } entry;
++#define KL_MAX_IMAGES 1024   // VeRantyx: was 64; Alyx loads ~110 images
++typedef struct { char soname[128]; kl_image *img;     char real[1024];       // realpath of the file, so two names for one file are one image
++} entry;
+ static entry  g_imgs[KL_MAX_IMAGES];
+ static int    g_nimgs = 0;
+ static char   g_libdir[512] = ".";
+@@ -85,11 +86,16 @@ int kl_dl_iterate_phdr(int (*cb)(void *, size_t, void *), void *data) {
+ }
+ 
+ // Register an image so guest dlsym/dladdr can see it (also used for the root libs).
++void (*kl_image_loaded_hook)(const char *path, kl_image *img);
++
+ void kl_register_image(const char *soname, kl_image *img) {
+     const char *base = basename_of(soname);
+     pthread_mutex_lock(&g_lock);
++    if (g_nimgs >= KL_MAX_IMAGES)
++        fprintf(stderr, "  [klepton] image table full (%d): %s is not visible to dlsym\n", KL_MAX_IMAGES, soname);
+     if (g_nimgs < KL_MAX_IMAGES) {
+         snprintf(g_imgs[g_nimgs].soname, sizeof g_imgs[0].soname, "%s", base);
++        if (!realpath(soname, g_imgs[g_nimgs].real)) snprintf(g_imgs[g_nimgs].real, sizeof g_imgs[0].real, "%s", soname);
+         g_imgs[g_nimgs].img = img;
+         g_nimgs++;
+     }
+@@ -103,12 +109,15 @@ void kl_register_image(const char *soname, kl_image *img) {
+     // here — not searching for any GL library, which klepton.h warns breaks Steam
+     // Link/VRChat/RE4 — routes them to gl4es for every driver.
+     if (!strcmp(base, "libgl4es.so")) kl_shim_set_guest_gl(img);
++    if (kl_image_loaded_hook) kl_image_loaded_hook(soname, img);
+ }
+ 
+ kl_image *kl_find_image(const char *soname) {
+     const char *b = basename_of(soname);
++    char rp[1024];
++    const char *real = strchr(soname, '/') && realpath(soname, rp) ? rp : NULL;
+     for (int i = 0; i < g_nimgs; i++)
+-        if (strcmp(g_imgs[i].soname, b) == 0) return g_imgs[i].img;
++        if (strcmp(g_imgs[i].soname, b) == 0 || (real && strcmp(g_imgs[i].real, real) == 0)) return g_imgs[i].img;
+     return NULL;
+ }
+ 
+@@ -302,6 +311,15 @@ void *kl_guest_sym_global(const char *name) {
+     return v;
+ }
+ 
++int kl_guest_tls_sym_global(const char *name, kl_tls_module **m, uint64_t *off) {
++    int rc = -1;
++    pthread_mutex_lock(&g_lock);
++    for (int i = 0; i < g_nimgs && rc != 0; i++)
++        if (kl_sym_tls(g_imgs[i].img, name, off) == 0) { *m = kl_image_tls_module(g_imgs[i].img); rc = 0; }
++    pthread_mutex_unlock(&g_lock);
++    return rc;
++}
++
+ // Load an .so together with its DT_NEEDED chain, dependencies first, so each
+ // image's relocation-time imports can bind against the images it needs
+ // (kl_guest_sym_global). Names with no file in the library path are assumed
+@@ -320,6 +338,12 @@ static int kl_dep_is_shim_served(const char *name) {
+         // kl_guest_sym_global — not a packaging gap.
+         "libOVRPlugin.so", "libovrplatformloader.so", "libvrapi.so",
+         "libopenxr_loader.so", "libOpenMAXAL.so",
++        // glibc guests: the C runtime is served by the host shim, never loaded
++        // as a guest image; windowing and device libraries are stubbed by name.
++        "libc.so.6", "libm.so.6", "libdl.so.2", "libpthread.so.0", "librt.so.1",
++        "libutil.so.1", "libresolv.so.2", "ld-linux-aarch64.so.1",
++        "libX11.so.6", "libXext.so.6", "libxcb.so.1", "libwayland-client.so.0",
++        "libudev.so.1", "libdrm.so.2", "libmimalloc.so",
+     };
+     for (unsigned i = 0; i < sizeof shim / sizeof shim[0]; i++)
+         if (!strcmp(name, shim[i])) return 1;
+@@ -348,9 +372,37 @@ static void kl_maybe_jni_onload(const char *path, kl_image *img) {
+             b, r);
+ }
+ 
++// Libraries whose DT_NEEDED chain is being walked right now. A dependency that
++// is already on this list is skipped (its symbols bind late, see
++// kl_rebind_missing), and when the outermost load finishes every image's
++// missing imports are tried again.
++static kl_image *kl_load_recursive_inner(const char *path);
++static char g_loading_names[64][128];
++static int g_loading_n;
++static int g_loading_sentinel_storage;
++static int loading_has(const char *b) { for (int i = 0; i < g_loading_n; i++) if (!strcmp(g_loading_names[i], b)) return 1; return 0; }
++
+ kl_image *kl_load_recursive(const char *path) {
+     kl_image *have = kl_find_image(path);
+-    if (have) return have;                       // cycle guard / already loaded
++    if (have) return have;                       // already loaded
++    const char *bname = strrchr(path, '/'); bname = bname ? bname + 1 : path;
++    if (loading_has(bname)) {
++        if (kl_env_on("KL_TRACE_NEEDED", 1)) fprintf(stderr, "  [dl] %s is already being loaded (dependency cycle) — bound late\n", bname);
++        return (kl_image *)&g_loading_sentinel_storage;      // non-NULL: the dependent carries on
++    }
++    if (g_loading_n < 64) snprintf(g_loading_names[g_loading_n++], 128, "%s", bname);
++    kl_image *result = kl_load_recursive_inner(path);
++    if (g_loading_n > 0) g_loading_n--;
++    if (g_loading_n == 0) {
++        pthread_mutex_lock(&g_lock);
++        int n = g_nimgs;
++        pthread_mutex_unlock(&g_lock);
++        for (int i = 0; i < n; i++) kl_rebind_missing(g_imgs[i].img);
++    }
++    return result;
++}
++
++static kl_image *kl_load_recursive_inner(const char *path) {
+ 
+     char names[32][128];
+     int nn = kl_list_needed(path, names, 32);
+@@ -696,6 +748,32 @@ static int kl_core_shim_claims(const char *path) {
+ 
+ static int kl_core_shim_is_handle(void *h) { return h == (void *)&g_core_shim_handle; }
+ 
++// ---- host modules ----
++// A library the HOST implements for the guest, keyed by a path suffix
++// ("/vrclient.so"): dlopen of such a path returns a handle whose dlsym asks the
++// registered lookup. Up to 8; the handle is the registry entry's address.
++struct kl_host_module { const char *suffix; void *(*lookup)(const char *); };
++static struct kl_host_module g_host_mods[8];
++static unsigned g_host_mods_n;
++void kl_dl_add_host_module(const char *suffix, void *(*lookup)(const char *)) {
++    if (g_host_mods_n < 8) { g_host_mods[g_host_mods_n].suffix = suffix; g_host_mods[g_host_mods_n].lookup = lookup; g_host_mods_n++; }
++}
++static void *kl_host_module_dlopen(const char *path) {
++    size_t n = strlen(path);
++    for (unsigned i = 0; i < g_host_mods_n; i++) {
++        size_t m = strlen(g_host_mods[i].suffix);
++        if (n >= m && !strcmp(path + n - m, g_host_mods[i].suffix)) {
++            fprintf(stderr, "  [klepton] guest dlopen(%s) -> host module\n", path);
++            return &g_host_mods[i];
++        }
++    }
++    return NULL;
++}
++static struct kl_host_module *kl_host_module_handle(void *h) {
++    for (unsigned i = 0; i < g_host_mods_n; i++) if (h == (void *)&g_host_mods[i]) return &g_host_mods[i];
++    return NULL;
++}
++
+ void *klb_dlopen(const char *path, int flags) {
+     (void)flags;
+     { static int once; if (!once) { once = 1; kl_dl_trace_shims(); } }
+@@ -747,6 +825,7 @@ void *klb_dlopen(const char *path, int flags) {
+     // The always-resident Android system libraries (libc/libdl/libm/...). No file
+     // to open; served with a handle whose dlsym routes to the shim table. Must
+     // come before the file-load fallthrough, which would fail and hand back NULL.
++    { void *hm = kl_host_module_dlopen(path); if (hm) return hm; }
+     if (kl_core_shim_claims(path)) {
+         fprintf(stderr, "  [klepton] guest dlopen(\"%s\") -> shim-served handle\n", path);
+         return (void *)&g_core_shim_handle;
+@@ -835,6 +914,7 @@ static void *klb_dlsym_null(const char *name) {
+ }
+ 
+ void *klb_dlsym(void *handle, const char *name) {
++    { struct kl_host_module *hm = kl_host_module_handle(handle); if (hm) return hm->lookup(name); }
+     if (kl_egl_is_handle(handle)) return kl_egl_sym(name);
+     if (kl_opensl_is_handle(handle)) return kl_opensl_sym(name);
+     if (kl_ovrp_is_handle(handle)) return kl_ovrp_sym(name);
+@@ -880,6 +960,7 @@ void *klb_dlsym(void *handle, const char *name) {
+     void *v = kl_sym((kl_image *)handle, name);
+     if (!v) { snprintf(g_dlerr, sizeof g_dlerr, "klepton: undefined symbol: %s", name);
+               return klb_dlsym_null(name); }
++    { void *w = kl_interpose_lookup(name); if (w) return w; }
+     { void *w = kl_dl_interpose(name, v); if (w) return w; }
+     return v;
+ }
+diff --git a/runtime/kl_image.c b/runtime/kl_image.c
+index 8d1801d..c84cabc 100644
+--- a/runtime/kl_image.c
++++ b/runtime/kl_image.c
+@@ -88,6 +88,10 @@ typedef struct { uint32_t sh_name, sh_type; uint64_t sh_flags, sh_addr, sh_offse
+ #define R_AARCH64_JUMP_SLOT 1026
+ #define R_AARCH64_RELATIVE  1027
+ #define STB_WEAK 2
++#define PT_TLS 7
++#define R_AARCH64_TLS_TPREL64 1030
++#define R_AARCH64_TLSDESC 1031
++#define STT_TLS 6
+ 
+ struct kl_image {
+     uint8_t   *base;        // ELF vaddr V lives at base + V (V relative to the
+@@ -112,6 +116,7 @@ struct kl_image {
+     unsigned    missing_n, missing_cap;
+     const char **weak;         // ...and the weak ones, deliberately left NULL
+     unsigned    weak_n, weak_cap;
++    kl_tls_module *tls;        // PT_TLS, registered with kl_tls.c (glibc guests)
+     void       *dl_handle;     // set when the image arrived as a translated
+                                // Mach-O dylib; then dyld owns the mapping
+ };
+@@ -339,13 +344,30 @@ static uint32_t *gp_at(void *ctx, uint64_t va) {
+     return (uint32_t *)(c->base + (va - c->lo));
+ }
+ 
++// A `svc #0` with no x8 write in the six words before it (any instruction
++// whose destination register is x8/w8).
++static int kl_svc_is_bare(const uint32_t *w, size_t i) {
++    for (size_t k = 1; k <= 6 && k <= i; k++)
++        if ((w[i - k] & 0x1fu) == 8u) return 0;
++    return 1;
++}
++
+ static void rewrite_tls(uint8_t *p, size_t n, uint64_t va, const char *path,
+                         kl_stats *st) {
+     uint32_t *w = (uint32_t *)p;
+     size_t words = n / 4;
+     for (size_t i = 0; i < words; i++) {
++        if (w[i] == 0xd4000001u && kl_svc_is_bare(w, i)) {
++            static int said;
++            if (!said++) fprintf(stderr, "  [klepton] %s: bare svc #0 (no syscall number) at +0x%llx and "
++                                         "others -> nop (Darwin would run syscall x16)\n",
++                                 path, (unsigned long long)(va + i * 4));
++            w[i] = 0xd503201fu;
++            st->svc_sites++;
++            continue;
++        }
+         if ((w[i] & 0xffffffe0u) == 0xd53bd040u) {
+-            if (kl_x18_is_data(w, n, i)) {
++            if (!kl_env_on("KL_TLS_REWRITE_FORCE", 0) && kl_x18_is_data(w, n, i)) {
+                 st->tls_refused++;
+                 fprintf(stderr, "  [klepton] %s: TLS site at +0x%llx left alone — its "
+                                 "neighbourhood reads as data. If it IS code, "
+@@ -363,16 +385,22 @@ static void rewrite_tls(uint8_t *p, size_t n, uint64_t va, const char *path,
+ // Registered interposers, consulted for defined and undefined symbols alike.
+ // Small and fixed: this is an instrument, and a table that has to grow is a sign
+ // the question being asked wants a different tool.
+-static struct { const char *name; void *fn; } g_interpose[8];
++static struct { const char *name; void *fn; } g_interpose[64];
+ static unsigned g_interpose_n;
+ 
+ void kl_interpose(const char *name, void *fn) {
+-    if (!name || !fn || g_interpose_n >= 8) return;
++    if (!name || !fn || g_interpose_n >= 64) return;
+     g_interpose[g_interpose_n].name = name;
+     g_interpose[g_interpose_n].fn = fn;
+     g_interpose_n++;
+ }
+ 
++void *kl_interpose_lookup(const char *name) {
++    for (unsigned i = 0; i < g_interpose_n; i++)
++        if (!strcmp(name, g_interpose[i].name)) return g_interpose[i].fn;
++    return NULL;
++}
++
+ static uint64_t sym_value(kl_image *img, uint32_t idx, const char **name_out) {
+     const Elf64_Sym *s = &img->symtab[idx];
+     const char *nm = img->strtab + s->st_name;
+@@ -442,6 +470,38 @@ static int apply_relocs(kl_image *img, const Elf64_Rela *r, size_t count) {
+             else img->stats.jump_slot++;
+             break;
+         }
++        case R_AARCH64_TLS_TPREL64:
++        case R_AARCH64_TLSDESC: {
++            // ELF TLS (glibc guests). The symbol, if any, is an STT_TLS whose
++            // value is an offset inside its module's TLS block — this image's
++            // when defined here, another loaded image's when imported.
++            kl_tls_module *m = img->tls;
++            uint64_t off = 0;
++            if (sidx) {
++                const Elf64_Sym *s = &img->symtab[sidx];
++                nm = img->strtab + s->st_name;
++                if (s->st_shndx != 0) off = s->st_value;
++                else if (kl_guest_tls_sym_global(nm, &m, &off) != 0) m = NULL;
++            }
++            if (!m) {
++                img->stats.imports_missing++;
++                record_missing(img, nm ? nm : "(TLS without PT_TLS)");
++                if (type == R_AARCH64_TLSDESC) { slot[0] = (uint64_t)(uintptr_t)unresolved_stub(nm ? nm : "tlsdesc"); slot[1] = 0; }
++                else *slot = 0;
++                break;
++            }
++            off += (uint64_t)r->r_addend;
++            if (type == R_AARCH64_TLS_TPREL64) {
++                uint64_t v;
++                if (kl_tls_tprel(m, off, &v) != 0) { err("%s: %s", img->path, kl_tls_error()); return -1; }
++                *slot = v;
++                img->stats.tls_tprel++;
++            } else {
++                kl_tls_desc(m, off, slot);
++                img->stats.tls_desc++;
++            }
++            break;
++        }
+         default:
+             err("unhandled relocation type %u at %#llx", type, (unsigned long long)r->r_offset);
+             return -1;
+@@ -564,6 +624,24 @@ static int bind_dynamic(kl_image *img, const Elf64_Phdr *ph, int phnum, uint64_t
+     }
+     if (!img->symtab || !img->strtab) { err("missing DT_SYMTAB/DT_STRTAB"); return -1; }
+ 
++    // PT_TLS: register the module's thread-local block before any TLS
++    // relocation asks for an offset into it. A module with TPREL64 relocations
++    // needs TP-relative placement; everything else goes in the per-thread block.
++    for (int i = 0; i < phnum; i++) {
++        if (ph[i].p_type != PT_TLS) continue;
++        int fixed = 0;
++        const Elf64_Rela *tabs[2] = { rela, jmprel };
++        size_t cnts[2] = { relasz / sizeof(Elf64_Rela), pltsz / sizeof(Elf64_Rela) };
++        for (int t = 0; t < 2 && !fixed; t++)
++            for (size_t k = 0; tabs[t] && k < cnts[t]; k++)
++                if (ELF64_R_TYPE(tabs[t][k].r_info) == R_AARCH64_TLS_TPREL64) { fixed = 1; break; }
++        img->tls = kl_tls_register(img->path, img->base + ph[i].p_vaddr - lo,
++                                   (size_t)ph[i].p_filesz, (size_t)ph[i].p_memsz,
++                                   (size_t)ph[i].p_align, fixed);
++        if (!img->tls) { err("%s: %s", img->path, kl_tls_error()); return -1; }
++        break;
++    }
++
+     // Order is independent — RELA, RELR and APS2 relocate disjoint slots — but
+     // every relative table must run before kl_run_init: the .init_array pointers
+     // live in RELR/APS2 on a modern NDK and are raw offsets until relocated.
+@@ -1197,8 +1275,24 @@ kl_image *kl_load(const char *path) {
+ }
+ 
+ void kl_run_init(kl_image *img) {
+-    for (size_t i = 0; i < img->init_count; i++)
+-        if (img->init_array[i]) img->init_array[i]();
++    int trace = kl_env_on("KL_TRACE_INIT", 0);
++    for (size_t i = 0; i < img->init_count; i++) {
++        if (!img->init_array[i]) continue;
++        if (trace) fprintf(stderr, "  [init] %s [%zu/%zu] -> +%#llx\n", img->path, i, img->init_count,
++                           (unsigned long long)((const uint8_t *)img->init_array[i] - img->base));
++        // KL_INIT_SLEEP=<basename>:<index>:<ms> pauses before that constructor; KL_INIT_SKIP=<basename>:<index> skips it.
++        { const char *sl = getenv("KL_INIT_SLEEP"); const char *sk = getenv("KL_INIT_SKIP");
++          const char *b = strrchr(img->path, '/'); b = b ? b + 1 : img->path;
++          if (sl) { const char *c1 = strchr(sl, ':'); const char *c2 = c1 ? strchr(c1 + 1, ':') : NULL;
++                    if (c1 && c2 && (size_t)(c1 - sl) == strlen(b) && !strncmp(sl, b, strlen(b)) && (size_t)atoi(c1 + 1) == i) usleep((useconds_t)atoi(c2 + 1) * 1000); }
++          if (sk) { const char *c1 = strrchr(sk, ':');
++                    if (c1 && (size_t)(c1 - sk) == strlen(b) && !strncmp(sk, b, strlen(b)) && (size_t)atoi(c1 + 1) == i) { fprintf(stderr, "  [init] skipping %s [%zu]\n", b, i); continue; } } }
++        // KL_INIT_BREAK=<basename>:<index> traps into the debugger just before that constructor.
++        { const char *brk = getenv("KL_INIT_BREAK");
++          if (brk) { const char *colon = strrchr(brk, ':'); const char *b = strrchr(img->path, '/'); b = b ? b + 1 : img->path;
++                     if (colon && (size_t)(colon - brk) == strlen(b) && !strncmp(brk, b, strlen(b)) && (size_t)atoi(colon + 1) == i) __builtin_debugtrap(); } }
++        img->init_array[i]();
++    }
+ }
+ 
+ void *kl_sym(kl_image *img, const char *name) {
+@@ -1226,6 +1320,7 @@ void *kl_sym(kl_image *img, const char *name) {
+     for (size_t i = 0; i < n; i++) {
+         const Elf64_Sym *s = &img->symtab[i];
+         if ((const char *)(s + 1) > hi_p) break;             // past the mapping
++        if ((s->st_info & 0xf) == STT_TLS) continue;         // an offset, not an address: kl_sym_tls
+         if (s->st_shndx == 0 || !s->st_name) continue;
+         const char *nm = img->strtab + s->st_name;
+         if (nm < lo_p || nm >= hi_p) continue;               // not a real name
+@@ -1235,6 +1330,83 @@ void *kl_sym(kl_image *img, const char *name) {
+     return NULL;
+ }
+ 
++int kl_sym_tls(kl_image *img, const char *name, uint64_t *off) {
++    if (!img || !img->tls) return -1;
++    size_t n = img->nsyms;
++    if (!n) n = ((const char *)img->strtab - (const char *)img->symtab) / sizeof(Elf64_Sym);
++    const char *lo_p = (const char *)img->base, *hi_p = lo_p + img->span;
++    for (size_t i = 0; i < n; i++) {
++        const Elf64_Sym *s = &img->symtab[i];
++        if ((const char *)(s + 1) > hi_p) break;
++        if (s->st_shndx == 0 || !s->st_name || (s->st_info & 0xf) != STT_TLS) continue;
++        const char *nm = img->strtab + s->st_name;
++        if (nm < lo_p || nm >= hi_p) continue;
++        if (strcmp(nm, name) == 0) { if (off) *off = s->st_value; return 0; }
++    }
++    return -1;
++}
++
++kl_tls_module *kl_image_tls_module(kl_image *img) { return img ? img->tls : NULL; }
++
++// Bind again the imports that were unresolved when this image was relocated:
++// a dependency cycle loads one side before the other exists. Only the names in
++// the missing list are touched; GOT pages that RELRO made read-only are opened.
++int kl_rebind_missing(kl_image *img) {
++    if (!img || !img->missing_n || !img->symtab || !img->strtab) return 0;
++    unsigned phnum = 0;
++    const Elf64_Phdr *ph = (const Elf64_Phdr *)kl_phdrs(img, &phnum);
++    if (!ph) return 0;
++    uint64_t lo = UINT64_MAX;
++    for (unsigned i = 0; i < phnum; i++) if (ph[i].p_type == PT_LOAD && ph[i].p_vaddr < lo) lo = ph[i].p_vaddr;
++    if (lo == UINT64_MAX) lo = 0;
++    const Elf64_Rela *tabs[2] = { NULL, NULL }; size_t cnts[2] = { 0, 0 };
++    for (unsigned i = 0; i < phnum; i++) {
++        if (ph[i].p_type != PT_DYNAMIC) continue;
++        for (const Elf64_Dyn *dp = (const Elf64_Dyn *)(img->base + ph[i].p_vaddr - lo); dp->d_tag != DT_NULL; dp++) {
++            if (dp->d_tag == DT_RELA) tabs[0] = (const Elf64_Rela *)(img->base + dp->d_val);
++            else if (dp->d_tag == DT_RELASZ) cnts[0] = dp->d_val / sizeof(Elf64_Rela);
++            else if (dp->d_tag == DT_JMPREL) tabs[1] = (const Elf64_Rela *)(img->base + dp->d_val);
++            else if (dp->d_tag == DT_PLTRELSZ) cnts[1] = dp->d_val / sizeof(Elf64_Rela);
++        }
++    }
++    int fixed = 0;
++    const uintptr_t pg = (uintptr_t)getpagesize();
++    for (int t = 0; t < 2; t++) {
++        for (size_t k = 0; tabs[t] && k < cnts[t]; k++) {
++            const Elf64_Rela *r = &tabs[t][k];
++            uint32_t type = ELF64_R_TYPE(r->r_info), sidx = ELF64_R_SYM(r->r_info);
++            if (!sidx || (type != R_AARCH64_ABS64 && type != R_AARCH64_GLOB_DAT && type != R_AARCH64_JUMP_SLOT)) continue;
++            const Elf64_Sym *s = &img->symtab[sidx];
++            if (s->st_shndx != 0) continue;
++            const char *nm = img->strtab + s->st_name;
++            unsigned m;
++            for (m = 0; m < img->missing_n; m++) if (!strcmp(img->missing[m], nm)) break;
++            if (m == img->missing_n) continue;
++            void *v = kl_shim_lookup(nm);
++            if (!v) v = kl_guest_sym_global(nm);
++            if (!v) continue;
++            uint64_t *slot = (uint64_t *)(img->base + r->r_offset);
++            mprotect((void *)((uintptr_t)slot & ~(pg - 1)), pg, PROT_READ | PROT_WRITE);
++            *slot = (uint64_t)(uintptr_t)v + (uint64_t)r->r_addend;
++            fixed++;
++        }
++    }
++    if (fixed) {
++        // Drop the names that now resolve.
++        unsigned w = 0;
++        for (unsigned m = 0; m < img->missing_n; m++) {
++            const char *nm = img->missing[m];
++            if (kl_shim_lookup(nm) || kl_guest_sym_global(nm)) continue;
++            img->missing[w++] = nm;
++        }
++        img->missing_n = w;
++        img->stats.imports_bound += (unsigned)fixed;
++        if (kl_env_on("KL_TRACE_NEEDED", 1))
++            fprintf(stderr, "  [dl] %s: %d import(s) bound late (dependency cycle)\n", img->path, fixed);
++    }
++    return fixed;
++}
++
+ void kl_unload(kl_image *img) {
+     if (!img) return;
+     if (img->dl_handle) dlclose(img->dl_handle);   // translated: dyld owns it
+diff --git a/runtime/kl_tls.S b/runtime/kl_tls.S
+new file mode 100644
+index 0000000..07cda78
+--- /dev/null
++++ b/runtime/kl_tls.S
+@@ -0,0 +1,91 @@
++// TLSDESC resolvers — see kl_tls.h.
++//
++// The guest calls the resolver with x0 = the address of the GOT pair
++// (resolver, argument) and expects, in x0, the offset of the variable from
++// the thread pointer; every other register must come back untouched (the
++// condition flags need not). Darwin's TSD base is the thread pointer.
++.text
++
++// Fixed, TP-relative placement: the argument IS the offset.
++.globl _kl_tlsdesc_static
++.p2align 2
++_kl_tlsdesc_static:
++    ldr     x0, [x0, #8]
++    ret
++
++// Dynamic placement: block + argument - TP, where the block pointer sits in
++// Darwin TSD slot KL_TLS_BLOCK_SLOT (501); a thread without a block takes the
++// slow path once.
++.globl _kl_tlsdesc_dynamic
++.p2align 2
++_kl_tlsdesc_dynamic:
++    stp     x1, x2, [sp, #-16]!
++    mrs     x1, tpidrro_el0
++    ldr     x2, [x1, #(501 * 8)]
++    cbz     x2, Lslow
++    ldr     x0, [x0, #8]
++    add     x0, x0, x2
++    sub     x0, x0, x1
++    ldp     x1, x2, [sp], #16
++    ret
++Lslow:
++    ldp     x1, x2, [sp], #16
++    stp     x29, x30, [sp, #-16]!
++    mov     x29, sp
++    sub     sp, sp, #672                // 18 GPRs (144, padded to 160) + 32 Q regs (512)
++    stp     x1, x2, [sp, #0]
++    stp     x3, x4, [sp, #16]
++    stp     x5, x6, [sp, #32]
++    stp     x7, x8, [sp, #48]
++    stp     x9, x10, [sp, #64]
++    stp     x11, x12, [sp, #80]
++    stp     x13, x14, [sp, #96]
++    stp     x15, x16, [sp, #112]
++    stp     x17, x18, [sp, #128]
++    add     x1, sp, #160
++    stp     q0, q1, [x1, #0]
++    stp     q2, q3, [x1, #32]
++    stp     q4, q5, [x1, #64]
++    stp     q6, q7, [x1, #96]
++    stp     q8, q9, [x1, #128]
++    stp     q10, q11, [x1, #160]
++    stp     q12, q13, [x1, #192]
++    stp     q14, q15, [x1, #224]
++    stp     q16, q17, [x1, #256]
++    stp     q18, q19, [x1, #288]
++    stp     q20, q21, [x1, #320]
++    stp     q22, q23, [x1, #352]
++    stp     q24, q25, [x1, #384]
++    stp     q26, q27, [x1, #416]
++    stp     q28, q29, [x1, #448]
++    stp     q30, q31, [x1, #480]
++    bl      _kl_tls_slow
++    add     x1, sp, #160
++    ldp     q0, q1, [x1, #0]
++    ldp     q2, q3, [x1, #32]
++    ldp     q4, q5, [x1, #64]
++    ldp     q6, q7, [x1, #96]
++    ldp     q8, q9, [x1, #128]
++    ldp     q10, q11, [x1, #160]
++    ldp     q12, q13, [x1, #192]
++    ldp     q14, q15, [x1, #224]
++    ldp     q16, q17, [x1, #256]
++    ldp     q18, q19, [x1, #288]
++    ldp     q20, q21, [x1, #320]
++    ldp     q22, q23, [x1, #352]
++    ldp     q24, q25, [x1, #384]
++    ldp     q26, q27, [x1, #416]
++    ldp     q28, q29, [x1, #448]
++    ldp     q30, q31, [x1, #480]
++    ldp     x1, x2, [sp, #0]
++    ldp     x3, x4, [sp, #16]
++    ldp     x5, x6, [sp, #32]
++    ldp     x7, x8, [sp, #48]
++    ldp     x9, x10, [sp, #64]
++    ldp     x11, x12, [sp, #80]
++    ldp     x13, x14, [sp, #96]
++    ldp     x15, x16, [sp, #112]
++    ldp     x17, x18, [sp, #128]
++    add     sp, sp, #672
++    ldp     x29, x30, [sp], #16
++    ret
+diff --git a/runtime/kl_tls.c b/runtime/kl_tls.c
+new file mode 100644
+index 0000000..98185cd
+--- /dev/null
++++ b/runtime/kl_tls.c
+@@ -0,0 +1,249 @@
++// ELF TLS for glibc guests — see kl_tls.h.
++#include <stdio.h>
++#include <stdlib.h>
++#include <string.h>
++#include <stdarg.h>
++#include <pthread.h>
++#include <sys/mman.h>
++#include "kl_tls.h"
++#include "kl_env.h"
++
++#define KL_TLS_MAX_MODULES 512
++#define KL_TLS_BLOCK_BYTES (1u << 20)      // mmap'd per thread, committed lazily
++#define KL_TLS_BLOCK_HDR   64              // block header (list links, atexit list)
++
++struct kl_tls_module {
++    const void *init;
++    size_t filesz, memsz, align;
++    uint64_t off;          // offset in the dynamic block, or in the fixed region
++    int fixed;
++    char name[96];
++};
++
++struct atexit_rec { struct atexit_rec *next; void (*dtor)(void *); void *obj; };
++struct block { struct block *next, *prev; struct atexit_rec *atexit; uint64_t pad[5]; };
++
++static kl_tls_module g_mods[KL_TLS_MAX_MODULES];
++static unsigned g_nmods;
++static uint64_t g_block_used = KL_TLS_BLOCK_HDR;
++static uint64_t g_fixed_used;
++static struct block *g_blocks;
++static unsigned g_nblocks, g_blocks_peak;
++static pthread_mutex_t g_mu = PTHREAD_MUTEX_INITIALIZER;
++static int g_ready;                // 0 unclaimed, 1 ok, -1 failed
++static char g_err[256];
++
++static void err(const char *fmt, ...) {
++    va_list a; va_start(a, fmt); vsnprintf(g_err, sizeof g_err, fmt, a); va_end(a);
++}
++const char *kl_tls_error(void) { return g_err; }
++
++static inline uint64_t *tsd(void) {
++    uint64_t tp; __asm__ volatile("mrs %0, tpidrro_el0" : "=r"(tp));
++    return (uint64_t *)tp;
++}
++static inline uint64_t align_up(uint64_t v, uint64_t a) { return (v + a - 1) & ~(a - 1); }
++
++// Claim one TSD slot as a real pthread key (never squat: see kl_x18.h). Darwin
++// hands keys out lowest-free-first and never reissues one that is held, so
++// creating keys until it yields `slot` walks up to it; the ones collected on
++// the way are released again.
++static int claim_slot(unsigned slot, void (*dtor)(void *)) {
++    static pthread_key_t spare[768];
++    unsigned nspare = 0;
++    int got = 0;
++    for (unsigned i = 0; i < 768; i++) {
++        pthread_key_t k;
++        if (pthread_key_create(&k, (unsigned)k == slot ? dtor : NULL) != 0) break;
++        if ((unsigned)k == slot) {
++            // Created without the destructor above (k was unknown before the
++            // call); recreate with it when one is wanted.
++            if (dtor) {
++                pthread_key_delete(k);
++                if (pthread_key_create(&k, dtor) != 0 || (unsigned)k != slot) break;
++            }
++            got = 1; break;
++        }
++        if ((unsigned)k > slot) { spare[nspare++] = k; break; }
++        spare[nspare++] = k;
++    }
++    for (unsigned i = 0; i < nspare; i++) pthread_key_delete(spare[i]);
++    return got ? 0 : -1;
++}
++
++static void block_destroy(void *p) {
++    struct block *b = (struct block *)p;
++    // Thread-exit destructors, most recently registered first, exactly as
++    // glibc runs them. A destructor may register another; the list is drained.
++    for (;;) {
++        pthread_mutex_lock(&g_mu);
++        struct atexit_rec *r = b->atexit;
++        if (r) b->atexit = r->next;
++        pthread_mutex_unlock(&g_mu);
++        if (!r) break;
++        r->dtor(r->obj);
++        free(r);
++    }
++    pthread_mutex_lock(&g_mu);
++    if (b->prev) b->prev->next = b->next; else g_blocks = b->next;
++    if (b->next) b->next->prev = b->prev;
++    g_nblocks--;
++    pthread_mutex_unlock(&g_mu);
++    munmap(b, KL_TLS_BLOCK_BYTES);
++}
++
++static int init_once(void) {
++    if (g_ready) return g_ready > 0 ? 0 : -1;
++    uint64_t tp = (uint64_t)(uintptr_t)tsd();
++    if (tp & 7) { err("thread pointer %#llx is not 8-aligned", (unsigned long long)tp); g_ready = -1; return -1; }
++    if (claim_slot(KL_TLS_BLOCK_SLOT, block_destroy) != 0) {
++        err("TSD slot %d (TLS block) is not available in this process", KL_TLS_BLOCK_SLOT);
++        g_ready = -1; return -1;
++    }
++    for (unsigned i = 0; i < KL_TLS_FIXED_SLOTS; i++)
++        if (claim_slot(KL_TLS_FIXED_SLOT + i, NULL) != 0) {
++            err("TSD slot %u (fixed TLS) is not available in this process", KL_TLS_FIXED_SLOT + i);
++            g_ready = -1; return -1;
++        }
++    g_ready = 1;
++    return 0;
++}
++
++// Allocate (if needed) the calling thread's dynamic block, with every module
++// registered so far initialised. Caller holds g_mu.
++static struct block *block_get_locked(void) {
++    uint64_t *t = tsd();
++    struct block *b = (struct block *)t[KL_TLS_BLOCK_SLOT];
++    if (b) return b;
++    b = mmap(NULL, KL_TLS_BLOCK_BYTES, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANON, -1, 0);
++    if (b == MAP_FAILED) return NULL;
++    for (unsigned i = 0; i < g_nmods; i++)
++        if (!g_mods[i].fixed && g_mods[i].filesz)
++            memcpy((char *)b + g_mods[i].off, g_mods[i].init, g_mods[i].filesz);
++    b->next = g_blocks; b->prev = NULL;
++    if (g_blocks) g_blocks->prev = b;
++    g_blocks = b;
++    g_nblocks++;
++    if (g_nblocks > g_blocks_peak) g_blocks_peak = g_nblocks;
++    // pthread_setspecific writes the same slot and lets the key's destructor
++    // see the value at thread exit.
++    pthread_setspecific((pthread_key_t)KL_TLS_BLOCK_SLOT, b);
++    return b;
++}
++
++static void fixed_init_thread_locked(void) {
++    char *base = (char *)tsd() + KL_TLS_FIXED_SLOT * 8;
++    for (unsigned i = 0; i < g_nmods; i++) {
++        if (!g_mods[i].fixed) continue;
++        if (g_mods[i].filesz) memcpy(base + g_mods[i].off, g_mods[i].init, g_mods[i].filesz);
++        memset(base + g_mods[i].off + g_mods[i].filesz, 0, g_mods[i].memsz - g_mods[i].filesz);
++    }
++}
++
++kl_tls_module *kl_tls_register(const char *path, const void *init, size_t filesz,
++                               size_t memsz, size_t align, int fixed) {
++    pthread_mutex_lock(&g_mu);
++    if (init_once() != 0) { pthread_mutex_unlock(&g_mu); return NULL; }
++    if (g_nmods == KL_TLS_MAX_MODULES) { err("too many TLS modules (%u)", g_nmods); pthread_mutex_unlock(&g_mu); return NULL; }
++    if (align < 8) align = 8;
++    if (filesz > memsz) filesz = memsz;
++    kl_tls_module *m = &g_mods[g_nmods];
++    memset(m, 0, sizeof *m);
++    m->init = init; m->filesz = filesz; m->memsz = memsz; m->align = align; m->fixed = fixed;
++    const char *b = path ? strrchr(path, '/') : NULL;
++    snprintf(m->name, sizeof m->name, "%s", b ? b + 1 : (path ? path : "?"));
++    if (fixed) {
++        if (align > 16) { err("%s: TP-relative TLS with alignment %zu (max 16)", m->name, align); pthread_mutex_unlock(&g_mu); return NULL; }
++        uint64_t off = align_up(g_fixed_used, align);
++        if (off + memsz > KL_TLS_FIXED_SLOTS * 8) {
++            err("%s: TP-relative TLS of %zu bytes does not fit the %d fixed slots (%llu used)",
++                m->name, memsz, KL_TLS_FIXED_SLOTS * 8, (unsigned long long)g_fixed_used);
++            pthread_mutex_unlock(&g_mu); return NULL;
++        }
++        m->off = off; g_fixed_used = off + memsz;
++        g_nmods++;
++        // This thread's copy now; every other thread's at its kl_thread_init.
++        char *base = (char *)tsd() + KL_TLS_FIXED_SLOT * 8;
++        if (filesz) memcpy(base + off, init, filesz);
++        memset(base + off + filesz, 0, memsz - filesz);
++    } else {
++        uint64_t off = align_up(g_block_used, align);
++        if (off + memsz > KL_TLS_BLOCK_BYTES) { err("%s: TLS block exhausted", m->name); pthread_mutex_unlock(&g_mu); return NULL; }
++        m->off = off; g_block_used = off + memsz;
++        g_nmods++;
++        // Threads that already have a block get this module's initial image
++        // too: nothing of the module has run yet, so the region is untouched.
++        if (filesz)
++            for (struct block *blk = g_blocks; blk; blk = blk->next)
++                memcpy((char *)blk + off, init, filesz);
++    }
++    if (kl_env_on("KL_TRACE_TLS", 0))
++        fprintf(stderr, "  [tls] %s: %zu bytes (%zu initialised, align %zu) at %s+%#llx\n",
++                m->name, memsz, filesz, align, fixed ? "TP" : "block",
++                (unsigned long long)(fixed ? KL_TLS_FIXED_SLOT * 8 + m->off : m->off));
++    pthread_mutex_unlock(&g_mu);
++    return m;
++}
++
++int kl_tls_tprel(kl_tls_module *m, uint64_t off, uint64_t *tp_off) {
++    if (!m || !m->fixed) { err("TPREL64 against a module without TP-relative placement"); return -1; }
++    *tp_off = KL_TLS_FIXED_SLOT * 8 + m->off + off;
++    return 0;
++}
++
++void kl_tls_desc(kl_tls_module *m, uint64_t off, uint64_t slot[2]) {
++    if (m->fixed) {
++        slot[0] = (uint64_t)(uintptr_t)kl_tlsdesc_static;
++        slot[1] = KL_TLS_FIXED_SLOT * 8 + m->off + off;
++    } else {
++        slot[0] = (uint64_t)(uintptr_t)kl_tlsdesc_dynamic;
++        slot[1] = m->off + off;
++    }
++}
++
++// The slow path of kl_tlsdesc_dynamic (kl_tls.S): this thread has no block yet.
++uint64_t kl_tls_slow(const uint64_t *desc) {
++    pthread_mutex_lock(&g_mu);
++    struct block *b = block_get_locked();
++    pthread_mutex_unlock(&g_mu);
++    if (!b) {
++        fprintf(stderr, "  [tls] out of memory for a thread's TLS block\n");
++        abort();
++    }
++    return (uint64_t)(uintptr_t)((char *)b + desc[1]) - (uint64_t)(uintptr_t)tsd();
++}
++
++void *kl_tls_block(void) {
++    pthread_mutex_lock(&g_mu);
++    if (init_once() != 0) { pthread_mutex_unlock(&g_mu); return NULL; }
++    struct block *b = block_get_locked();
++    pthread_mutex_unlock(&g_mu);
++    return b;
++}
++
++void kl_tls_thread_init(void) {
++    pthread_mutex_lock(&g_mu);
++    if (g_ready > 0) fixed_init_thread_locked();
++    pthread_mutex_unlock(&g_mu);
++}
++
++int kl_tls_thread_atexit(void (*dtor)(void *), void *obj, void *dso) {
++    (void)dso;
++    struct atexit_rec *r = malloc(sizeof *r);
++    if (!r) return -1;
++    r->dtor = dtor; r->obj = obj;
++    pthread_mutex_lock(&g_mu);
++    struct block *b = g_ready > 0 || init_once() == 0 ? block_get_locked() : NULL;
++    if (!b) { pthread_mutex_unlock(&g_mu); free(r); return -1; }
++    r->next = b->atexit; b->atexit = r;
++    pthread_mutex_unlock(&g_mu);
++    return 0;
++}
++
++void kl_tls_report(FILE *f) {
++    pthread_mutex_lock(&g_mu);
++    fprintf(f, "  [tls] %u modules, %llu bytes dynamic, %llu bytes TP-relative, %u live blocks (peak %u)\n",
++            g_nmods, (unsigned long long)g_block_used, (unsigned long long)g_fixed_used,
++            g_nblocks, g_blocks_peak);
++    pthread_mutex_unlock(&g_mu);
++}
+diff --git a/runtime/kl_tls.h b/runtime/kl_tls.h
+new file mode 100644
+index 0000000..8611305
+--- /dev/null
++++ b/runtime/kl_tls.h
+@@ -0,0 +1,58 @@
++// ELF thread-local storage for guests that use it (glibc-built libraries).
++//
++// Android guests reach TLS through emutls or bionic's slot table, so Klepton's
++// loader had no PT_TLS handling and knew no TLS relocation. A glibc guest is
++// different: every `thread_local` and `__thread` lands in a PT_TLS segment and
++// is reached through R_AARCH64_TLSDESC (a resolver call) or, for the
++// initial-exec model, R_AARCH64_TLS_TPREL64 (a fixed offset from the thread
++// pointer). Both are answered here.
++//
++// The thread pointer the guest reads is Darwin's TSD base (TPIDRRO_EL0, after
++// the loader's tpidr_el0 rewrite), so a fixed TP-relative offset has to land
++// inside the TSD array. A handful of slots (KL_TLS_FIXED_SLOT ...) is claimed
++// for the few modules that need that; everything else lives in a per-thread
++// block allocated on first touch, whose address sits in KL_TLS_BLOCK_SLOT, and
++// the TLSDESC resolver returns (block + offset - TP).
++#ifndef KL_TLS_H
++#define KL_TLS_H
++#include <stddef.h>
++#include <stdint.h>
++#include <stdio.h>
++
++typedef struct kl_tls_module kl_tls_module;
++
++// Darwin TSD slots, claimed as real pthread keys the way kl_x18.h claims 500.
++#define KL_TLS_BLOCK_SLOT   501
++#define KL_TLS_FIXED_SLOT   504
++#define KL_TLS_FIXED_SLOTS  8        // 64 bytes of TP-relative TLS, for TPREL64 modules
++
++// Register a module's PT_TLS: its initialisation image, how many bytes of it
++// are in the file, the full size and alignment. `fixed` asks for TP-relative
++// placement (needed when the module has TPREL64 relocations). NULL on failure;
++// kl_tls_error() says why.
++kl_tls_module *kl_tls_register(const char *path, const void *init, size_t filesz,
++                               size_t memsz, size_t align, int fixed);
++const char *kl_tls_error(void);
++
++// The value of an R_AARCH64_TLS_TPREL64 slot: the TP-relative offset of
++// `off` bytes into the module's block. Fails for a module that was not
++// registered as fixed.
++int  kl_tls_tprel(kl_tls_module *m, uint64_t off, uint64_t *tp_off);
++// Fill an R_AARCH64_TLSDESC GOT pair (resolver, argument) for `off` bytes into
++// the module's block.
++void kl_tls_desc(kl_tls_module *m, uint64_t off, uint64_t slot[2]);
++
++// Per-thread: initialise the fixed slots for the calling thread. Called from
++// kl_thread_init (every guest thread, and the host's main thread).
++void kl_tls_thread_init(void);
++// glibc's __cxa_thread_atexit_impl: run `dtor(obj)` when the calling thread
++// exits. Returns 0.
++int  kl_tls_thread_atexit(void (*dtor)(void *), void *obj, void *dso);
++// The dynamic block of the calling thread, created if needed (test aid).
++void *kl_tls_block(void);
++void kl_tls_report(FILE *f);
++
++// The resolvers the GOT pairs point at (kl_tls.S).
++extern void kl_tlsdesc_static(void);
++extern void kl_tlsdesc_dynamic(void);
++#endif
+diff --git a/runtime/kl_x18.c b/runtime/kl_x18.c
+index d255546..56b788a 100644
+--- a/runtime/kl_x18.c
++++ b/runtime/kl_x18.c
+@@ -828,6 +828,85 @@ int kl_x18_emit(void *code, size_t size, uint64_t code_va,
+             continue;
+         }
+ 
++        // ---- glibc guest shapes (x18 is a general register on Linux) ----
++        if (out + VEN_MAX_INSN <= pool_end) {
++            uint32_t body[VEN_MAX_INSN], patch;
++            unsigned k = 0;
++            int ok = 1, served = 0;
++            if (word == 0xD63F0240u) {
++                // blr x18: call through the shadow via x16 (IP0, which every
++                // call may clobber), never through the real x18: the kernel can
++                // zero x18 between loading it and the blr, and the race
++                // recovery then resumed the callee with the wrong return
++                // address (libmpg123's dct36 calls: corrupted state, crash).
++                // Return lands in the veneer, which branches back behind the site.
++                body[k++] = enc_mrs_tpidrro(16);
++                body[k++] = enc_ldr(16, 16, (unsigned)KLX_TSD_SLOT * 8);
++                body[k++] = 0xD63F0200u;                 // blr x16
++                ok &= enc_b(vpc + k * 4, spc + 4, &body[k]); k++;
++                served = 1;
++            } else if (in.pcrel == KLX_PC_ADR && (word & 0x9F000000u) == 0x10000000u && (word & 31u) == 18) {
++                // adr x18, label: the address is a constant, materialised into the shadow.
++                int64_t imm = (int64_t)(((word >> 5) & 0x7FFFFu) << 2 | ((word >> 29) & 3u));
++                if (imm & (1LL << 20)) imm -= (1LL << 21);
++                uint64_t target = spc + (uint64_t)imm;
++                unsigned a, b;
++                pick_scratch(in.gp_used, &a, &b);
++                body[k++] = enc_stp(a, b, -16);
++                body[k++] = enc_mrs_tpidrro(a);
++                k += enc_mov_imm64(b, target, body + k);
++                body[k++] = enc_str(b, a, (unsigned)KLX_TSD_SLOT * 8);
++                body[k++] = enc_ldp(a, b, -16);
++                ok &= enc_b(vpc + k * 4, spc + 4, &body[k]); k++;
++                served = 1;
++            } else if (in.hazard == KLX_HZ_SPWRITE && (word & 0xFFC00000u) == 0xA9800000u && ((word >> 5) & 31u) == 31u) {
++                // stp Xt, Xt2, [sp, #imm]!  — scratch spilled below the pair's
++                // destination, the pair written (x18 read from the shadow) with
++                // the original writeback, scratch restored from the new sp.
++                int imm = (int)((word >> 15) & 0x7Fu); if (imm & 0x40) imm -= 0x80; imm *= 8;
++                if (imm - 16 >= -512 && imm <= 0) {
++                    unsigned a, b;
++                    pick_scratch(in.gp_used, &a, &b);
++                    body[k++] = enc_stp(a, b, imm - 16);
++                    body[k++] = enc_mrs_tpidrro(a);
++                    body[k++] = enc_ldr(b, a, (unsigned)KLX_TSD_SLOT * 8);
++                    body[k++] = klx_substitute(word, &in, b);
++                    body[k++] = enc_ldp(a, b, -16);
++                    ok &= enc_b(vpc + k * 4, spc + 4, &body[k]); k++;
++                    served = 1;
++                }
++            } else if (in.hazard == KLX_HZ_SPWRITE && (word & 0xFFC00000u) == 0xA8C00000u && ((word >> 5) & 31u) == 31u) {
++                // ldp Xt, Xt2, [sp], #imm — the pair is loaded (x18's value into
++                // scratch b) with the original writeback, b goes to the shadow,
++                // scratch is restored from where it was spilled (old sp - 16).
++                int imm = (int)((word >> 15) & 0x7Fu); if (imm & 0x40) imm -= 0x80; imm *= 8;
++                if (imm >= 0 && -16 - imm >= -512) {
++                    unsigned a, b;
++                    pick_scratch(in.gp_used, &a, &b);
++                    body[k++] = enc_stp(a, b, -16);
++                    body[k++] = klx_substitute(word, &in, b);
++                    body[k++] = enc_mrs_tpidrro(a);
++                    body[k++] = enc_str(b, a, (unsigned)KLX_TSD_SLOT * 8);
++                    body[k++] = enc_ldp(a, b, -16 - imm);
++                    ok &= enc_b(vpc + k * 4, spc + 4, &body[k]); k++;
++                    served = 1;
++                }
++            }
++            if (served) {
++                ok &= (k <= VEN_MAX_INSN) && enc_b(spc, vpc, &patch);
++                if (!ok) {
++                    note_refusal(word); st->refused++;
++                    if (out_of_reach(spc, vpc)) st->far_refused++;
++                    continue;
++                }
++                memcpy(out, body, k * 4);
++                out += k;
++                w[i] = patch;
++                st->patched++;
++                continue;
++            }
++        }
++
+         if (in.hazard || in.pcrel == KLX_PC_ADR || in.pcrel == KLX_PC_LITERAL ||
+             out + VEN_MAX_INSN > pool_end) { note_refusal(word); st->refused++; continue; }
+ 
+diff --git a/runtime/kl_x18.h b/runtime/kl_x18.h
+index 0dab391..d7da807 100644
+--- a/runtime/kl_x18.h
++++ b/runtime/kl_x18.h
+@@ -162,7 +162,7 @@ uint64_t kl_x18_ctr_value(void);
+ 
+ // Longest veneer, in instructions. Public because klepton-ld sizes its pool from
+ // the site count before it emits anything.
+-#define KLX_VEN_MAX_INSN 8
++#define KLX_VEN_MAX_INSN 12
+ 
+ typedef struct {
+     unsigned sites;     // instructions found naming x18
+diff --git a/runtime/klepton.h b/runtime/klepton.h
+index 23bbbcc..72d5972 100644
+--- a/runtime/klepton.h
++++ b/runtime/klepton.h
+@@ -9,6 +9,7 @@
+ #include <stdint.h>
+ #include <stdio.h>
+ #include "kl_env.h"
++#include "kl_tls.h"
+ 
+ typedef struct kl_image kl_image;
+ 
+@@ -45,9 +46,14 @@ void      *kl_sym(kl_image *img, const char *name);
+ // is how an interposer calls through. Diagnostic: nothing in a shipping path
+ // registers one.
+ void       kl_interpose(const char *name, void *fn);
++// Called once per image right after it is registered (before guest code
++// of a later dlopen can run it); the host uses it for byte-checked fixes.
++extern void (*kl_image_loaded_hook)(const char *path, kl_image *img);
++void      *kl_interpose_lookup(const char *name);   // an interposer by name, or NULL
+ // Run DT_INIT_ARRAY. Separate from kl_load so tests can inspect first.
+ void       kl_run_init(kl_image *img);
+ void       kl_unload(kl_image *img);
++int        kl_rebind_missing(kl_image *img);   // bind imports that missed (dependency cycles)
+ const char *kl_error(void);
+ 
+ // Base address the image was mapped at, and its total vaddr span.
+@@ -87,6 +93,7 @@ typedef struct {
+     // veneer machinery, counted apart because the x18 numbers above are exact
+     // and `make check` gates on them.
+     unsigned ctr_sites, ctr_patched, ctr_refused;
++    unsigned tls_desc, tls_tprel;                    // ELF TLS relocations (glibc guests)
+ } kl_stats;
+ const kl_stats *kl_get_stats(kl_image *img);
+ 
+@@ -130,6 +137,12 @@ int       kl_list_needed(const char *path, char names[][128], int max);
+ // Search every registered guest image for an export (kl_dl.c); used by the
+ // loader's import binding after the shim misses.
+ void     *kl_guest_sym_global(const char *name);
++// ELF TLS symbols: a defined STT_TLS symbol's offset inside its module's block.
++int       kl_sym_tls(kl_image *img, const char *name, uint64_t *off);
++kl_tls_module *kl_image_tls_module(kl_image *img);
++int       kl_guest_tls_sym_global(const char *name, kl_tls_module **m, uint64_t *off);
++// A host-implemented library for the guest, by dlopen path suffix ("/vrclient.so").
++void      kl_dl_add_host_module(const char *suffix, void *(*lookup)(const char *));
+ // The image's program headers, as mapped. Every guest lib's first PT_LOAD maps
+ // file offset 0 at vaddr 0, so the phdr array is live at base + e_phoff and the
+ // load bias is simply the base. This is what dl_iterate_phdr hands the guest's
+diff --git a/runtime/libc/kl_libc.c b/runtime/libc/kl_libc.c
+index 060df05..916f297 100644
+--- a/runtime/libc/kl_libc.c
++++ b/runtime/libc/kl_libc.c
+@@ -1315,6 +1315,27 @@ static void proc_build(void) {
+         snprintf(rel, sizeof rel, "/sys/devices/system/cpu/cpu%ld/cpu_capacity", i);
+         proc_put(rel, "1024\n");
+     }
++    {
++        int perf = 0; size_t sz = sizeof perf;
++        if (sysctlbyname("hw.perflevel0.logicalcpu", &perf, &sz, NULL, 0) != 0 || perf <= 0 || perf > ncpu) perf = (int)ncpu;
++        char sib[64];
++        if (ncpu > 1) snprintf(sib, sizeof sib, "0-%ld\n", ncpu - 1); else snprintf(sib, sizeof sib, "0\n");
++        for (long i = 0; i < ncpu; i++) {
++            char rel[256], val[32];
++            snprintf(rel, sizeof rel, "/sys/devices/system/cpu/cpu%ld/topology/core_id", i);
++            snprintf(val, sizeof val, "%ld\n", i); proc_put(rel, val);
++            snprintf(rel, sizeof rel, "/sys/devices/system/cpu/cpu%ld/topology/physical_package_id", i);
++            proc_put(rel, "0\n");
++            snprintf(rel, sizeof rel, "/sys/devices/system/cpu/cpu%ld/topology/thread_siblings_list", i);
++            proc_put(rel, val);
++            snprintf(rel, sizeof rel, "/sys/devices/system/cpu/cpu%ld/topology/core_siblings_list", i);
++            proc_put(rel, sib);
++            snprintf(rel, sizeof rel, "/sys/devices/system/cpu/cpu%ld/topology/package_cpus_list", i);
++            proc_put(rel, sib);
++            snprintf(rel, sizeof rel, "/sys/devices/system/cpu/cpu%ld/cpu_capacity", i);
++            proc_put(rel, i < perf ? "1024\n" : "400\n");          // performance cores first
++        }
++    }
+     // Some guests size their core loop from kernel_max (highest possible CPU
+     // index) rather than from /possible. Pin it to the last slot we serve so the
+     // loop's upper bound and the nodes that exist agree.
+@@ -2868,10 +2889,23 @@ int kl_fcntl(int fd, int cmd, uintptr_t arg) {
+     // with l_type/l_whence, Darwin with l_start/l_len), so forwarding the
+     // pointer would silently lock a different range. Refused by name until
+     // something needs it — no guest has yet.
+-    case LX_F_GETLK: case LX_F_SETLK: case LX_F_SETLKW:
+-        warn_once("fcntl file locking (struct flock layout differs) — refused");
+-        errno = EINVAL;
+-        return -1;
++    case LX_F_GETLK: case LX_F_SETLK: case LX_F_SETLKW: {
++        // Linux/aarch64 struct flock leads with l_type/l_whence, Darwin's with
++        // l_start/l_len, and the F_RDLCK/F_WRLCK/F_UNLCK values differ (0/1/2 vs
++        // 1/3/2), so the record is translated both ways.
++        struct lx_flock { int16_t l_type, l_whence; int32_t pad; int64_t l_start, l_len; int32_t l_pid, pad2; };
++        struct lx_flock *lx = (struct lx_flock *)arg;
++        struct flock d; memset(&d, 0, sizeof d);
++        d.l_type = lx->l_type == 0 ? F_RDLCK : lx->l_type == 1 ? F_WRLCK : F_UNLCK;
++        d.l_whence = lx->l_whence; d.l_start = lx->l_start; d.l_len = lx->l_len; d.l_pid = lx->l_pid;
++        int dcmd = cmd == LX_F_GETLK ? F_GETLK : cmd == LX_F_SETLK ? F_SETLK : F_SETLKW;
++        int r = fcntl(fd, dcmd, &d);
++        if (r == 0 && cmd == LX_F_GETLK) {
++            lx->l_type = d.l_type == F_RDLCK ? 0 : d.l_type == F_WRLCK ? 1 : 2;
++            lx->l_whence = d.l_whence; lx->l_start = d.l_start; lx->l_len = d.l_len; lx->l_pid = d.l_pid;
++        }
++        return r;
++    }
+     default:
+         fcntl_warn_once("fcntl", cmd);
+         errno = EINVAL;
+diff --git a/runtime/libc/kl_shim.c b/runtime/libc/kl_shim.c
+index 70c1cdd..dc35d2f 100644
+--- a/runtime/libc/kl_shim.c
++++ b/runtime/libc/kl_shim.c
+@@ -97,6 +97,7 @@ static uint64_t g_canary = 0x0000BEEFCAFE0000ULL;
+ void kl_thread_init(void) {
+     uint64_t tp; __asm__ volatile("mrs %0, tpidrro_el0" : "=r"(tp));
+     ((uint64_t *)tp)[TLS_SLOT_STACK_GUARD] = g_canary;
++    kl_tls_thread_init();
+ }
+ 
+ // The guest installs its own fatal-signal handlers — IL2CPP does this for crash
+diff --git a/tools/klepton_ld.c b/tools/klepton_ld.c
+index 19b4703..75a1c43 100644
+--- a/tools/klepton_ld.c
++++ b/tools/klepton_ld.c
+@@ -103,7 +103,7 @@ static unsigned rewrite_tls(uint8_t *p, size_t n, uint64_t va, unsigned *refused
+     size_t words = n / 4;
+     for (size_t i = 0; i < words; i++) {
+         if ((w[i] & 0xffffffe0u) != 0xd53bd040u) continue;
+-        if (kl_x18_is_data(w, n, i)) {
++        if (!getenv("KL_TLS_REWRITE_FORCE") && kl_x18_is_data(w, n, i)) {
+             (*refused)++;
+             fprintf(stderr, "klepton-ld: TLS site at +0x%llx left alone — its "
+                             "neighbourhood reads as data. If it IS code, "
+-- 
+2.54.0 (Apple Git-157)
+

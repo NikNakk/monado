@@ -1,0 +1,12 @@
+{
+  "renderer_sha256": "02edbf8f2040cd8a3103038583447865ca7d34f36f13daacab9d4d194cb9d04d",
+  "original_and_clone_unchanged": true,
+  "option": "-vulkan_disable_ext_dynamic_state_3",
+  "string_va": "0x18e988",
+  "reference_va": "0x297324",
+  "command_line_call_va": "0x29732c",
+  "absent_option_branch_va": "0x297330",
+  "extension_enable_target": "0x298c14",
+  "method": "Read-only ELF string cross-reference and LLVM disassembly of CommandLine check and conditional extension-enable path; no game bytes/disassembly redistributed.",
+  "runtime_engine_fallback": "Not yet observed; next user headset run required."
+}

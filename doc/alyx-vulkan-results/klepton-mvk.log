@@ -1,0 +1,17 @@
+  [vk] explicit Vulkan dispatch library: /opt/homebrew/lib/libvulkan.1.dylib
+  [vk] Vulkan dispatch loaded — instance API 1.4.363
+  [vk] fdm resolve=vkCreateInstance
+  [vk] cached display adapter LUID 000000010000054c
+  [vk] vkCreateInstance ok — 1 extension(s)
+  [vk] fdm resolve=vkEnumeratePhysicalDevices
+  [vk] vkEnumeratePhysicalDevices -> 1 device(s) (result 0)
+  [vk]   phys[0] 'Apple M5' api 1.2.357 type 1 vendor 0x106b device 0x1a07020a queueFamilies 4 graphics 1
+  [vk] vkEnumeratePhysicalDevices(inst 0x9ecc6c000) FETCH -> 1, devs[0] 0x9ec8001e0 (result 0)
+  [vk] fdm resolve=vkGetPhysicalDeviceFeatures2
+  [vk] fdm Features2-request pNext sType=1000218000
+  [vk] fdm Features2-request features map=0 dynamic=0 nonSubsampled=0
+  [vk] fdm Features2-result pNext sType=1000218000
+  [vk] fdm Features2-result features map=0 dynamic=0 nonSubsampled=0
+  [vk] fdm resolve=vkDestroyInstance
+CreateInstance=0
+fdm=0 dynamic=0

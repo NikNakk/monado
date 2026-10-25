@@ -1,0 +1,943 @@
+{
+  "library_manifest_sha256": "bc1a6fb82eb6ed6be4730caa9f076d9e94b78ce196eb3b6dfa7337cc60024723",
+  "library_names": 193,
+  "unique_elf_files": 106,
+  "missing": {},
+  "shim_served_missing_files": {
+    "libc.so.6": [
+      "/private/tmp/alyx-engine-uuid-runtime/usr/lib/aarch64-linux-gnu/libuuid.so.1.3.0",
+      "/private/tmp/alyx-font-runtime/usr/lib/aarch64-linux-gnu/libblkid.so.1.1.0",
+      "/private/tmp/alyx-font-runtime/usr/lib/aarch64-linux-gnu/libbrotlicommon.so.1.1.0",
+      "/private/tmp/alyx-font-runtime/usr/lib/aarch64-linux-gnu/libbrotlidec.so.1.1.0",
+      "/private/tmp/alyx-font-runtime/usr/lib/aarch64-linux-gnu/libbrotlienc.so.1.1.0",
+      "/private/tmp/alyx-font-runtime/usr/lib/aarch64-linux-gnu/libbz2.so.1.0.4",
+      "/private/tmp/alyx-font-runtime/usr/lib/aarch64-linux-gnu/libexpat.so.1.12.3",
+      "/private/tmp/alyx-font-runtime/usr/lib/aarch64-linux-gnu/libexpatw.so.1.12.3",
+      "/private/tmp/alyx-font-runtime/usr/lib/aarch64-linux-gnu/libffi.so.8.1.4",
+      "/private/tmp/alyx-font-runtime/usr/lib/aarch64-linux-gnu/libfribidi.so.0.4.0",
+      "/private/tmp/alyx-font-runtime/usr/lib/aarch64-linux-gnu/libgio-2.0.so.0.8400.4",
+      "/private/tmp/alyx-font-runtime/usr/lib/aarch64-linux-gnu/libglib-2.0.so.0.8400.4",
+      "/private/tmp/alyx-font-runtime/usr/lib/aarch64-linux-gnu/libgmodule-2.0.so.0.8400.4",
+      "/private/tmp/alyx-font-runtime/usr/lib/aarch64-linux-gnu/libgobject-2.0.so.0.8400.4",
+      "/private/tmp/alyx-font-runtime/usr/lib/aarch64-linux-gnu/libgthread-2.0.so.0.8400.4",
+      "/private/tmp/alyx-font-runtime/usr/lib/aarch64-linux-gnu/libmount.so.1.1.0",
+      "/private/tmp/alyx-font-runtime/usr/lib/aarch64-linux-gnu/libpcre2-8.so.0.14.0",
+      "/private/tmp/alyx-font-runtime/usr/lib/aarch64-linux-gnu/libpng16.so.16.48.0",
+      "/private/tmp/alyx-font-runtime/usr/lib/aarch64-linux-gnu/libselinux.so.1",
+      "/private/tmp/alyx-font-runtime/usr/lib/aarch64-linux-gnu/libz.so.1.3.1",
+      "/private/tmp/alyx-icu67-runtime/usr/lib/aarch64-linux-gnu/libicui18n.so.67.1",
+      "/private/tmp/alyx-icu67-runtime/usr/lib/aarch64-linux-gnu/libicuio.so.67.1",
+      "/private/tmp/alyx-icu67-runtime/usr/lib/aarch64-linux-gnu/libicutest.so.67.1",
+      "/private/tmp/alyx-icu67-runtime/usr/lib/aarch64-linux-gnu/libicutu.so.67.1",
+      "/private/tmp/alyx-icu67-runtime/usr/lib/aarch64-linux-gnu/libicuuc.so.67.1",
+      "/private/tmp/alyx-lua-gnu-runtime/usr/lib/aarch64-linux-gnu/libgcc_s.so.1",
+      "/private/tmp/alyx-lua-gnu-runtime/usr/lib/aarch64-linux-gnu/libstdc++.so.6.0.33",
+      "/private/tmp/alyx-native-game-root/game/bin/linuxsteamrtarm64/libSDL2.so",
+      "/private/tmp/alyx-native-game-root/game/bin/linuxsteamrtarm64/libanimationsystem.so",
+      "/private/tmp/alyx-native-game-root/game/bin/linuxsteamrtarm64/libavcodec.so",
+      "/private/tmp/alyx-native-game-root/game/bin/linuxsteamrtarm64/libavcodec.so.58.91.100",
+      "/private/tmp/alyx-native-game-root/game/bin/linuxsteamrtarm64/libavformat.so",
+      "/private/tmp/alyx-native-game-root/game/bin/linuxsteamrtarm64/libavformat.so.58.45.100",
+      "/private/tmp/alyx-native-game-root/game/bin/linuxsteamrtarm64/libavresample.so",
+      "/private/tmp/alyx-native-game-root/game/bin/linuxsteamrtarm64/libavresample.so.4.0.0",
+      "/private/tmp/alyx-native-game-root/game/bin/linuxsteamrtarm64/libavutil.so",
+      "/private/tmp/alyx-native-game-root/game/bin/linuxsteamrtarm64/libavutil.so.56.51.100",
+      "/private/tmp/alyx-native-game-root/game/bin/linuxsteamrtarm64/libengine2.so",
+      "/private/tmp/alyx-native-game-root/game/bin/linuxsteamrtarm64/libfilesystem_stdio.so",
+      "/private/tmp/alyx-native-game-root/game/bin/linuxsteamrtarm64/libfontconfig.so.1.14.0",
+      "/private/tmp/alyx-native-game-root/game/bin/linuxsteamrtarm64/libfreetype.so.6.20.2",
+      "/private/tmp/alyx-native-game-root/game/bin/linuxsteamrtarm64/libharfbuzz-gobject.so.0.61010.0",
+      "/private/tmp/alyx-native-game-root/game/bin/linuxsteamrtarm64/libharfbuzz-icu.so.0.61010.0",
+      "/private/tmp/alyx-native-game-root/game/bin/linuxsteamrtarm64/libharfbuzz-subset.so.0.61010.0",
+      "/private/tmp/alyx-native-game-root/game/bin/linuxsteamrtarm64/libharfbuzz.so.0.61010.0",
+      "/private/tmp/alyx-native-game-root/game/bin/linuxsteamrtarm64/libinputsystem.so",
+      "/private/tmp/alyx-native-game-root/game/bin/linuxsteamrtarm64/liblocalize.so",
+      "/private/tmp/alyx-native-game-root/game/bin/linuxsteamrtarm64/libmaterialsystem2.so",
+      "/private/tmp/alyx-native-game-root/game/bin/linuxsteamrtarm64/libmeshsystem.so",
+      "/private/tmp/alyx-native-game-root/game/bin/linuxsteamrtarm64/libmpg123_hlvr.so.0",
+      "/private/tmp/alyx-native-game-root/game/bin/linuxsteamrtarm64/libnetworksystem.so",
+      "/private/tmp/alyx-native-game-root/game/bin/linuxsteamrtarm64/libopenvr_api.so",
+      "/private/tmp/alyx-native-game-root/game/bin/linuxsteamrtarm64/libpango-1.0.so.0.5102.0",
+      "/private/tmp/alyx-native-game-root/game/bin/linuxsteamrtarm64/libpangoft2-1.0.so.0.5102.0",
+      "/private/tmp/alyx-native-game-root/game/bin/linuxsteamrtarm64/libpanorama.so",
+      "/private/tmp/alyx-native-game-root/game/bin/linuxsteamrtarm64/libpanorama_text_pango.so",
+      "/private/tmp/alyx-native-game-root/game/bin/linuxsteamrtarm64/libparticles.so",
+      "/private/tmp/alyx-native-game-root/game/bin/linuxsteamrtarm64/libphonon.so",
+      "/private/tmp/alyx-native-game-root/game/bin/linuxsteamrtarm64/librenderingpipelines.so",
+      "/private/tmp/alyx-native-game-root/game/bin/linuxsteamrtarm64/librendersystemempty.so",
+      "/private/tmp/alyx-native-game-root/game/bin/linuxsteamrtarm64/librendersystemgl.so",
+      "/private/tmp/alyx-native-game-root/game/bin/linuxsteamrtarm64/librendersystemvulkan.so",
+      "/private/tmp/alyx-native-game-root/game/bin/linuxsteamrtarm64/libresourcesystem.so",
+      "/private/tmp/alyx-native-game-root/game/bin/linuxsteamrtarm64/libscenefilecache.so",
+      "/private/tmp/alyx-native-game-root/game/bin/linuxsteamrtarm64/libscenesystem.so",
+      "/private/tmp/alyx-native-game-root/game/bin/linuxsteamrtarm64/libschemasystem.so",
+      "/private/tmp/alyx-native-game-root/game/bin/linuxsteamrtarm64/libsoundsystem.so",
+      "/private/tmp/alyx-native-game-root/game/bin/linuxsteamrtarm64/libsteam_api.so",
+      "/private/tmp/alyx-native-game-root/game/bin/linuxsteamrtarm64/libsteamaudio.so",
+      "/private/tmp/alyx-native-game-root/game/bin/linuxsteamrtarm64/libswscale.so",
+      "/private/tmp/alyx-native-game-root/game/bin/linuxsteamrtarm64/libswscale.so.5.7.100",
+      "/private/tmp/alyx-native-game-root/game/bin/linuxsteamrtarm64/libtier0.so",
+      "/private/tmp/alyx-native-game-root/game/bin/linuxsteamrtarm64/libv8.so",
+      "/private/tmp/alyx-native-game-root/game/bin/linuxsteamrtarm64/libv8_absl.so",
+      "/private/tmp/alyx-native-game-root/game/bin/linuxsteamrtarm64/libv8_icui18n.so",
+      "/private/tmp/alyx-native-game-root/game/bin/linuxsteamrtarm64/libv8_icuuc.so",
+      "/private/tmp/alyx-native-game-root/game/bin/linuxsteamrtarm64/libv8_libbase.so",
+      "/private/tmp/alyx-native-game-root/game/bin/linuxsteamrtarm64/libv8_libcpp.so",
+      "/private/tmp/alyx-native-game-root/game/bin/linuxsteamrtarm64/libv8_libplatform.so",
+      "/private/tmp/alyx-native-game-root/game/bin/linuxsteamrtarm64/libv8_zlib.so",
+      "/private/tmp/alyx-native-game-root/game/bin/linuxsteamrtarm64/libvconcomm.so",
+      "/private/tmp/alyx-native-game-root/game/bin/linuxsteamrtarm64/libvgui2.so",
+      "/private/tmp/alyx-native-game-root/game/bin/linuxsteamrtarm64/libvguirendersurface.so",
+      "/private/tmp/alyx-native-game-root/game/bin/linuxsteamrtarm64/libvideo.so",
+      "/private/tmp/alyx-native-game-root/game/bin/linuxsteamrtarm64/libvorbis.so",
+      "/private/tmp/alyx-native-game-root/game/bin/linuxsteamrtarm64/libvorbis.so.0",
+      "/private/tmp/alyx-native-game-root/game/bin/linuxsteamrtarm64/libvorbisenc.so",
+      "/private/tmp/alyx-native-game-root/game/bin/linuxsteamrtarm64/libvorbisenc.so.2",
+      "/private/tmp/alyx-native-game-root/game/bin/linuxsteamrtarm64/libvorbisfile.so",
+      "/private/tmp/alyx-native-game-root/game/bin/linuxsteamrtarm64/libvorbisfile.so.3",
+      "/private/tmp/alyx-native-game-root/game/bin/linuxsteamrtarm64/libvphysics2.so",
+      "/private/tmp/alyx-native-game-root/game/bin/linuxsteamrtarm64/libvpx.so",
+      "/private/tmp/alyx-native-game-root/game/bin/linuxsteamrtarm64/libvpx.so.6",
+      "/private/tmp/alyx-native-game-root/game/bin/linuxsteamrtarm64/libvr.so",
+      "/private/tmp/alyx-native-game-root/game/bin/linuxsteamrtarm64/libvscript.so",
+      "/private/tmp/alyx-native-game-root/game/bin/linuxsteamrtarm64/libvstdlib.so",
+      "/private/tmp/alyx-native-game-root/game/bin/linuxsteamrtarm64/libworldrenderer.so",
+      "/private/tmp/alyx-native-game-root/game/hlvr/bin/linuxsteamrtarm64/libclient.so",
+      "/private/tmp/alyx-native-game-root/game/hlvr/bin/linuxsteamrtarm64/libhost.so",
+      "/private/tmp/alyx-native-game-root/game/hlvr/bin/linuxsteamrtarm64/libserver.so",
+      "/private/tmp/alyx-panorama-runtime/usr/lib/aarch64-linux-gnu/libatomic.so.1.2.0",
+      "/private/tmp/alyx-panorama-runtime/usr/lib/aarch64-linux-gnu/libcrypto.so.3",
+      "/private/tmp/alyx-panorama-runtime/usr/lib/aarch64-linux-gnu/libogg.so.0.8.5",
+      "/private/tmp/alyx-panorama-runtime/usr/lib/aarch64-linux-gnu/libssl.so.3",
+      "/private/tmp/alyx-zstd-runtime/usr/lib/aarch64-linux-gnu/libzstd.so.1.5.7"
+    ],
+    "ld-linux-aarch64.so.1": [
+      "/private/tmp/alyx-engine-uuid-runtime/usr/lib/aarch64-linux-gnu/libuuid.so.1.3.0",
+      "/private/tmp/alyx-font-runtime/usr/lib/aarch64-linux-gnu/libblkid.so.1.1.0",
+      "/private/tmp/alyx-font-runtime/usr/lib/aarch64-linux-gnu/libbrotlidec.so.1.1.0",
+      "/private/tmp/alyx-font-runtime/usr/lib/aarch64-linux-gnu/libbrotlienc.so.1.1.0",
+      "/private/tmp/alyx-font-runtime/usr/lib/aarch64-linux-gnu/libbz2.so.1.0.4",
+      "/private/tmp/alyx-font-runtime/usr/lib/aarch64-linux-gnu/libexpat.so.1.12.3",
+      "/private/tmp/alyx-font-runtime/usr/lib/aarch64-linux-gnu/libexpatw.so.1.12.3",
+      "/private/tmp/alyx-font-runtime/usr/lib/aarch64-linux-gnu/libffi.so.8.1.4",
+      "/private/tmp/alyx-font-runtime/usr/lib/aarch64-linux-gnu/libfribidi.so.0.4.0",
+      "/private/tmp/alyx-font-runtime/usr/lib/aarch64-linux-gnu/libgio-2.0.so.0.8400.4",
+      "/private/tmp/alyx-font-runtime/usr/lib/aarch64-linux-gnu/libglib-2.0.so.0.8400.4",
+      "/private/tmp/alyx-font-runtime/usr/lib/aarch64-linux-gnu/libgmodule-2.0.so.0.8400.4",
+      "/private/tmp/alyx-font-runtime/usr/lib/aarch64-linux-gnu/libgobject-2.0.so.0.8400.4",
+      "/private/tmp/alyx-font-runtime/usr/lib/aarch64-linux-gnu/libmount.so.1.1.0",
+      "/private/tmp/alyx-font-runtime/usr/lib/aarch64-linux-gnu/libpcre2-8.so.0.14.0",
+      "/private/tmp/alyx-font-runtime/usr/lib/aarch64-linux-gnu/libpng16.so.16.48.0",
+      "/private/tmp/alyx-font-runtime/usr/lib/aarch64-linux-gnu/libselinux.so.1",
+      "/private/tmp/alyx-font-runtime/usr/lib/aarch64-linux-gnu/libz.so.1.3.1",
+      "/private/tmp/alyx-icu67-runtime/usr/lib/aarch64-linux-gnu/libicui18n.so.67.1",
+      "/private/tmp/alyx-icu67-runtime/usr/lib/aarch64-linux-gnu/libicuio.so.67.1",
+      "/private/tmp/alyx-icu67-runtime/usr/lib/aarch64-linux-gnu/libicutest.so.67.1",
+      "/private/tmp/alyx-icu67-runtime/usr/lib/aarch64-linux-gnu/libicutu.so.67.1",
+      "/private/tmp/alyx-icu67-runtime/usr/lib/aarch64-linux-gnu/libicuuc.so.67.1",
+      "/private/tmp/alyx-native-game-root/game/bin/linuxsteamrtarm64/libSDL2.so",
+      "/private/tmp/alyx-native-game-root/game/bin/linuxsteamrtarm64/libengine2.so",
+      "/private/tmp/alyx-native-game-root/game/bin/linuxsteamrtarm64/libopenvr_api.so",
+      "/private/tmp/alyx-native-game-root/game/bin/linuxsteamrtarm64/libsteam_api.so",
+      "/private/tmp/alyx-native-game-root/game/bin/linuxsteamrtarm64/libv8.so",
+      "/private/tmp/alyx-native-game-root/game/bin/linuxsteamrtarm64/libv8_absl.so",
+      "/private/tmp/alyx-native-game-root/game/bin/linuxsteamrtarm64/libv8_icui18n.so",
+      "/private/tmp/alyx-native-game-root/game/bin/linuxsteamrtarm64/libv8_icuuc.so",
+      "/private/tmp/alyx-native-game-root/game/bin/linuxsteamrtarm64/libv8_libbase.so",
+      "/private/tmp/alyx-native-game-root/game/bin/linuxsteamrtarm64/libv8_libcpp.so",
+      "/private/tmp/alyx-native-game-root/game/bin/linuxsteamrtarm64/libvideo.so",
+      "/private/tmp/alyx-native-game-root/game/hlvr/bin/linuxsteamrtarm64/libclient.so",
+      "/private/tmp/alyx-native-game-root/game/hlvr/bin/linuxsteamrtarm64/libserver.so",
+      "/private/tmp/alyx-panorama-runtime/usr/lib/aarch64-linux-gnu/libcrypto.so.3",
+      "/private/tmp/alyx-panorama-runtime/usr/lib/aarch64-linux-gnu/libogg.so.0.8.5",
+      "/private/tmp/alyx-panorama-runtime/usr/lib/aarch64-linux-gnu/libssl.so.3",
+      "/private/tmp/alyx-zstd-runtime/usr/lib/aarch64-linux-gnu/libzstd.so.1.5.7"
+    ],
+    "libm.so.6": [
+      "/private/tmp/alyx-font-runtime/usr/lib/aarch64-linux-gnu/libbrotlienc.so.1.1.0",
+      "/private/tmp/alyx-font-runtime/usr/lib/aarch64-linux-gnu/libglib-2.0.so.0.8400.4",
+      "/private/tmp/alyx-font-runtime/usr/lib/aarch64-linux-gnu/libpng16.so.16.48.0",
+      "/private/tmp/alyx-icu67-runtime/usr/lib/aarch64-linux-gnu/libicui18n.so.67.1",
+      "/private/tmp/alyx-icu67-runtime/usr/lib/aarch64-linux-gnu/libicuuc.so.67.1",
+      "/private/tmp/alyx-lua-gnu-runtime/usr/lib/aarch64-linux-gnu/libstdc++.so.6.0.33",
+      "/private/tmp/alyx-native-game-root/game/bin/linuxsteamrtarm64/libSDL2.so",
+      "/private/tmp/alyx-native-game-root/game/bin/linuxsteamrtarm64/libanimationsystem.so",
+      "/private/tmp/alyx-native-game-root/game/bin/linuxsteamrtarm64/libavcodec.so",
+      "/private/tmp/alyx-native-game-root/game/bin/linuxsteamrtarm64/libavcodec.so.58.91.100",
+      "/private/tmp/alyx-native-game-root/game/bin/linuxsteamrtarm64/libavformat.so",
+      "/private/tmp/alyx-native-game-root/game/bin/linuxsteamrtarm64/libavformat.so.58.45.100",
+      "/private/tmp/alyx-native-game-root/game/bin/linuxsteamrtarm64/libavresample.so",
+      "/private/tmp/alyx-native-game-root/game/bin/linuxsteamrtarm64/libavresample.so.4.0.0",
+      "/private/tmp/alyx-native-game-root/game/bin/linuxsteamrtarm64/libavutil.so",
+      "/private/tmp/alyx-native-game-root/game/bin/linuxsteamrtarm64/libavutil.so.56.51.100",
+      "/private/tmp/alyx-native-game-root/game/bin/linuxsteamrtarm64/libengine2.so",
+      "/private/tmp/alyx-native-game-root/game/bin/linuxsteamrtarm64/libharfbuzz-subset.so.0.61010.0",
+      "/private/tmp/alyx-native-game-root/game/bin/linuxsteamrtarm64/libharfbuzz.so.0.61010.0",
+      "/private/tmp/alyx-native-game-root/game/bin/linuxsteamrtarm64/libmaterialsystem2.so",
+      "/private/tmp/alyx-native-game-root/game/bin/linuxsteamrtarm64/libmeshsystem.so",
+      "/private/tmp/alyx-native-game-root/game/bin/linuxsteamrtarm64/libmpg123_hlvr.so.0",
+      "/private/tmp/alyx-native-game-root/game/bin/linuxsteamrtarm64/libnetworksystem.so",
+      "/private/tmp/alyx-native-game-root/game/bin/linuxsteamrtarm64/libopenvr_api.so",
+      "/private/tmp/alyx-native-game-root/game/bin/linuxsteamrtarm64/libpango-1.0.so.0.5102.0",
+      "/private/tmp/alyx-native-game-root/game/bin/linuxsteamrtarm64/libpanorama.so",
+      "/private/tmp/alyx-native-game-root/game/bin/linuxsteamrtarm64/libparticles.so",
+      "/private/tmp/alyx-native-game-root/game/bin/linuxsteamrtarm64/libphonon.so",
+      "/private/tmp/alyx-native-game-root/game/bin/linuxsteamrtarm64/librenderingpipelines.so",
+      "/private/tmp/alyx-native-game-root/game/bin/linuxsteamrtarm64/librendersystemempty.so",
+      "/private/tmp/alyx-native-game-root/game/bin/linuxsteamrtarm64/librendersystemgl.so",
+      "/private/tmp/alyx-native-game-root/game/bin/linuxsteamrtarm64/librendersystemvulkan.so",
+      "/private/tmp/alyx-native-game-root/game/bin/linuxsteamrtarm64/libresourcesystem.so",
+      "/private/tmp/alyx-native-game-root/game/bin/linuxsteamrtarm64/libscenesystem.so",
+      "/private/tmp/alyx-native-game-root/game/bin/linuxsteamrtarm64/libschemasystem.so",
+      "/private/tmp/alyx-native-game-root/game/bin/linuxsteamrtarm64/libsoundsystem.so",
+      "/private/tmp/alyx-native-game-root/game/bin/linuxsteamrtarm64/libsteamaudio.so",
+      "/private/tmp/alyx-native-game-root/game/bin/linuxsteamrtarm64/libswscale.so",
+      "/private/tmp/alyx-native-game-root/game/bin/linuxsteamrtarm64/libswscale.so.5.7.100",
+      "/private/tmp/alyx-native-game-root/game/bin/linuxsteamrtarm64/libtier0.so",
+      "/private/tmp/alyx-native-game-root/game/bin/linuxsteamrtarm64/libv8.so",
+      "/private/tmp/alyx-native-game-root/game/bin/linuxsteamrtarm64/libv8_absl.so",
+      "/private/tmp/alyx-native-game-root/game/bin/linuxsteamrtarm64/libv8_icui18n.so",
+      "/private/tmp/alyx-native-game-root/game/bin/linuxsteamrtarm64/libv8_icuuc.so",
+      "/private/tmp/alyx-native-game-root/game/bin/linuxsteamrtarm64/libv8_libbase.so",
+      "/private/tmp/alyx-native-game-root/game/bin/linuxsteamrtarm64/libvguirendersurface.so",
+      "/private/tmp/alyx-native-game-root/game/bin/linuxsteamrtarm64/libvideo.so",
+      "/private/tmp/alyx-native-game-root/game/bin/linuxsteamrtarm64/libvorbis.so",
+      "/private/tmp/alyx-native-game-root/game/bin/linuxsteamrtarm64/libvorbis.so.0",
+      "/private/tmp/alyx-native-game-root/game/bin/linuxsteamrtarm64/libvphysics2.so",
+      "/private/tmp/alyx-native-game-root/game/bin/linuxsteamrtarm64/libvpx.so",
+      "/private/tmp/alyx-native-game-root/game/bin/linuxsteamrtarm64/libvpx.so.6",
+      "/private/tmp/alyx-native-game-root/game/bin/linuxsteamrtarm64/libvr.so",
+      "/private/tmp/alyx-native-game-root/game/bin/linuxsteamrtarm64/libvscript.so",
+      "/private/tmp/alyx-native-game-root/game/bin/linuxsteamrtarm64/libvstdlib.so",
+      "/private/tmp/alyx-native-game-root/game/bin/linuxsteamrtarm64/libworldrenderer.so",
+      "/private/tmp/alyx-native-game-root/game/hlvr/bin/linuxsteamrtarm64/libclient.so",
+      "/private/tmp/alyx-native-game-root/game/hlvr/bin/linuxsteamrtarm64/libhost.so",
+      "/private/tmp/alyx-native-game-root/game/hlvr/bin/linuxsteamrtarm64/libserver.so"
+    ],
+    "libpthread.so.0": [
+      "/private/tmp/alyx-icu67-runtime/usr/lib/aarch64-linux-gnu/libicutu.so.67.1",
+      "/private/tmp/alyx-icu67-runtime/usr/lib/aarch64-linux-gnu/libicuuc.so.67.1",
+      "/private/tmp/alyx-native-game-root/game/bin/linuxsteamrtarm64/libavcodec.so",
+      "/private/tmp/alyx-native-game-root/game/bin/linuxsteamrtarm64/libavcodec.so.58.91.100",
+      "/private/tmp/alyx-native-game-root/game/bin/linuxsteamrtarm64/libavformat.so",
+      "/private/tmp/alyx-native-game-root/game/bin/linuxsteamrtarm64/libavformat.so.58.45.100",
+      "/private/tmp/alyx-native-game-root/game/bin/linuxsteamrtarm64/libavutil.so",
+      "/private/tmp/alyx-native-game-root/game/bin/linuxsteamrtarm64/libavutil.so.56.51.100",
+      "/private/tmp/alyx-native-game-root/game/bin/linuxsteamrtarm64/libfontconfig.so.1.14.0",
+      "/private/tmp/alyx-native-game-root/game/bin/linuxsteamrtarm64/libharfbuzz.so.0.61010.0",
+      "/private/tmp/alyx-native-game-root/game/bin/linuxsteamrtarm64/libopenvr_api.so",
+      "/private/tmp/alyx-native-game-root/game/bin/linuxsteamrtarm64/libsteam_api.so",
+      "/private/tmp/alyx-native-game-root/game/bin/linuxsteamrtarm64/libv8.so",
+      "/private/tmp/alyx-native-game-root/game/bin/linuxsteamrtarm64/libv8_absl.so",
+      "/private/tmp/alyx-native-game-root/game/bin/linuxsteamrtarm64/libv8_icuuc.so",
+      "/private/tmp/alyx-native-game-root/game/bin/linuxsteamrtarm64/libv8_libbase.so",
+      "/private/tmp/alyx-native-game-root/game/bin/linuxsteamrtarm64/libv8_libcpp.so",
+      "/private/tmp/alyx-native-game-root/game/bin/linuxsteamrtarm64/libv8_zlib.so",
+      "/private/tmp/alyx-native-game-root/game/bin/linuxsteamrtarm64/libvideo.so",
+      "/private/tmp/alyx-native-game-root/game/bin/linuxsteamrtarm64/libvpx.so",
+      "/private/tmp/alyx-native-game-root/game/bin/linuxsteamrtarm64/libvpx.so.6"
+    ],
+    "libdl.so.2": [
+      "/private/tmp/alyx-icu67-runtime/usr/lib/aarch64-linux-gnu/libicuuc.so.67.1",
+      "/private/tmp/alyx-native-game-root/game/bin/linuxsteamrtarm64/libopenvr_api.so",
+      "/private/tmp/alyx-native-game-root/game/bin/linuxsteamrtarm64/libsteam_api.so",
+      "/private/tmp/alyx-native-game-root/game/bin/linuxsteamrtarm64/libv8_libbase.so",
+      "/private/tmp/alyx-native-game-root/game/bin/linuxsteamrtarm64/libvideo.so"
+    ],
+    "libdrm.so.2": [
+      "/private/tmp/alyx-native-game-root/game/bin/linuxsteamrtarm64/libavutil.so",
+      "/private/tmp/alyx-native-game-root/game/bin/linuxsteamrtarm64/libavutil.so.56.51.100"
+    ],
+    "libX11.so.6": [
+      "/private/tmp/alyx-native-game-root/game/bin/linuxsteamrtarm64/libpanorama.so",
+      "/private/tmp/alyx-native-game-root/game/bin/linuxsteamrtarm64/libvconcomm.so"
+    ],
+    "libudev.so.1": [
+      "/private/tmp/alyx-native-game-root/game/bin/linuxsteamrtarm64/librendersystemgl.so"
+    ],
+    "libxcb.so.1": [
+      "/private/tmp/alyx-native-game-root/game/bin/linuxsteamrtarm64/librendersystemvulkan.so"
+    ],
+    "librt.so.1": [
+      "/private/tmp/alyx-native-game-root/game/bin/linuxsteamrtarm64/libvideo.so"
+    ]
+  },
+  "needed": {
+    "/private/tmp/alyx-engine-uuid-runtime/usr/lib/aarch64-linux-gnu/libuuid.so.1.3.0": [
+      "libc.so.6",
+      "ld-linux-aarch64.so.1"
+    ],
+    "/private/tmp/alyx-font-runtime/usr/lib/aarch64-linux-gnu/libblkid.so.1.1.0": [
+      "libc.so.6",
+      "ld-linux-aarch64.so.1"
+    ],
+    "/private/tmp/alyx-font-runtime/usr/lib/aarch64-linux-gnu/libbrotlicommon.so.1.1.0": [
+      "libc.so.6"
+    ],
+    "/private/tmp/alyx-font-runtime/usr/lib/aarch64-linux-gnu/libbrotlidec.so.1.1.0": [
+      "libbrotlicommon.so.1",
+      "libc.so.6",
+      "ld-linux-aarch64.so.1"
+    ],
+    "/private/tmp/alyx-font-runtime/usr/lib/aarch64-linux-gnu/libbrotlienc.so.1.1.0": [
+      "libm.so.6",
+      "libbrotlicommon.so.1",
+      "libc.so.6",
+      "ld-linux-aarch64.so.1"
+    ],
+    "/private/tmp/alyx-font-runtime/usr/lib/aarch64-linux-gnu/libbz2.so.1.0.4": [
+      "libc.so.6",
+      "ld-linux-aarch64.so.1"
+    ],
+    "/private/tmp/alyx-font-runtime/usr/lib/aarch64-linux-gnu/libexpat.so.1.12.3": [
+      "libc.so.6",
+      "ld-linux-aarch64.so.1"
+    ],
+    "/private/tmp/alyx-font-runtime/usr/lib/aarch64-linux-gnu/libexpatw.so.1.12.3": [
+      "libc.so.6",
+      "ld-linux-aarch64.so.1"
+    ],
+    "/private/tmp/alyx-font-runtime/usr/lib/aarch64-linux-gnu/libffi.so.8.1.4": [
+      "libc.so.6",
+      "ld-linux-aarch64.so.1"
+    ],
+    "/private/tmp/alyx-font-runtime/usr/lib/aarch64-linux-gnu/libfribidi.so.0.4.0": [
+      "libc.so.6",
+      "ld-linux-aarch64.so.1"
+    ],
+    "/private/tmp/alyx-font-runtime/usr/lib/aarch64-linux-gnu/libgio-2.0.so.0.8400.4": [
+      "libglib-2.0.so.0",
+      "libgobject-2.0.so.0",
+      "libgmodule-2.0.so.0",
+      "libz.so.1",
+      "libmount.so.1",
+      "libselinux.so.1",
+      "libc.so.6",
+      "ld-linux-aarch64.so.1"
+    ],
+    "/private/tmp/alyx-font-runtime/usr/lib/aarch64-linux-gnu/libglib-2.0.so.0.8400.4": [
+      "libatomic.so.1",
+      "libm.so.6",
+      "libpcre2-8.so.0",
+      "libc.so.6",
+      "ld-linux-aarch64.so.1"
+    ],
+    "/private/tmp/alyx-font-runtime/usr/lib/aarch64-linux-gnu/libgmodule-2.0.so.0.8400.4": [
+      "libglib-2.0.so.0",
+      "libc.so.6",
+      "ld-linux-aarch64.so.1"
+    ],
+    "/private/tmp/alyx-font-runtime/usr/lib/aarch64-linux-gnu/libgobject-2.0.so.0.8400.4": [
+      "libglib-2.0.so.0",
+      "libffi.so.8",
+      "libc.so.6",
+      "ld-linux-aarch64.so.1"
+    ],
+    "/private/tmp/alyx-font-runtime/usr/lib/aarch64-linux-gnu/libgthread-2.0.so.0.8400.4": [
+      "libglib-2.0.so.0",
+      "libc.so.6"
+    ],
+    "/private/tmp/alyx-font-runtime/usr/lib/aarch64-linux-gnu/libmount.so.1.1.0": [
+      "libblkid.so.1",
+      "libselinux.so.1",
+      "libc.so.6",
+      "ld-linux-aarch64.so.1"
+    ],
+    "/private/tmp/alyx-font-runtime/usr/lib/aarch64-linux-gnu/libpcre2-8.so.0.14.0": [
+      "libc.so.6",
+      "ld-linux-aarch64.so.1"
+    ],
+    "/private/tmp/alyx-font-runtime/usr/lib/aarch64-linux-gnu/libpng16.so.16.48.0": [
+      "libz.so.1",
+      "libm.so.6",
+      "libc.so.6",
+      "ld-linux-aarch64.so.1"
+    ],
+    "/private/tmp/alyx-font-runtime/usr/lib/aarch64-linux-gnu/libselinux.so.1": [
+      "libpcre2-8.so.0",
+      "libc.so.6",
+      "ld-linux-aarch64.so.1"
+    ],
+    "/private/tmp/alyx-font-runtime/usr/lib/aarch64-linux-gnu/libz.so.1.3.1": [
+      "libc.so.6",
+      "ld-linux-aarch64.so.1"
+    ],
+    "/private/tmp/alyx-icu67-runtime/usr/lib/aarch64-linux-gnu/libicudata.so.67.1": [],
+    "/private/tmp/alyx-icu67-runtime/usr/lib/aarch64-linux-gnu/libicui18n.so.67.1": [
+      "libicuuc.so.67",
+      "libstdc++.so.6",
+      "libm.so.6",
+      "libgcc_s.so.1",
+      "libc.so.6",
+      "ld-linux-aarch64.so.1"
+    ],
+    "/private/tmp/alyx-icu67-runtime/usr/lib/aarch64-linux-gnu/libicuio.so.67.1": [
+      "libicuuc.so.67",
+      "libicui18n.so.67",
+      "libstdc++.so.6",
+      "libgcc_s.so.1",
+      "libc.so.6",
+      "ld-linux-aarch64.so.1"
+    ],
+    "/private/tmp/alyx-icu67-runtime/usr/lib/aarch64-linux-gnu/libicutest.so.67.1": [
+      "libicutu.so.67",
+      "libicuuc.so.67",
+      "libstdc++.so.6",
+      "libgcc_s.so.1",
+      "libc.so.6",
+      "ld-linux-aarch64.so.1"
+    ],
+    "/private/tmp/alyx-icu67-runtime/usr/lib/aarch64-linux-gnu/libicutu.so.67.1": [
+      "libicui18n.so.67",
+      "libicuuc.so.67",
+      "libpthread.so.0",
+      "libstdc++.so.6",
+      "libgcc_s.so.1",
+      "libc.so.6",
+      "ld-linux-aarch64.so.1"
+    ],
+    "/private/tmp/alyx-icu67-runtime/usr/lib/aarch64-linux-gnu/libicuuc.so.67.1": [
+      "libicudata.so.67",
+      "libpthread.so.0",
+      "libdl.so.2",
+      "libstdc++.so.6",
+      "libm.so.6",
+      "libgcc_s.so.1",
+      "libc.so.6",
+      "ld-linux-aarch64.so.1"
+    ],
+    "/private/tmp/alyx-lua-gnu-runtime/usr/lib/aarch64-linux-gnu/libgcc_s.so.1": [
+      "libc.so.6"
+    ],
+    "/private/tmp/alyx-lua-gnu-runtime/usr/lib/aarch64-linux-gnu/libstdc++.so.6.0.33": [
+      "libm.so.6",
+      "libc.so.6",
+      "libgcc_s.so.1"
+    ],
+    "/private/tmp/alyx-native-game-root/game/bin/linuxsteamrtarm64/libSDL2.so": [
+      "libm.so.6",
+      "libc.so.6",
+      "ld-linux-aarch64.so.1"
+    ],
+    "/private/tmp/alyx-native-game-root/game/bin/linuxsteamrtarm64/libanimationsystem.so": [
+      "libm.so.6",
+      "libstdc++.so.6",
+      "libtier0.so",
+      "libvstdlib.so",
+      "libc.so.6"
+    ],
+    "/private/tmp/alyx-native-game-root/game/bin/linuxsteamrtarm64/libavcodec.so": [
+      "libavutil.so.56",
+      "libvpx.so.6",
+      "libm.so.6",
+      "libpthread.so.0",
+      "libc.so.6"
+    ],
+    "/private/tmp/alyx-native-game-root/game/bin/linuxsteamrtarm64/libavcodec.so.58.91.100": [
+      "libavutil.so.56",
+      "libvpx.so.6",
+      "libm.so.6",
+      "libpthread.so.0",
+      "libc.so.6"
+    ],
+    "/private/tmp/alyx-native-game-root/game/bin/linuxsteamrtarm64/libavformat.so": [
+      "libavcodec.so.58",
+      "libavutil.so.56",
+      "libm.so.6",
+      "libz.so.1",
+      "libpthread.so.0",
+      "libc.so.6"
+    ],
+    "/private/tmp/alyx-native-game-root/game/bin/linuxsteamrtarm64/libavformat.so.58.45.100": [
+      "libavcodec.so.58",
+      "libavutil.so.56",
+      "libm.so.6",
+      "libz.so.1",
+      "libpthread.so.0",
+      "libc.so.6"
+    ],
+    "/private/tmp/alyx-native-game-root/game/bin/linuxsteamrtarm64/libavresample.so": [
+      "libavutil.so.56",
+      "libm.so.6",
+      "libc.so.6"
+    ],
+    "/private/tmp/alyx-native-game-root/game/bin/linuxsteamrtarm64/libavresample.so.4.0.0": [
+      "libavutil.so.56",
+      "libm.so.6",
+      "libc.so.6"
+    ],
+    "/private/tmp/alyx-native-game-root/game/bin/linuxsteamrtarm64/libavutil.so": [
+      "libm.so.6",
+      "libdrm.so.2",
+      "libpthread.so.0",
+      "libc.so.6"
+    ],
+    "/private/tmp/alyx-native-game-root/game/bin/linuxsteamrtarm64/libavutil.so.56.51.100": [
+      "libm.so.6",
+      "libdrm.so.2",
+      "libpthread.so.0",
+      "libc.so.6"
+    ],
+    "/private/tmp/alyx-native-game-root/game/bin/linuxsteamrtarm64/libengine2.so": [
+      "libm.so.6",
+      "libstdc++.so.6",
+      "libuuid.so.1",
+      "ld-linux-aarch64.so.1",
+      "libtier0.so",
+      "libvstdlib.so",
+      "libsteam_api.so",
+      "libc.so.6"
+    ],
+    "/private/tmp/alyx-native-game-root/game/bin/linuxsteamrtarm64/libfilesystem_stdio.so": [
+      "libstdc++.so.6",
+      "libtier0.so",
+      "libvstdlib.so",
+      "libsteam_api.so",
+      "libc.so.6"
+    ],
+    "/private/tmp/alyx-native-game-root/game/bin/linuxsteamrtarm64/libfontconfig.so.1.14.0": [
+      "libfreetype.so.6",
+      "libexpat.so.1",
+      "libpthread.so.0",
+      "libc.so.6"
+    ],
+    "/private/tmp/alyx-native-game-root/game/bin/linuxsteamrtarm64/libfreetype.so.6.20.2": [
+      "libbz2.so.1.0",
+      "libpng16.so.16",
+      "libharfbuzz.so.0",
+      "libbrotlidec.so.1",
+      "libc.so.6"
+    ],
+    "/private/tmp/alyx-native-game-root/game/bin/linuxsteamrtarm64/libharfbuzz-gobject.so.0.61010.0": [
+      "libharfbuzz.so.0",
+      "libglib-2.0.so.0",
+      "libgobject-2.0.so.0",
+      "libc.so.6"
+    ],
+    "/private/tmp/alyx-native-game-root/game/bin/linuxsteamrtarm64/libharfbuzz-icu.so.0.61010.0": [
+      "libharfbuzz.so.0",
+      "libicuuc.so.67",
+      "libc.so.6"
+    ],
+    "/private/tmp/alyx-native-game-root/game/bin/linuxsteamrtarm64/libharfbuzz-subset.so.0.61010.0": [
+      "libharfbuzz.so.0",
+      "libm.so.6",
+      "libc.so.6"
+    ],
+    "/private/tmp/alyx-native-game-root/game/bin/linuxsteamrtarm64/libharfbuzz.so.0.61010.0": [
+      "libm.so.6",
+      "libfreetype.so.6",
+      "libglib-2.0.so.0",
+      "libpthread.so.0",
+      "libc.so.6"
+    ],
+    "/private/tmp/alyx-native-game-root/game/bin/linuxsteamrtarm64/libinputsystem.so": [
+      "libstdc++.so.6",
+      "libtier0.so",
+      "libvstdlib.so",
+      "libc.so.6"
+    ],
+    "/private/tmp/alyx-native-game-root/game/bin/linuxsteamrtarm64/liblocalize.so": [
+      "libstdc++.so.6",
+      "libtier0.so",
+      "libc.so.6"
+    ],
+    "/private/tmp/alyx-native-game-root/game/bin/linuxsteamrtarm64/libmaterialsystem2.so": [
+      "libm.so.6",
+      "libstdc++.so.6",
+      "libtier0.so",
+      "libvstdlib.so",
+      "libc.so.6"
+    ],
+    "/private/tmp/alyx-native-game-root/game/bin/linuxsteamrtarm64/libmeshsystem.so": [
+      "libm.so.6",
+      "libstdc++.so.6",
+      "libtier0.so",
+      "libvstdlib.so",
+      "libc.so.6"
+    ],
+    "/private/tmp/alyx-native-game-root/game/bin/linuxsteamrtarm64/libmpg123_hlvr.so.0": [
+      "libm.so.6",
+      "libc.so.6"
+    ],
+    "/private/tmp/alyx-native-game-root/game/bin/linuxsteamrtarm64/libnetworksystem.so": [
+      "libm.so.6",
+      "libstdc++.so.6",
+      "libtier0.so",
+      "libvstdlib.so",
+      "libsteam_api.so",
+      "libc.so.6"
+    ],
+    "/private/tmp/alyx-native-game-root/game/bin/linuxsteamrtarm64/libopenvr_api.so": [
+      "libdl.so.2",
+      "ld-linux-aarch64.so.1",
+      "libpthread.so.0",
+      "libstdc++.so.6",
+      "libm.so.6",
+      "libc.so.6"
+    ],
+    "/private/tmp/alyx-native-game-root/game/bin/linuxsteamrtarm64/libpango-1.0.so.0.5102.0": [
+      "libm.so.6",
+      "libglib-2.0.so.0",
+      "libgobject-2.0.so.0",
+      "libgio-2.0.so.0",
+      "libfribidi.so.0",
+      "libharfbuzz.so.0",
+      "libc.so.6"
+    ],
+    "/private/tmp/alyx-native-game-root/game/bin/linuxsteamrtarm64/libpangoft2-1.0.so.0.5102.0": [
+      "libpango-1.0.so.0",
+      "libglib-2.0.so.0",
+      "libgobject-2.0.so.0",
+      "libgio-2.0.so.0",
+      "libharfbuzz.so.0",
+      "libfontconfig.so.1",
+      "libfreetype.so.6",
+      "libc.so.6"
+    ],
+    "/private/tmp/alyx-native-game-root/game/bin/linuxsteamrtarm64/libpanorama.so": [
+      "libm.so.6",
+      "libstdc++.so.6",
+      "libssl.so.3",
+      "libcrypto.so.3",
+      "libSDL2.so",
+      "libX11.so.6",
+      "libtier0.so",
+      "libvstdlib.so",
+      "libvideo.so",
+      "libsteam_api.so",
+      "libv8_libplatform.so",
+      "libv8.so",
+      "libc.so.6"
+    ],
+    "/private/tmp/alyx-native-game-root/game/bin/linuxsteamrtarm64/libpanorama_text_pango.so": [
+      "libstdc++.so.6",
+      "libssl.so.3",
+      "libcrypto.so.3",
+      "libtier0.so",
+      "libvstdlib.so",
+      "libc.so.6"
+    ],
+    "/private/tmp/alyx-native-game-root/game/bin/linuxsteamrtarm64/libparticles.so": [
+      "libm.so.6",
+      "libstdc++.so.6",
+      "libtier0.so",
+      "libvstdlib.so",
+      "libc.so.6"
+    ],
+    "/private/tmp/alyx-native-game-root/game/bin/linuxsteamrtarm64/libphonon.so": [
+      "libz.so.1",
+      "libstdc++.so.6",
+      "libm.so.6",
+      "libgcc_s.so.1",
+      "libc.so.6"
+    ],
+    "/private/tmp/alyx-native-game-root/game/bin/linuxsteamrtarm64/librenderingpipelines.so": [
+      "libm.so.6",
+      "libstdc++.so.6",
+      "libtier0.so",
+      "libvstdlib.so",
+      "libc.so.6"
+    ],
+    "/private/tmp/alyx-native-game-root/game/bin/linuxsteamrtarm64/librendersystemempty.so": [
+      "libm.so.6",
+      "libstdc++.so.6",
+      "libtier0.so",
+      "libvstdlib.so",
+      "libc.so.6"
+    ],
+    "/private/tmp/alyx-native-game-root/game/bin/linuxsteamrtarm64/librendersystemgl.so": [
+      "libm.so.6",
+      "libstdc++.so.6",
+      "libudev.so.1",
+      "libtier0.so",
+      "libvstdlib.so",
+      "libSDL2.so",
+      "libc.so.6"
+    ],
+    "/private/tmp/alyx-native-game-root/game/bin/linuxsteamrtarm64/librendersystemvulkan.so": [
+      "libm.so.6",
+      "libstdc++.so.6",
+      "libxcb.so.1",
+      "libtier0.so",
+      "libvstdlib.so",
+      "libc.so.6"
+    ],
+    "/private/tmp/alyx-native-game-root/game/bin/linuxsteamrtarm64/libresourcesystem.so": [
+      "libm.so.6",
+      "libstdc++.so.6",
+      "libtier0.so",
+      "libvstdlib.so",
+      "libc.so.6"
+    ],
+    "/private/tmp/alyx-native-game-root/game/bin/linuxsteamrtarm64/libscenefilecache.so": [
+      "libstdc++.so.6",
+      "libtier0.so",
+      "libvstdlib.so",
+      "libc.so.6"
+    ],
+    "/private/tmp/alyx-native-game-root/game/bin/linuxsteamrtarm64/libscenesystem.so": [
+      "libm.so.6",
+      "libstdc++.so.6",
+      "libtier0.so",
+      "libvstdlib.so",
+      "libc.so.6"
+    ],
+    "/private/tmp/alyx-native-game-root/game/bin/linuxsteamrtarm64/libschemasystem.so": [
+      "libm.so.6",
+      "libstdc++.so.6",
+      "libtier0.so",
+      "libvstdlib.so",
+      "libc.so.6"
+    ],
+    "/private/tmp/alyx-native-game-root/game/bin/linuxsteamrtarm64/libsoundsystem.so": [
+      "libm.so.6",
+      "libstdc++.so.6",
+      "libtier0.so",
+      "libvstdlib.so",
+      "libc.so.6"
+    ],
+    "/private/tmp/alyx-native-game-root/game/bin/linuxsteamrtarm64/libsteam_api.so": [
+      "libdl.so.2",
+      "ld-linux-aarch64.so.1",
+      "libpthread.so.0",
+      "libc.so.6"
+    ],
+    "/private/tmp/alyx-native-game-root/game/bin/linuxsteamrtarm64/libsteamaudio.so": [
+      "libm.so.6",
+      "libstdc++.so.6",
+      "libtier0.so",
+      "libvstdlib.so",
+      "libphonon.so",
+      "libc.so.6"
+    ],
+    "/private/tmp/alyx-native-game-root/game/bin/linuxsteamrtarm64/libswscale.so": [
+      "libavutil.so.56",
+      "libm.so.6",
+      "libc.so.6"
+    ],
+    "/private/tmp/alyx-native-game-root/game/bin/linuxsteamrtarm64/libswscale.so.5.7.100": [
+      "libavutil.so.56",
+      "libm.so.6",
+      "libc.so.6"
+    ],
+    "/private/tmp/alyx-native-game-root/game/bin/linuxsteamrtarm64/libtier0.so": [
+      "libm.so.6",
+      "libstdc++.so.6",
+      "libc.so.6"
+    ],
+    "/private/tmp/alyx-native-game-root/game/bin/linuxsteamrtarm64/libv8.so": [
+      "libv8_libbase.so",
+      "libv8_icui18n.so",
+      "libv8_icuuc.so",
+      "libv8_zlib.so",
+      "libv8_libcpp.so",
+      "libpthread.so.0",
+      "libm.so.6",
+      "libc.so.6",
+      "ld-linux-aarch64.so.1"
+    ],
+    "/private/tmp/alyx-native-game-root/game/bin/linuxsteamrtarm64/libv8_absl.so": [
+      "libv8_libcpp.so",
+      "libpthread.so.0",
+      "libm.so.6",
+      "libgcc_s.so.1",
+      "libc.so.6",
+      "ld-linux-aarch64.so.1"
+    ],
+    "/private/tmp/alyx-native-game-root/game/bin/linuxsteamrtarm64/libv8_icui18n.so": [
+      "libv8_icuuc.so",
+      "libv8_libcpp.so",
+      "libm.so.6",
+      "libc.so.6",
+      "ld-linux-aarch64.so.1"
+    ],
+    "/private/tmp/alyx-native-game-root/game/bin/linuxsteamrtarm64/libv8_icuuc.so": [
+      "libv8_libcpp.so",
+      "libpthread.so.0",
+      "libm.so.6",
+      "libc.so.6",
+      "ld-linux-aarch64.so.1"
+    ],
+    "/private/tmp/alyx-native-game-root/game/bin/linuxsteamrtarm64/libv8_libbase.so": [
+      "libv8_libcpp.so",
+      "libdl.so.2",
+      "libpthread.so.0",
+      "libm.so.6",
+      "libc.so.6",
+      "ld-linux-aarch64.so.1"
+    ],
+    "/private/tmp/alyx-native-game-root/game/bin/linuxsteamrtarm64/libv8_libcpp.so": [
+      "libpthread.so.0",
+      "libgcc_s.so.1",
+      "libc.so.6",
+      "ld-linux-aarch64.so.1"
+    ],
+    "/private/tmp/alyx-native-game-root/game/bin/linuxsteamrtarm64/libv8_libplatform.so": [
+      "libv8_libbase.so",
+      "libv8_libcpp.so",
+      "libc.so.6"
+    ],
+    "/private/tmp/alyx-native-game-root/game/bin/linuxsteamrtarm64/libv8_zlib.so": [
+      "libpthread.so.0",
+      "libc.so.6"
+    ],
+    "/private/tmp/alyx-native-game-root/game/bin/linuxsteamrtarm64/libvconcomm.so": [
+      "libstdc++.so.6",
+      "libX11.so.6",
+      "libtier0.so",
+      "libc.so.6"
+    ],
+    "/private/tmp/alyx-native-game-root/game/bin/linuxsteamrtarm64/libvgui2.so": [
+      "libstdc++.so.6",
+      "libtier0.so",
+      "libvstdlib.so",
+      "libc.so.6"
+    ],
+    "/private/tmp/alyx-native-game-root/game/bin/linuxsteamrtarm64/libvguirendersurface.so": [
+      "libm.so.6",
+      "libstdc++.so.6",
+      "libuuid.so.1",
+      "libtier0.so",
+      "libvstdlib.so",
+      "libc.so.6"
+    ],
+    "/private/tmp/alyx-native-game-root/game/bin/linuxsteamrtarm64/libvideo.so": [
+      "libdl.so.2",
+      "librt.so.1",
+      "ld-linux-aarch64.so.1",
+      "libavcodec.so.58",
+      "libavformat.so.58",
+      "libavresample.so.4",
+      "libavutil.so.56",
+      "libswscale.so.5",
+      "libm.so.6",
+      "libpthread.so.0",
+      "libc.so.6"
+    ],
+    "/private/tmp/alyx-native-game-root/game/bin/linuxsteamrtarm64/libvorbis.so": [
+      "libm.so.6",
+      "libogg.so.0",
+      "libc.so.6"
+    ],
+    "/private/tmp/alyx-native-game-root/game/bin/linuxsteamrtarm64/libvorbis.so.0": [
+      "libm.so.6",
+      "libogg.so.0",
+      "libc.so.6"
+    ],
+    "/private/tmp/alyx-native-game-root/game/bin/linuxsteamrtarm64/libvorbisenc.so": [
+      "libvorbis.so.0",
+      "libc.so.6"
+    ],
+    "/private/tmp/alyx-native-game-root/game/bin/linuxsteamrtarm64/libvorbisenc.so.2": [
+      "libvorbis.so.0",
+      "libc.so.6"
+    ],
+    "/private/tmp/alyx-native-game-root/game/bin/linuxsteamrtarm64/libvorbisfile.so": [
+      "libvorbis.so.0",
+      "libogg.so.0",
+      "libc.so.6"
+    ],
+    "/private/tmp/alyx-native-game-root/game/bin/linuxsteamrtarm64/libvorbisfile.so.3": [
+      "libvorbis.so.0",
+      "libogg.so.0",
+      "libc.so.6"
+    ],
+    "/private/tmp/alyx-native-game-root/game/bin/linuxsteamrtarm64/libvphysics2.so": [
+      "libm.so.6",
+      "libstdc++.so.6",
+      "libtier0.so",
+      "libvstdlib.so",
+      "libc.so.6"
+    ],
+    "/private/tmp/alyx-native-game-root/game/bin/linuxsteamrtarm64/libvpx.so": [
+      "libpthread.so.0",
+      "libm.so.6",
+      "libc.so.6"
+    ],
+    "/private/tmp/alyx-native-game-root/game/bin/linuxsteamrtarm64/libvpx.so.6": [
+      "libpthread.so.0",
+      "libm.so.6",
+      "libc.so.6"
+    ],
+    "/private/tmp/alyx-native-game-root/game/bin/linuxsteamrtarm64/libvr.so": [
+      "libm.so.6",
+      "libstdc++.so.6",
+      "libtier0.so",
+      "libvstdlib.so",
+      "libopenvr_api.so",
+      "libc.so.6"
+    ],
+    "/private/tmp/alyx-native-game-root/game/bin/linuxsteamrtarm64/libvscript.so": [
+      "libm.so.6",
+      "libstdc++.so.6",
+      "libtier0.so",
+      "libvstdlib.so",
+      "libc.so.6"
+    ],
+    "/private/tmp/alyx-native-game-root/game/bin/linuxsteamrtarm64/libvstdlib.so": [
+      "libm.so.6",
+      "libstdc++.so.6",
+      "libtier0.so",
+      "libc.so.6"
+    ],
+    "/private/tmp/alyx-native-game-root/game/bin/linuxsteamrtarm64/libworldrenderer.so": [
+      "libm.so.6",
+      "libstdc++.so.6",
+      "libtier0.so",
+      "libvstdlib.so",
+      "libc.so.6"
+    ],
+    "/private/tmp/alyx-native-game-root/game/hlvr/bin/linuxsteamrtarm64/libclient.so": [
+      "libm.so.6",
+      "libstdc++.so.6",
+      "libuuid.so.1",
+      "ld-linux-aarch64.so.1",
+      "libtier0.so",
+      "libvstdlib.so",
+      "libvideo.so",
+      "libsteam_api.so",
+      "libv8.so",
+      "libc.so.6"
+    ],
+    "/private/tmp/alyx-native-game-root/game/hlvr/bin/linuxsteamrtarm64/libhost.so": [
+      "libm.so.6",
+      "libstdc++.so.6",
+      "libtier0.so",
+      "libvstdlib.so",
+      "libc.so.6"
+    ],
+    "/private/tmp/alyx-native-game-root/game/hlvr/bin/linuxsteamrtarm64/libserver.so": [
+      "libm.so.6",
+      "libstdc++.so.6",
+      "ld-linux-aarch64.so.1",
+      "libtier0.so",
+      "libvstdlib.so",
+      "libsteam_api.so",
+      "libc.so.6"
+    ],
+    "/private/tmp/alyx-panorama-runtime/usr/lib/aarch64-linux-gnu/libatomic.so.1.2.0": [
+      "libc.so.6"
+    ],
+    "/private/tmp/alyx-panorama-runtime/usr/lib/aarch64-linux-gnu/libcrypto.so.3": [
+      "libz.so.1",
+      "libzstd.so.1",
+      "libc.so.6",
+      "ld-linux-aarch64.so.1"
+    ],
+    "/private/tmp/alyx-panorama-runtime/usr/lib/aarch64-linux-gnu/libogg.so.0.8.5": [
+      "libc.so.6",
+      "ld-linux-aarch64.so.1"
+    ],
+    "/private/tmp/alyx-panorama-runtime/usr/lib/aarch64-linux-gnu/libssl.so.3": [
+      "libcrypto.so.3",
+      "libc.so.6",
+      "ld-linux-aarch64.so.1"
+    ],
+    "/private/tmp/alyx-zstd-runtime/usr/lib/aarch64-linux-gnu/libzstd.so.1.5.7": [
+      "libc.so.6",
+      "ld-linux-aarch64.so.1"
+    ]
+  },
+  "scope": "Static packaging audit only; no ELF code, constructors or entry points executed."
+}

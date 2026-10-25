@@ -1,0 +1,30 @@
+{
+  "date": "2026-10-19",
+  "host": "M5 MacBook Air, macOS 26.7.1 25G241, Xcode 27.1 27A9275",
+  "sources": {
+    "monado": "914b89368efd1fe401fede1a211c61f01d794753",
+    "xrizer": "4c5dc1418e431f9b33974e198177f15c72030776",
+    "klepton": "debda5ff48a2a7265c5b4522bae9b0a40c671071",
+    "verantyx": "4c354a63bba2bcfb61f6ce7de25e9f9c22cd095e",
+    "mesa": "0913fce718feb08571529f1ca97ebf05d1df634a"
+  },
+  "hashes": {
+    "benchmark.jsonl": "ef37ae2e8f2b03ac102b5454bb885cf78641030df4257d021ba982f975aff234",
+    "metal-import.log": "27a1abfc3753fc9fcabe5e04d91a081d34dfd42fb127bd74ba3cb19d19ef0df4",
+    "metal-rate-map.log": "d889fc781d6c7953bedfea4839cb39e196f2bd83845415b646275c72c730eddb",
+    "xrizer-kk-failure.log": "3497b09ccb117c72a514d807c2e529b5e2a4a26d7535ab01753e9dc0438d6167",
+    "benchmark-summary.json": "b0a9724e71a945fe4a073a35395a184b84311f9b304e6c7223a12aaa057705e0",
+    "klepton-kk.log": "6d414e4d04aa3639408ca4a3b98c6ac547e805cf1abb3e3bb1f33a017d03ad9b",
+    "monado-ctest.log": "4f7eb945394f48ad3c520fbae92ecd5cf2c4672e2cd9a3d58e19985e35e0673c",
+    "metal-import-peer.log": "c0c6b1cec41e0235dcd07c1068ced027c285119eef724e2520aa287a3212feda",
+    "native-array.log": "ee9acb52395dcee6209d27f6060fc443e34e860c2767e622a9126aa8f307a0b2",
+    "kosmickrisp-driver.log": "95a790be03e5f3f1a083da9318c59292b2b61f183aa28b373f57aee9a4254732",
+    "klepton-mvk.log": "8c265d6f98cf8a5ee35eb563dcb50257e725571d19067271a6a6c73dec8ca492",
+    "xrizer-tests.log": "300cf85ac58a5d113c4ce3609cdbb910ecbd077abc9c3e866b55f47a40317b94",
+    "klepton-missing.log": "f57fc0039f22a10494a7de247cb8aa5bbf45785d883de8c971a09ecd5e4a7583",
+    "xrizer-adapter.log": "116e660cc4f75246d58d314eb8b750e5ee719584f60d4f8c2a72b52484df1ce2",
+    "xrizer-mvk.log": "352c48a3225b7963f5d7575d255c56375128d09ae66bdd35417eaf70bcc8e924",
+    "moltenvk-driver.log": "58b5cf644f5ff2788646fce370574500ed0ab9646b145f6ba158b786612480ad",
+    "selection-negative.json": "8cdf69b82f2875c1f6d5fd4e7ee3bd8116d1ce66f274dd1166ec93e1a39c7a12"
+  }
+}

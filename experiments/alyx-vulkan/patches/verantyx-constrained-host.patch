@@ -1,0 +1,432 @@
+From 63bec846f8e545ea0f71dfac3dec20d00c548a78 Mon Sep 17 00:00:00 2001
+From: Nick Kennedy <nick@nick-kennedy.com>
+Date: Tue, 20 Oct 2026 00:22:51 +0200
+Subject: [PATCH] host: add gated constrained build and Lua callback fixture
+
+Signed-off-by: Nick Kennedy <nick@nick-kennedy.com>
+---
+ NativeARM/host/Makefile                   | 36 ++++++++++++++-
+ NativeARM/host/XRIZER.md                  | 47 +++++++++++++++++++
+ NativeARM/host/alyx_host.c                | 25 +++++++++-
+ NativeARM/host/kl_glibc.c                 |  5 +-
+ NativeARM/host/kl_lua_builtin.c           | 26 +++++++++++
+ NativeARM/host/kl_lua_builtin.h           |  3 ++
+ NativeARM/host/kl_thread_probe.c          | 20 ++++++++
+ NativeARM/host/kl_thread_probe.h          |  4 ++
+ NativeARM/host/tests/check_constrained.py | 24 ++++++++++
+ NativeARM/host/tests/lua_builtin.c        | 42 +++++++++++++++++
+ NativeARM/host/tests/thread_probe.c       | 56 +++++++++++++++++++++++
+ 11 files changed, 283 insertions(+), 5 deletions(-)
+ create mode 100644 NativeARM/host/kl_lua_builtin.c
+ create mode 100644 NativeARM/host/kl_lua_builtin.h
+ create mode 100644 NativeARM/host/kl_thread_probe.c
+ create mode 100644 NativeARM/host/kl_thread_probe.h
+ create mode 100644 NativeARM/host/tests/check_constrained.py
+ create mode 100644 NativeARM/host/tests/lua_builtin.c
+ create mode 100644 NativeARM/host/tests/thread_probe.c
+
+diff --git a/NativeARM/host/Makefile b/NativeARM/host/Makefile
+index 3479d81..7fad4ca 100644
+--- a/NativeARM/host/Makefile
++++ b/NativeARM/host/Makefile
+@@ -21,7 +21,15 @@ LDLIBS := -lz -lresolv -liconv -framework AudioToolbox -framework CoreAudio \
+           -framework CoreFoundation -framework AVFoundation -framework Foundation
+ 
+ RT_OBJS   := $(patsubst %,$(OUT)/kl/%.o,$(RUNTIME))
+-HOST_SRCS := alyx_host.c kl_glibc.c kl_glibc_va.S kl_enginelog.c kl_sdlshim.c kl_steambridge.c kl_luafix.c kl_sdlaudio.c kl_guestfix.c
++HOST_SRCS := alyx_host.c kl_thread_probe.c kl_glibc.c kl_glibc_va.S kl_enginelog.c kl_sdlshim.c kl_steambridge.c kl_luafix.c kl_sdlaudio.c kl_guestfix.c
++# Separate output directories are required when changing HOST_MODE.
++HOST_MODE ?= legacy
++ifeq ($(HOST_MODE),constrained)
++CFLAGS += -DALYX_CONSTRAINED_HOST=1
++HOST_SRCS := $(filter-out kl_luafix.c kl_guestfix.c,$(HOST_SRCS)) kl_lua_builtin.c
++else ifneq ($(HOST_MODE),legacy)
++$(error HOST_MODE must be legacy or constrained)
++endif
+ HOST_OBJS := $(patsubst %,$(OUT)/%.o,$(HOST_SRCS))
+ # The OpenVR runtime (C++): ../vrruntime.
+ VRRT_DIR  := ../vrruntime
+@@ -67,3 +75,29 @@ clean:
+ 	rm -rf $(OUT)
+ 
+ .PHONY: all probe clean
++
++# Native fixture: no guest loading or Steam dependency.
++check-lua-builtin:
++	@mkdir -p $(OUT)
++	$(CC) $(CFLAGS) -o $(OUT)/check-lua-builtin tests/lua_builtin.c kl_lua_builtin.c -I.
++	$(OUT)/check-lua-builtin
++
++.PHONY: check-lua-builtin
++
++check-thread-probe:
++	@mkdir -p $(OUT)
++	$(CC) $(CFLAGS) -o $(OUT)/check-thread-probe tests/thread_probe.c kl_thread_probe.c -I.
++	$(OUT)/check-thread-probe
++
++.PHONY: check-thread-probe
++
++# Avoid silently reusing objects compiled for the other mode.
++check-host-mode:
++	@mkdir -p $(OUT)
++	@if test -f $(OUT)/.host-mode && test "$$(cat $(OUT)/.host-mode)" != "$(HOST_MODE)"; then \
++	  echo "Use a separate OUT directory for HOST_MODE=$(HOST_MODE)" >&2; exit 2; \
++	fi
++	@echo $(HOST_MODE) > $(OUT)/.host-mode
++
++$(RT_OBJS) $(HOST_OBJS) $(VRRT_OBJS): | check-host-mode
++.PHONY: check-host-mode
+diff --git a/NativeARM/host/XRIZER.md b/NativeARM/host/XRIZER.md
+index 6bac002..2d938db 100644
+--- a/NativeARM/host/XRIZER.md
++++ b/NativeARM/host/XRIZER.md
+@@ -26,3 +26,50 @@ repairs (including LuaJIT and video fixes). A no-game-binary-modification policy
+ therefore blocks using this host as-is: audit/replace these mechanisms first.
+ Steam authentication must still go through the owner's signed-in macOS Steam.
+ No launcher, global registry, Steam account or game content was changed here.
++
++## Constrained host scaffold (20 October 2026)
++
++This opt-in build excludes `kl_luafix.c` and `kl_guestfix.c`. The replacement
++interposes `lua_VALVE_OVERRIDE_MMAP` and passes five null callbacks to the
++image's original setter, selecting Valve Lua's built-in mmap fallback. It
++performs no executable-page writes. Native fixtures test setter binding,
++repeat calls and refusal on a missing image/symbol or recursive binding.
++**They do not execute Valve Lua or validate its allocation lifecycle.**
++
++```sh
++make -C NativeARM/host KL=/private/tmp/alyx-klepton \
++  OUT=/private/tmp/alyx-constrained-host-build VR_RUNTIME=xrizer \
++  HOST_MODE=constrained -j6
++make -C NativeARM/host KL=/private/tmp/alyx-klepton \
++  OUT=/private/tmp/alyx-constrained-host-build VR_RUNTIME=xrizer \
++  HOST_MODE=constrained check-lua-builtin check-thread-probe
++/private/tmp/alyx-constrained-host-build/alyx_host --constrained-check
++python3 NativeARM/host/tests/check_constrained.py \
++  /private/tmp/alyx-constrained-host-build/alyx_host
++```
++
++Use a separate output directory per mode. A `.host-mode` marker rejects mode
++changes once written. `legacy` remains the default. Do not reuse an old output
++directory with no marker when first switching modes; create a new one.
++
++**This is a preflight scaffold, not a runnable constrained game host.** It
++returns status 2 for both `--probe` and `--game` before guest loading or runtime
++setup. No environment variable bypasses the gate. The linked Klepton runtime
++still contains its generic patch table, raw-SVC rewrites and Vulkan semantic
++substitutions; these are unreachable through the scaffold. A future runnable
++mode must explicitly disable/replace them, rather than just removing this gate.
++The legacy build retains its existing behaviour and must not be used as a
++substitute for this audit.
++
++The native thread probe fixture exposed an additional limitation: a joined
++pthread's kernel thread may be retained by macOS, and `proc_pidinfo` still
++reports it alive. Factoring this query into `kl_thread_probe` allows testing
++current/live/terminated Mach thread IDs, but **does not implement Linux guest
++thread-exit semantics**. Correct lifecycle tracking must include guest thread
++creation, return and explicit exit; cross-process `tgkill` and signal errno
++handling also need review. The video patch cannot be declared unnecessary on
++the strength of the existing kernel query.
++
++Still unverified: Valve Lua mmap/mremap growth, shrink, allocation failure,
++47-bit addressing and teardown; page-size handling outside Lua; guest syscall
++translation and actual Alyx/OpenVR/Vulkan calls. No game was launched here.
+diff --git a/NativeARM/host/alyx_host.c b/NativeARM/host/alyx_host.c
+index 17283b5..5789fdc 100644
+--- a/NativeARM/host/alyx_host.c
++++ b/NativeARM/host/alyx_host.c
+@@ -19,7 +19,11 @@
+ #include "kl_fault.h"
+ #include "kl_enginelog.h"
+ #include "kl_sdlshim.h"
++#ifdef ALYX_CONSTRAINED_HOST
++#include "kl_lua_builtin.h"
++#else
+ #include "kl_luafix.h"
++#endif
+ #include "kl_sdlaudio.h"
+ #include "kl_guestfix.h"
+ #include "kl_steambridge.h"
+@@ -129,12 +133,25 @@ int main(int argc, char **argv) {
+     const char *game = NULL;
+     int do_probe = 0, first_lib = 0, engine_args = argc;
+     for (int i = 1; i < argc; i++) {
++#ifdef ALYX_CONSTRAINED_HOST
++        if (!strcmp(argv[i], "--constrained-check") && argc == 2) {
++            puts("constrained build: Lua/video text patch objects excluded; guest execution disabled");
++            return 0;
++        }
++#endif
+         if (!strcmp(argv[i], "--libdir") && i + 1 < argc) g_libdir = argv[++i];
+         else if (!strcmp(argv[i], "--game") && i + 1 < argc) game = argv[++i];
+         else if (!strcmp(argv[i], "--probe")) { do_probe = 1; first_lib = i + 1; break; }
+         else if (!strcmp(argv[i], "--")) { engine_args = i + 1; break; }
+         else { fprintf(stderr, "unknown option %s\n", argv[i]); return 2; }
+     }
++#ifdef ALYX_CONSTRAINED_HOST
++    // Both --probe and gameplay execute guest constructors. Until the loader's
++    // raw-SVC rewriting and Vulkan semantic substitutions are resolved, refuse
++    // both before any guest image, registry, cache or runtime is touched.
++    fprintf(stderr, "constrained host: guest execution blocked pending raw-SVC/ABI and Vulkan semantic audit\n");
++    return 2;
++#endif
+     // The engine's console output goes through the guest's printf to our stdout
+     // and the process ends with _exit(); unbuffered, nothing is lost.
+     setvbuf(stdout, NULL, _IONBF, 0);
+@@ -186,9 +203,15 @@ int main(int argc, char **argv) {
+ 
+     kl_enginelog_install();        // the engine's console, to stderr
+     kl_sdlshim_install();          // SDL window without X11; Vulkan surface from the shim
++#ifndef ALYX_CONSTRAINED_HOST
+     kl_guestfix_install();         // byte-checked repairs of guest code at load
++#endif
+     kl_sdlaudio_install();         // SDL2 audio -> Core Audio (Linux SDL has no macOS backend)
+-    kl_luafix_install();           // LuaJIT arena above 4 GB (no low memory on arm64 macOS)
++#ifdef ALYX_CONSTRAINED_HOST
++    kl_lua_builtin_install();      // exported allocator setter; no text patch
++#else
++    kl_luafix_install();           // legacy Lua arena workaround
++#endif
+     install_vr_path_registry();
+     kl_steambridge_install();      // steam_api -> the macOS Steam client
+     // fontconfig wants a writable cache; keep it beside the game root.
+diff --git a/NativeARM/host/kl_glibc.c b/NativeARM/host/kl_glibc.c
+index 1ce350f..74a9c65 100644
+--- a/NativeARM/host/kl_glibc.c
++++ b/NativeARM/host/kl_glibc.c
+@@ -1,3 +1,4 @@
++#include "kl_thread_probe.h"
+ // glibc symbol layer for Klepton.
+ //
+ // Klepton's shim translates bionic (Android libc) names to Darwin. Valve's
+@@ -323,9 +324,7 @@ long klgh_syscall(long nr, kl_va *va) {
+     case 131: case 130: {
+         long tid = nr == 131 ? a[1] : a[0], sig = nr == 131 ? a[2] : a[1];
+         if (sig == 0) {
+-            struct proc_threadinfo ti;
+-            if (tid > 0 && proc_pidinfo(getpid(), PROC_PIDTHREADID64INFO, (uint64_t)tid, &ti, sizeof ti) > 0) return 0;
+-            errno = ESRCH; return -1;
++            return kl_thread_probe(tid);
+         }
+         uint64_t self = 0; pthread_threadid_np(NULL, &self);
+         if ((uint64_t)tid == self) return pthread_kill(pthread_self(), (int)sig) == 0 ? 0 : -1;
+diff --git a/NativeARM/host/kl_lua_builtin.c b/NativeARM/host/kl_lua_builtin.c
+new file mode 100644
+index 0000000..060aa55
+--- /dev/null
++++ b/NativeARM/host/kl_lua_builtin.c
+@@ -0,0 +1,26 @@
++// SPDX-License-Identifier: BSL-1.0
++// Copyright 2026, Nick Kennedy
++// No instruction scanning, executable-page writes or allocation-size overrides.
++#include <stdio.h>
++#include <stdlib.h>
++#include "klepton.h"
++#include "kl_lua_builtin.h"
++
++typedef void (*mmap_setter)(void *, void *, void *, void *, void *);
++static void select_builtin(void *prepare, void *reserve, void *resize,
++                           void *release, void *extra) {
++    (void)prepare; (void)reserve; (void)resize; (void)release; (void)extra;
++    kl_image *image = kl_find_image("libvscript.so");
++    // kl_sym returns the image's definition, bypassing the interpose registry.
++    mmap_setter original = image ? (mmap_setter)kl_sym(image, "lua_VALVE_OVERRIDE_MMAP") : NULL;
++    if (!original || original == select_builtin) {
++        fprintf(stderr, "[lua-builtin] original setter unavailable; refusing to continue\n");
++        abort();
++    }
++    original(NULL, NULL, NULL, NULL, NULL);
++    fprintf(stderr, "[lua-builtin] selected built-in mmap allocator (game lifecycle unvalidated)\n");
++}
++
++void kl_lua_builtin_install(void) {
++    kl_interpose("lua_VALVE_OVERRIDE_MMAP", (void *)select_builtin);
++}
+diff --git a/NativeARM/host/kl_lua_builtin.h b/NativeARM/host/kl_lua_builtin.h
+new file mode 100644
+index 0000000..fae745d
+--- /dev/null
++++ b/NativeARM/host/kl_lua_builtin.h
+@@ -0,0 +1,3 @@
++#pragma once
++/* Experimental: select Valve Lua's own mmap fallback through its exported setter. */
++void kl_lua_builtin_install(void);
+diff --git a/NativeARM/host/kl_thread_probe.c b/NativeARM/host/kl_thread_probe.c
+new file mode 100644
+index 0000000..7b914cc
+--- /dev/null
++++ b/NativeARM/host/kl_thread_probe.c
+@@ -0,0 +1,20 @@
++// SPDX-License-Identifier: BSL-1.0
++// Copyright 2026, Nick Kennedy
++#include <errno.h>
++#include <stdint.h>
++#include <unistd.h>
++#include <libproc.h>
++#include <sys/proc_info.h>
++#include "kl_thread_probe.h"
++
++// Klepton exposes pthread_threadid_np IDs as guest gettid values. Probe only
++// this process. A cached kernel thread may outlive pthread_join; this is NOT
++// sufficient for Linux guest thread-exit semantics. Never translate these IDs into pthread_t or send a real signal.
++long kl_thread_probe(long tid) {
++    struct proc_threadinfo info;
++    if (tid > 0 && proc_pidinfo(getpid(), PROC_PIDTHREADID64INFO,
++                              (uint64_t)tid, &info, sizeof info) == sizeof info)
++        return 0;
++    errno = ESRCH;
++    return -1;
++}
+diff --git a/NativeARM/host/kl_thread_probe.h b/NativeARM/host/kl_thread_probe.h
+new file mode 100644
+index 0000000..1aee936
+--- /dev/null
++++ b/NativeARM/host/kl_thread_probe.h
+@@ -0,0 +1,4 @@
++// SPDX-License-Identifier: BSL-1.0
++// Copyright 2026, Nick Kennedy
++#pragma once
++long kl_thread_probe(long tid);
+diff --git a/NativeARM/host/tests/check_constrained.py b/NativeARM/host/tests/check_constrained.py
+new file mode 100644
+index 0000000..725e217
+--- /dev/null
++++ b/NativeARM/host/tests/check_constrained.py
+@@ -0,0 +1,24 @@
++#!/usr/bin/env python3
++# SPDX-License-Identifier: BSL-1.0
++# Copyright 2026, Nick Kennedy
++"""Only launches host preflight; all guest paths deliberately nonexistent."""
++import pathlib
++import subprocess
++import sys
++
++host = pathlib.Path(sys.argv[1]).resolve()
++check = subprocess.run([str(host), '--constrained-check'], capture_output=True, text=True)
++assert check.returncode == 0 and 'guest execution disabled' in check.stdout, check
++for args in (
++    ['--libdir', '/nonexistent-alyx', '--probe', 'libvscript.so'],
++    ['--libdir', '/nonexistent-alyx', '--game', '/nonexistent-alyx'],
++    ['--constrained-check', '--probe', 'libvscript.so'],
++):
++    result = subprocess.run([str(host), *args], capture_output=True, text=True)
++    assert result.returncode == 2, result
++    assert 'Source2Main' not in result.stderr and 'loaded with dependencies' not in result.stdout
++symbols = subprocess.check_output(['nm', str(host)], text=True)
++for symbol in ('_kl_luafix_install', '_kl_guestfix_install'):
++    assert symbol not in symbols, symbol
++assert '_kl_lua_builtin_install' in symbols
++print('PASS: constrained preflight, probe/game rejection and excluded patch symbols')
+diff --git a/NativeARM/host/tests/lua_builtin.c b/NativeARM/host/tests/lua_builtin.c
+new file mode 100644
+index 0000000..3d0375e
+--- /dev/null
++++ b/NativeARM/host/tests/lua_builtin.c
+@@ -0,0 +1,42 @@
++// SPDX-License-Identifier: BSL-1.0
++// Copyright 2026, Nick Kennedy
++// Host-owned fixture only: never loads or executes Valve code.
++#include <assert.h>
++#include <stdio.h>
++#include <string.h>
++#include <sys/wait.h>
++#include <unistd.h>
++#include <signal.h>
++#include <sys/resource.h>
++#include "klepton.h"
++#include "kl_lua_builtin.h"
++static void (*bound)(void *, void *, void *, void *, void *);
++static int calls, missing;
++static void setter(void *a, void *b, void *c, void *d, void *e) {
++    assert(!a && !b && !c && !d && !e); calls++;
++}
++void kl_interpose(const char *name, void *fn) {
++    assert(!strcmp(name, "lua_VALVE_OVERRIDE_MMAP")); bound = fn;
++}
++kl_image *kl_find_image(const char *name) {
++    assert(!strcmp(name, "libvscript.so"));
++    return missing == 1 ? NULL : (kl_image *)&calls;
++}
++void *kl_sym(kl_image *image, const char *name) {
++    assert(image == (kl_image *)&calls);
++    assert(!strcmp(name, "lua_VALVE_OVERRIDE_MMAP"));
++    return missing == 2 ? NULL : missing == 3 ? (void *)bound : (void *)setter;
++}
++int main(void) {
++    struct rlimit no_core = {0, 0}; setrlimit(RLIMIT_CORE, &no_core);
++    kl_lua_builtin_install(); assert(bound);
++    for (int i = 0; i < 2; ++i) bound(&calls, &calls, &calls, &calls, &calls);
++    assert(calls == 2);
++    for (missing = 1; missing <= 3; ++missing) {
++        pid_t pid = fork(); assert(pid >= 0);
++        if (!pid) { bound(NULL, NULL, NULL, NULL, NULL); _exit(1); }
++        int status; assert(waitpid(pid, &status, 0) == pid);
++        assert(WIFSIGNALED(status) && WTERMSIG(status) == SIGABRT);
++    }
++    puts("PASS: callback substitution, repeated binding, missing image/symbol and recursion fail closed");
++}
+diff --git a/NativeARM/host/tests/thread_probe.c b/NativeARM/host/tests/thread_probe.c
+new file mode 100644
+index 0000000..5024b90
+--- /dev/null
++++ b/NativeARM/host/tests/thread_probe.c
+@@ -0,0 +1,56 @@
++// SPDX-License-Identifier: BSL-1.0
++// Copyright 2026, Nick Kennedy
++#include <assert.h>
++#include <errno.h>
++#include <pthread.h>
++#include <stdint.h>
++#include <stdio.h>
++#include <mach/mach.h>
++#include <sys/resource.h>
++#include <sched.h>
++#include "kl_thread_probe.h"
++static pthread_mutex_t lock = PTHREAD_MUTEX_INITIALIZER;
++static pthread_cond_t cond = PTHREAD_COND_INITIALIZER;
++static int ready, finish;
++static uint64_t worker_id;
++static void *worker(void *arg) {
++    pthread_mutex_lock(&lock);
++    assert(!pthread_threadid_np(NULL, &worker_id));
++    ready = 1; pthread_cond_signal(&cond);
++    while (!finish) pthread_cond_wait(&cond, &lock);
++    pthread_mutex_unlock(&lock);
++    return NULL;
++}
++int main(void) {
++    struct rlimit no_core = {0, 0}; setrlimit(RLIMIT_CORE, &no_core);
++    uint64_t self; assert(!pthread_threadid_np(NULL, &self));
++    assert(kl_thread_probe(self) == 0);
++    pthread_t thread; assert(!pthread_create(&thread, NULL, worker, NULL));
++    pthread_mutex_lock(&lock);
++    while (!ready) pthread_cond_wait(&cond, &lock);
++    assert(kl_thread_probe(worker_id) == 0);
++    finish = 1; pthread_cond_signal(&cond); pthread_mutex_unlock(&lock);
++    assert(!pthread_join(thread, NULL));
++    long joined = kl_thread_probe(worker_id);
++    printf("joined pthread kernel probe: %ld (0 means retained kernel thread; guest exit tracking still needed)\n", joined);
++    // An actually terminated Mach thread, unlike a cached pthread worker.
++    thread_act_t suspended;
++    assert(thread_create(mach_task_self(), &suspended) == KERN_SUCCESS);
++    thread_identifier_info_data_t ident;
++    mach_msg_type_number_t count = THREAD_IDENTIFIER_INFO_COUNT;
++    assert(thread_info(suspended, THREAD_IDENTIFIER_INFO, (thread_info_t)&ident, &count) == KERN_SUCCESS);
++    assert(kl_thread_probe(ident.thread_id) == 0);
++    assert(thread_terminate(suspended) == KERN_SUCCESS);
++    long dead = 0;
++    for (int i = 0; i < 1000; ++i) {
++        dead = kl_thread_probe(ident.thread_id);
++        if (dead == -1) break;
++        sched_yield();
++    }
++    assert(dead == -1 && errno == ESRCH);
++    // Termination may invalidate the port name before this cleanup.
++    (void)mach_port_deallocate(mach_task_self(), suspended);
++    errno = 0; assert(kl_thread_probe(0) == -1 && errno == ESRCH);
++    errno = 0; assert(kl_thread_probe(-1) == -1 && errno == ESRCH);
++    puts("PASS: kernel current/live/terminated/invalid probes; guest pthread-exit semantics remain unverified");
++}
+-- 
+2.54.0 (Apple Git-157)
+

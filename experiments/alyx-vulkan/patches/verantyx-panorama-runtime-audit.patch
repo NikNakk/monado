@@ -1,0 +1,154 @@
+From 1b7d0acec44925d2cd9093cf037e5fa4b408a115 Mon Sep 17 00:00:00 2001
+From: Nick Kennedy <nick@nick-kennedy.com>
+Date: Tue, 20 Oct 2026 09:44:03 +0200
+Subject: [PATCH] native: close Panorama runtime dependencies and audit all
+ prepared ELF inputs
+
+Signed-off-by: Nick Kennedy <nick@nick-kennedy.com>
+---
+ NativeARM/host/Makefile                       |  5 ++
+ NativeARM/host/tests/valve_panorama_runtime.c | 48 +++++++++++++++++++
+ NativeARM/scripts/audit_guest_dependencies.py | 42 ++++++++++++++++
+ NativeARM/scripts/fetch_lua_runtime.py        |  6 ++-
+ 4 files changed, 99 insertions(+), 2 deletions(-)
+ create mode 100644 NativeARM/host/tests/valve_panorama_runtime.c
+ create mode 100644 NativeARM/scripts/audit_guest_dependencies.py
+
+diff --git a/NativeARM/host/Makefile b/NativeARM/host/Makefile
+index be98023..b9e8aac 100644
+--- a/NativeARM/host/Makefile
++++ b/NativeARM/host/Makefile
+@@ -154,3 +154,8 @@ valve-font-stack: $(RT_OBJS) $(filter-out $(OUT)/alyx_host.c.o,$(HOST_OBJS))
+ 	$(CC) $(CFLAGS) -o $(OUT)/valve-font-stack tests/valve_font_stack.c $^ $(LDLIBS) -I.
+ 
+ .PHONY: valve-font-stack
++
++valve-panorama-runtime: $(RT_OBJS) $(filter-out $(OUT)/alyx_host.c.o,$(HOST_OBJS))
++	$(CC) $(CFLAGS) -o $(OUT)/valve-panorama-runtime tests/valve_panorama_runtime.c $^ $(LDLIBS) -I.
++
++.PHONY: valve-panorama-runtime
+diff --git a/NativeARM/host/tests/valve_panorama_runtime.c b/NativeARM/host/tests/valve_panorama_runtime.c
+new file mode 100644
+index 0000000..a378351
+--- /dev/null
++++ b/NativeARM/host/tests/valve_panorama_runtime.c
+@@ -0,0 +1,48 @@
++// Copyright 2026, Nick Kennedy
++// SPDX-License-Identifier: BSL-1.0
++// Headless dependency/ABI checks. No game entry point, Steam, network or OpenXR.
++#include "klepton.h"
++#include "kl_glibc.h"
++#include "kl_lua_builtin.h"
++#include "kl_fault.h"
++#include <assert.h>
++#include <stdio.h>
++#include <stdlib.h>
++#include <string.h>
++static void safety(const char *path,kl_image *image) {
++    const kl_stats *s=kl_get_stats(image);unsigned missing;kl_missing_imports(image,&missing);
++    if(missing || s->svc_sites!=s->svc_trapped || s->tls_refused || s->x18_refused || s->ctr_refused) {
++        fprintf(stderr,"runtime image refused: %s missing=%u\n",path,missing);exit(3);
++    }
++}
++int main(int argc,char **argv) {
++    assert(argc==2);setvbuf(stdout,NULL,_IONBF,0);setvbuf(stderr,NULL,_IONBF,0);
++    setenv("KL_LOAD_DEFER_INIT","1",1);setenv("KL_LOAD_NO_INIT","0",1);
++    setenv("KL_SVC_POLICY","trap-code",1);setenv("KL_GUEST_PATCH","0",1);
++    setenv("KL_TLS_REWRITE_FORCE","1",1);setenv("KL_GUEST_THREAD_TRACKING","1",1);
++    kl_glibc_install(argv[0]);kl_set_library_path(argv[1]);kl_thread_init();kl_fault_install();
++    kl_lua_builtin_install();kl_image_loaded_hook=safety;
++    const char *names[]={"libpanorama_text_pango.so","libharfbuzz-icu.so","libvorbisfile.so","libpanorama.so"};
++    for(unsigned i=0;i<sizeof names/sizeof names[0];i++) {
++        char path[4096];snprintf(path,sizeof path,"%s/%s",argv[1],names[i]);
++        assert(kl_load_recursive(path));printf("RUNTIME constructors pass: %s\n",names[i]);
++    }
++    const char *(*version)(int)=(void*)kl_guest_sym_global("OpenSSL_version");assert(version);
++    int (*digest)(void*,const char*,const char*,const void*,size_t,unsigned char*,size_t*)=(void*)kl_guest_sym_global("EVP_Q_digest");assert(digest);
++    unsigned char bytes[64];size_t length=0;
++    assert(digest(NULL,"SHA256",NULL,"abc",3,bytes,&length)==1 && length==32);
++    char text[65];for(unsigned i=0;i<32;i++)sprintf(text+2*i,"%02x",bytes[i]);
++    assert(!strcmp(text,"ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"));
++    int (*random_bytes)(unsigned char*,int)=(void*)kl_guest_sym_global("RAND_bytes");assert(random_bytes);
++    assert(random_bytes(bytes,32)==1);
++    void *(*method)(void)=(void*)kl_guest_sym_global("TLS_method");assert(method);
++    void *(*new_context)(const void*)=(void*)kl_guest_sym_global("SSL_CTX_new");assert(new_context);
++    void *(*new_ssl)(void*)=(void*)kl_guest_sym_global("SSL_new");assert(new_ssl);
++    void (*free_ssl)(void*)=(void*)kl_guest_sym_global("SSL_free");assert(free_ssl);
++    void (*free_context)(void*)=(void*)kl_guest_sym_global("SSL_CTX_free");assert(free_context);
++    void *context=new_context(method());assert(context);void *ssl=new_ssl(context);assert(ssl);
++    free_ssl(ssl);free_context(context);
++    void *(*unicode_funcs)(void)=(void*)kl_guest_sym_global("hb_icu_get_unicode_funcs");assert(unicode_funcs && unicode_funcs());
++    printf("RUNTIME OpenSSL: %s\n",version(0));kl_glibc_report(stderr);
++    puts("PASS: Panorama constructors, OpenSSL SHA256/RNG/TLS object lifecycle, ICU67 integration and Vorbis dependencies; no network or authentication tests");
++}
+diff --git a/NativeARM/scripts/audit_guest_dependencies.py b/NativeARM/scripts/audit_guest_dependencies.py
+new file mode 100644
+index 0000000..1c86696
+--- /dev/null
++++ b/NativeARM/scripts/audit_guest_dependencies.py
+@@ -0,0 +1,42 @@
++#!/usr/bin/env python3
++# Copyright 2026, Nick Kennedy
++# SPDX-License-Identifier: BSL-1.0
++"""Audit DT_NEEDED across all prepared ELF inputs; this does not execute them.
++Uses Klepton's explicit shim list as the source for expected missing files.
++Relocation/constructor tests are still needed to establish import compatibility.
++"""
++import argparse
++import hashlib
++import json
++from pathlib import Path
++import re
++import subprocess
++
++parser=argparse.ArgumentParser(description=__doc__)
++parser.add_argument('--libs',type=Path,required=True)
++parser.add_argument('--klepton',type=Path,required=True)
++parser.add_argument('--output',type=Path,required=True,help='New JSON file')
++args=parser.parse_args()
++manifest=args.libs/'libraries.json'
++entries=json.loads(manifest.read_text())
++source=(args.klepton/'runtime/kl_dl.c').read_text()
++match=re.search(r'static int kl_dep_is_shim_served\([^)]*\)\s*\{\s*static const char \*shim\[\]\s*=\s*\{(.*?)\};',source,re.S)
++assert match,'Klepton shim-list format changed; update the parser explicitly'
++body=re.sub(r'//[^\n]*|/\*.*?\*/','',match[1],flags=re.S)
++shim=set(re.findall(r'"([^"]+)"',body))
++missing={};served={};needed={}
++for path in sorted(set(entries.values())):
++    text=subprocess.check_output(['/opt/homebrew/opt/llvm/bin/llvm-readelf','-d',path],text=True)
++    names=re.findall(r'\(NEEDED\).*?\[(.*?)\]',text)
++    needed[path]=names
++    for name in names:
++        if name not in entries:
++            (served if name in shim else missing).setdefault(name,[]).append(path)
++result={'library_manifest_sha256':hashlib.sha256(manifest.read_bytes()).hexdigest(),
++        'library_names':len(entries),'unique_elf_files':len(needed),
++        'missing':missing,'shim_served_missing_files':served,'needed':needed,
++        'scope':'Static packaging audit only; no ELF code, constructors or entry points executed.'}
++with args.output.open('x') as output:json.dump(result,output,indent=2);output.write('\n')
++print('ELF files:',len(needed),'library names:',len(entries),'missing non-shim dependencies:',len(missing))
++for name in sorted(missing):print('missing:',name)
++raise SystemExit(bool(missing))
+diff --git a/NativeARM/scripts/fetch_lua_runtime.py b/NativeARM/scripts/fetch_lua_runtime.py
+index 64f80e0..c5fd4c1 100644
+--- a/NativeARM/scripts/fetch_lua_runtime.py
++++ b/NativeARM/scripts/fetch_lua_runtime.py
+@@ -15,11 +15,13 @@ import urllib.request
+ 
+ parser = argparse.ArgumentParser(description=__doc__)
+ parser.add_argument('output', type=Path)
+-parser.add_argument('--packages', nargs='+', choices=['libstdc++6', 'libgcc-s1', 'libuuid1', 'libglib2.0-0t64', 'libpcre2-8-0', 'libffi8', 'libmount1', 'libblkid1', 'libselinux1', 'libpng16-16t64', 'libexpat1', 'libbz2-1.0', 'libbrotli1', 'libfribidi0', 'zlib1g'], default=['libstdc++6', 'libgcc-s1'])
++parser.add_argument('--packages', nargs='+', choices=['libstdc++6', 'libgcc-s1', 'libuuid1', 'libglib2.0-0t64', 'libpcre2-8-0', 'libffi8', 'libmount1', 'libblkid1', 'libselinux1', 'libpng16-16t64', 'libexpat1', 'libbz2-1.0', 'libbrotli1', 'libfribidi0', 'zlib1g', 'libssl3t64', 'libatomic1', 'libogg0', 'libicu67', 'libzstd1'], default=['libstdc++6', 'libgcc-s1'])
++parser.add_argument('--suite', choices=['trixie','bullseye'], default='trixie',
++                    help='bullseye supplies the ICU67 SONAME required by the bundled HarfBuzz ICU library')
+ args = parser.parse_args()
+ args.output.mkdir(parents=True, exist_ok=False)
+ mirror = 'https://deb.debian.org/debian/'
+-index_url = mirror + 'dists/trixie/main/binary-arm64/Packages.gz'
++index_url = mirror + 'dists/' + args.suite + '/main/binary-arm64/Packages.gz'
+ index_data = urllib.request.urlopen(index_url, timeout=60).read()
+ (args.output / 'Packages.gz').write_bytes(index_data)
+ packages = {}
+-- 
+2.54.0 (Apple Git-157)
+

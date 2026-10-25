@@ -1,0 +1,74 @@
+From d72bdbe52bd46bab667054dae3f0b3d82cf7b100 Mon Sep 17 00:00:00 2001
+From: Nick Kennedy <nick@nick-kennedy.com>
+Date: Tue, 20 Oct 2026 09:15:08 +0200
+Subject: [PATCH] launch: enable native sample-location compatibility with
+ MoltenVK fallback
+
+Signed-off-by: Nick Kennedy <nick@nick-kennedy.com>
+---
+ NativeARM/scripts/launch_xrizer.py      |  6 ++++++
+ NativeARM/scripts/test_launch_xrizer.py | 10 ++++++++++
+ 2 files changed, 16 insertions(+)
+
+diff --git a/NativeARM/scripts/launch_xrizer.py b/NativeARM/scripts/launch_xrizer.py
+index ba85463..a6514ed 100644
+--- a/NativeARM/scripts/launch_xrizer.py
++++ b/NativeARM/scripts/launch_xrizer.py
+@@ -25,6 +25,8 @@ parser.add_argument('--extended-dynamic-state3', choices=['auto','enabled','disa
+ parser.add_argument('--host',type=Path,default=Path('/private/tmp/alyx-constrained-host-build/alyx_host'))
+ parser.add_argument('--xrizer',type=Path,default=Path('/private/tmp/xrizer-dual-vulkan'))
+ parser.add_argument('--openxr-loader',type=Path,default=Path('/Users/nickkennedy/Code/OpenXR-SDK/build/macos/src/loader/Release/libopenxr_loader.dylib'))
++parser.add_argument('--sample-locations-compat', choices=['auto','enabled','disabled'], default='auto',
++                    help='auto enables the supported sample-location command for MoltenVK with the state3 fallback')
+ runtime=parser.add_mutually_exclusive_group(required=True)
+ runtime.add_argument('--runtime-json',type=Path)
+ runtime.add_argument('--no-xr-runtime',action='store_true')
+@@ -71,6 +73,9 @@ command=['python3',str(backend),'--driver',args.driver,'--output',str(args.outpu
+ if args.icd:command+=['--icd',str(args.icd.resolve(strict=True))]
+ disable_state3=(args.extended_dynamic_state3=='disabled' or
+                 (args.extended_dynamic_state3=='auto' and args.driver=='moltenvk'))
++sample_compat=(args.sample_locations_compat=='enabled' or
++               (args.sample_locations_compat=='auto' and args.driver=='moltenvk' and disable_state3))
++settings['KL_VK_SAMPLE_LOCATIONS_COMPAT']='1' if sample_compat else '0'
+ engine_options=['-vulkan_disable_ext_dynamic_state_3'] if disable_state3 else []
+ command+=['--',str(args.host),'--run-constrained','--libdir',str(args.libs),'--game',str(args.root),
+           '--','-vr','-steam','-vulkan','-nowindow','-console',*engine_options,'+map','startup',*extra]
+@@ -83,6 +88,7 @@ if args.runtime_json:
+     binaries['monado_runtime']=library.resolve(strict=True)
+ manifest={'command':command,'environment':settings,'timeout':args.timeout,'headless':args.no_xr_runtime,
+           'extended_dynamic_state3_disabled':disable_state3,
++          'sample_locations_compat':sample_compat,
+           'binaries':{name:{'path':str(path),'sha256':hashlib.sha256(path.read_bytes()).hexdigest()} for name,path in binaries.items()}}
+ if args.dry_run:
+  print(json.dumps(manifest,indent=2));raise SystemExit(0)
+diff --git a/NativeARM/scripts/test_launch_xrizer.py b/NativeARM/scripts/test_launch_xrizer.py
+index af706d8..26d939f 100644
+--- a/NativeARM/scripts/test_launch_xrizer.py
++++ b/NativeARM/scripts/test_launch_xrizer.py
+@@ -53,6 +53,8 @@ class NativeRuntimeDirectoryTest(unittest.TestCase):
+                     self.assertFalse(output.exists())
+                     manifest=json.loads(run.stdout)
+                     self.assertTrue(manifest['extended_dynamic_state3_disabled'])
++                    self.assertTrue(manifest['sample_locations_compat'])
++                    self.assertEqual(settings['KL_VK_SAMPLE_LOCATIONS_COMPAT'],'1')
+                     self.assertIn('-vulkan_disable_ext_dynamic_state_3',manifest['command'])
+                     for driver, policy, disabled in [('moltenvk','enabled',False),
+                                                       ('kosmickrisp','auto',False),
+@@ -62,6 +64,14 @@ class NativeRuntimeDirectoryTest(unittest.TestCase):
+                                                 env=env,capture_output=True,text=True,check=True)
+                         selected=json.loads(selected.stdout)
+                         self.assertEqual(selected['extended_dynamic_state3_disabled'],disabled)
++                        self.assertFalse(selected['sample_locations_compat'])
++                        for policy, on in [('enabled',True),('disabled',False)]:
++                            override=subprocess.run(command+['--driver',driver,
++                                '--sample-locations-compat',policy],env=env,capture_output=True,
++                                text=True,check=True)
++                            override=json.loads(override.stdout)
++                            self.assertEqual(override['sample_locations_compat'],on)
++                            self.assertEqual(override['environment']['KL_VK_SAMPLE_LOCATIONS_COMPAT'],str(int(on)))
+                         self.assertEqual('-vulkan_disable_ext_dynamic_state_3' in selected['command'],disabled)
+ 
+ 
+-- 
+2.54.0 (Apple Git-157)
+
