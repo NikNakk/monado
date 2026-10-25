@@ -18,6 +18,7 @@ validation and limitations.
 | `XRT_MACOS_WSI_GENERIC_LATCH_US` | `0` | With `wsi-adaptive`, how long after the desired present time GPU work may finish. |
 | `XRT_MACOS_WSI_PASSTHROUGH` | `0` | Enable GPU-ordered Vulkan camera composition with the compute compositor. |
 | `SIMULATED_DESKTOP` | `0` | Run the simulated HMD in a window on the built-in display, steered with the trackpad. Implies `SIMULATED_ENABLE`. With `QWERTY_ENABLE=1`, the window drives qwerty's HMD and controllers instead. See [the desktop simulation note](macos-desktop-simulation.md). |
+| `QWERTY_SCRIPT` | unset | Timed scripted desktop input for unattended runs: comma-separated `<seconds><+\|-><name>` events (`lctrl`, `lshift`, `lalt`, `left`, `middle`, `right` or a USB HID key usage), timed from the first input handler's registration. Example: `40+lctrl,40.1+left,40.6-left,40.7-lctrl` clicks the left controller's trigger. `QWERTY_SCRIPT_REPEAT` (seconds) repeats the list. |
 
 Presenter selection is read once per process. Unset selects `native`; an empty
 or unknown value logs a warning and falls back to native. Set it in the service
