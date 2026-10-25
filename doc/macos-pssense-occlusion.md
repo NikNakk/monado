@@ -257,3 +257,20 @@ Python summary tests pass. The first sandboxed full run could not initialise
 passes all 91. Logs are saved beside `summary.json` as `build-final.log` and
 `ctest-host.log`. `git diff --check` passes. Hardware acceptance and Linux CI
 remain pending.
+
+## Headset check with hold, coast and prior re-acquisition (25 October 2026)
+
+User-operated, working tree over `0daaffc4a`, `20261025-depth-hold-v4`:
+`PSSENSE_HOLD_POSITION=1`, `PSSENSE_COAST_POSITION=1` and
+`CONSTELLATION_TRACKER_PRIOR_REACQUIRE=1` with the 6DoF defaults, mode 16, four
+short `--generic-controller --passthrough` sessions (7 service starts). The
+user reports controller tracking felt better. `PSSENSE_POSE_DIAG` shows no
+orientation-only state after a controller's first lock (0, against every loss in
+the v3 survey) and 139 held or coasted (valid, untracked) states. Orientation-only
+states occur only before a controller first locks, when there is no position to
+hold. `JOINT_STATUS` was not logged at this level, so the prior re-acquisition
+counts are not available from this run; `constellation.ctd` is kept for replay.
+
+Following this run, the three settings are 6DoF defaults (`sense_tracking_defaults`),
+each still overridable; a unit test checks they are applied and that an explicit
+value wins.

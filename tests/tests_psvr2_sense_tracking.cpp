@@ -558,3 +558,23 @@ TEST_CASE("Sense coast integrates the filter velocity only while the IMU shows m
 	CHECK_FALSE(hold.coasting);
 	CHECK(hold.position.x == 0.2f);
 }
+
+TEST_CASE("6DoF defaults enable the position hold, coast and prior re-acquisition, keeping explicit overrides")
+{
+	// The only test in this binary that asks for the 6DoF switch, which is read once.
+	setenv("PSVR2_SENSE_6DOF", "1", 1);
+	unsetenv("PSSENSE_HOLD_POSITION");
+	unsetenv("PSSENSE_COAST_POSITION");
+	setenv("CONSTELLATION_TRACKER_PRIOR_REACQUIRE", "0", 1);
+
+	REQUIRE(psvr2_sense_tracking_requested());
+	auto value = [](const char *name) { return std::string(getenv(name) ? getenv(name) : ""); };
+	CHECK(value("PSSENSE_HOLD_POSITION") == "1");
+	CHECK(value("PSSENSE_COAST_POSITION") == "1");
+	CHECK(value("CONSTELLATION_TRACKER_PRIOR_REACQUIRE") == "0"); // an explicit setting wins
+
+	for (const char *name : {"PSVR2_SENSE_6DOF", "PSSENSE_HOLD_POSITION", "PSSENSE_COAST_POSITION",
+	                         "CONSTELLATION_TRACKER_PRIOR_REACQUIRE"}) {
+		unsetenv(name);
+	}
+}

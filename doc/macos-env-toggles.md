@@ -325,7 +325,9 @@ keep-lock/LED-shape/strict/tracking/coverage options, and wide pulse period ID
 CLI series and two OpenBrush runs without lockouts. Later on 5 Oct it also gained
 `PSSENSE_LED_BOOTSTRAP_QUICK_LOCK=1`, `PSVR2_LED_DETECTOR_BLOBS=1` and
 `PSSENSE_RECONNECT=1` (macOS only; ignored elsewhere), validated in CLI
-sessions; the camera streams stay on, so passthrough is unaffected. See `sense_tracking_defaults` in
+sessions. On 25 Oct it gained `PSSENSE_HOLD_POSITION=1`, `PSSENSE_COAST_POSITION=1`
+and `CONSTELLATION_TRACKER_PRIOR_REACQUIRE=1`, validated in the
+`20261025-depth-hold-v4` headset run and offline on the v3 survey; the camera streams stay on, so passthrough is unaffected. See `sense_tracking_defaults` in
 `targets/common/target_psvr2_sense_tracking.c` for exact names. Future LED
 scheduling, experimental clock/filter/bootstrap/model options remain off unless
 requested explicitly or through this 6DoF switch. Linux's full-stream default
@@ -1427,18 +1429,18 @@ Set in the service process, alongside the existing opt-in Sense 6DoF settings:
   application position validity during optical occlusion; clamped to 0–1000 ms.
   Zero retains 300 ms. Tracked status and optical solver prior validity remain
   at their normal horizons. IMU age above 100 ms expires tracking/velocity.
-- `PSSENSE_HOLD_POSITION=1` (default off): once position validity expires,
+- `PSSENSE_HOLD_POSITION=1` (default off; on with `PSVR2_SENSE_6DOF`): once position validity expires,
   keep reporting the last valid position (valid, untracked, zero linear
   velocity) while orientation stays valid. Without it OpenXR places the
   controller at the tracking origin (`m_space.cpp` upgrades orientation-only
   relations), about 6 m away on the 25 Oct survey. Reset on reconnect.
-- `CONSTELLATION_TRACKER_PRIOR_REACQUIRE=1` (default off; joint path): after
+- `CONSTELLATION_TRACKER_PRIOR_REACQUIRE=1` (default off; on with `PSVR2_SENSE_6DOF`; joint path): after
   stereo and oriented bootstrap fail, search within 20 cm of the predicted (or
   last solved) position at the IMU orientation, accepting 3+ matches at RMS
   ≤ 1 px. A result within 100 ms and 5 cm of the previous solve continues that
   track towards the usual three-solve confirmation. `JOINT_STATUS` reports
   `prior=` and `prior_continued=`.
-- `PSSENSE_COAST_POSITION=1` (default off; implies the hold): after position
+- `PSSENSE_COAST_POSITION=1` (default off; on with `PSVR2_SENSE_6DOF`; implies the hold): after position
   validity expires, advance the held position by the filter's velocity on each
   IMU sample, but only while the IMU shows motion (|gyro| > 0.3 rad/s or
   |accel| more than 0.5 m/s² from 1 g). Limits: 3 s, 0.8 m from where the coast
