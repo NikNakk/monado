@@ -161,6 +161,62 @@ start and 4 m/s, then holds. Unit tests cover tracking, gating, the limits and
 the application relation. It is enabled in `20261025-depth-hold-v4` with the
 hold; the headset check is pending.
 
+### Position-only solve from blobs and IMU orientation (offline prototype)
+
+The joint tracker already uses the IMU while tracking: the filter's predicted
+position seeds each refine and the IMU orientation, aligned to the optical
+world, is a 3° prior. After 250 ms without a solve the device is re-acquired by
+bootstrap: stereo (no prior) or, with `CONSTELLATION_TRACKER_ORIENTED_BOOTSTRAP`,
+one camera at the IMU orientation (at least 4 free blobs, 5 inliers, coverage
+0.5, RMS 0.8 px), then 3 confirming solves. Lost devices get no position prior,
+and views with fewer than 5 matches are never used.
+
+The offline tracker with the filter and oriented bootstrap (live settings)
+solves 29,498 / 28,815 exposures against the live 29,397 / 29,062, so it stands
+in for the live run. The live predicted orientation agrees with optical solves
+to 0.12° p50 / 0.65° p95 and stays available during losses. The LED model
+export is in OpenCV axes (projection 0.3 px p50 on own blobs).
+
+A Python prototype (session scratchpad, not in the tree) fixes the orientation
+from the live prediction and solves position only: each blob-LED pairing whose
+LED faces the camera puts the device on that blob's ray, at the point nearest
+the prior; the hypothesis explaining most blobs within 6 px is refined (Gauss-
+Newton, 10 cm prior) and accepted at 2+ inliers and RMS ≤ 1 px.
+
+- Synthetic partial views (tracked exposures, one camera, k own blobs plus all
+  free blobs, prior 3–8 cm off): k = 2 accepted 58% at 5–9 mm p50 but 110–138 mm
+  p95; k = 3, 66–70% at 3–5 / 72–120 mm; k = 4, 69–75% at 3–4 / 42–44 mm.
+- Real losses of 100 ms or more (12, each exposure seeded from the previous
+  estimate): 5% of loss exposures accepted, mostly as the ring returns, often
+  with 11–26 inliers before the tracker re-acquires. Distance to the first
+  optical pose after the loss: hold 101 mm p50 / 321 mm p90; blob + IMU 4 / 62 mm,
+  better in all 12. Requiring 3 inliers was worse (p90 325 mm).
+
+**In the tracker (`CONSTELLATION_TRACKER_PRIOR_REACQUIRE=1`, opt-in).**
+`prior_reacquire` in `oriented_bootstrap.cpp` shares the oriented bootstrap's
+views and scoring; the joint tracker tries it after stereo and oriented
+bootstrap, seeded from the predicted position (or the last solve), and counts a
+result within 100 ms and 5 cm of the previous solve as a continuation, so
+sparse solves only reach the device once three consecutive exposures agree.
+Synthetic unit tests: 3–4 LEDs in one camera are found from a 4 cm prior (where
+oriented bootstrap finds none), 90% within 2 cm; a 50 cm prior is accepted at
+most rarely. Replay of v3 with live settings, against the same replay without it:
+
+| Minimum matches | Extra poses | Losses ≥ 100 ms | > 5 cm jumps | Recapture jump p50 / p90 |
+| --- | --- | --- | --- | --- |
+| none (hold) | — | 12 | 0 | 101 / 321 mm |
+| 2 | +121 | 9 | 1 (a 2-match single-camera solve 4 cm off) | 13 / 265 mm |
+| 3 (default) | +75 | 11 | 0 | 14 / 320 mm |
+
+No existing pose changed. The real tracker gains less than the prototype,
+which accepted single sparse solves without confirmation; the p90 losses are
+behind-shoulder reaches with no blobs until the ring returns fully.
+
+So the larger gain is earlier re-acquisition when the ring is plainly visible
+but bootstrap and confirmation have not accepted it, rather than tracking
+through sparse views. A tracker change would need temporal consistency checks
+before 2-blob solves reach applications.
+
 ## Next user-operated capture
 
 Build the service used by the Alyx launcher from these sources. Its recorded

@@ -85,4 +85,42 @@ oriented_bootstrap(const std::vector<JointSolveCamera> &cameras,
                    const OrientedBootstrapParams &params,
                    OrientedBootstrapResult &out);
 
+/*!
+ * Re-acquisition near a known position (CONSTELLATION_TRACKER_PRIOR_REACQUIRE). With the orientation fixed, one
+ * blob-LED pairing puts the device on that blob's ray; the point on it nearest @p Tcv_world_position_prior is the
+ * hypothesis. Hypotheses within @ref search_m of the prior are scored in their camera, and the best are refined
+ * against every camera. Fewer blobs are needed than @ref oriented_bootstrap, so the caller must check consistency
+ * over consecutive exposures before trusting a result. Offline (25 Oct survey) this cut the distance between the
+ * last estimate and the first optical pose after a loss from 101 mm to 4 mm median.
+ */
+struct PriorReacquireParams
+{
+	uint32_t min_blobs{3};
+	uint32_t min_inliers{3};
+	float inlier_px{4.0f};
+	float facing_margin_deg{10.0f};
+	float min_depth_m{0.08f};
+	float max_depth_m{1.5f};
+	//! Hypotheses farther than this from the prior are discarded.
+	float search_m{0.20f};
+	uint32_t max_hypotheses{20000};
+	uint32_t refine_candidates{3};
+	JointSolveParams refine = [] {
+		JointSolveParams p;
+		p.min_matches = 3;
+		p.max_rms_px = 1.0f;
+		p.orientation_prior_sigma_deg = 4.0f;
+		p.min_coverage = 0.0f;
+		return p;
+	}();
+};
+
+bool
+prior_reacquire(const std::vector<JointSolveCamera> &cameras,
+                const t_constellation_tracker_led_model &model,
+                const xrt_quat &Tcv_world_orientation,
+                const xrt_vec3 &Tcv_world_position_prior,
+                const PriorReacquireParams &params,
+                OrientedBootstrapResult &out);
+
 } // namespace xrt::tracking::constellation

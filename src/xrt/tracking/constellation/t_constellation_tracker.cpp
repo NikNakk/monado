@@ -26,6 +26,8 @@ DEBUG_GET_ONCE_LOG_OPTION(constellation_tracker_log, "CONSTELLATION_TRACKER_LOG"
 DEBUG_GET_ONCE_OPTION(constellation_tracker_data_recorder_output, "CONSTELLATION_TRACKER_DATA_RECORDER_OUTPUT", "")
 DEBUG_GET_ONCE_BOOL_OPTION(constellation_tracker_joint, "CONSTELLATION_TRACKER_JOINT", false)
 DEBUG_GET_ONCE_BOOL_OPTION(constellation_tracker_oriented_bootstrap, "CONSTELLATION_TRACKER_ORIENTED_BOOTSTRAP", false)
+//! Re-acquire a lost device from as few as two blobs near its predicted position (see prior_reacquire).
+DEBUG_GET_ONCE_BOOL_OPTION(constellation_tracker_prior_reacquire, "CONSTELLATION_TRACKER_PRIOR_REACQUIRE", false)
 
 // Unconditionally present to allow warning that the feature is not enabled.
 DEBUG_GET_ONCE_BOOL_OPTION(constellation_tracker_enable_rerun, "CONSTELLATION_TRACKER_RERUN_ENABLE", false)
@@ -1047,9 +1049,12 @@ ConstellationTracker::ConstellationTracker(t_constellation_tracker_params *param
 	    debug_get_bool_option_constellation_tracker_joint() && !this->mosaics.empty()) {
 		bool oriented = debug_get_bool_option_constellation_tracker_oriented_bootstrap();
 		this->joint = std::make_unique<JointProcessor>(this, this->mosaics[0]->cameras.size(), oriented);
+		this->joint->prior_reacquire_enabled = debug_get_bool_option_constellation_tracker_prior_reacquire();
 		CT_INFO(this,
-		        "Constellation tracker joint multi-camera path enabled (%zu cameras, oriented bootstrap %s)",
-		        this->mosaics[0]->cameras.size(), oriented ? "on" : "off");
+		        "Constellation tracker joint multi-camera path enabled (%zu cameras, oriented bootstrap %s, prior "
+		        "re-acquisition %s)",
+		        this->mosaics[0]->cameras.size(), oriented ? "on" : "off",
+		        this->joint->prior_reacquire_enabled ? "on" : "off");
 	}
 
 	std::string data_recorder_output = debug_get_option_constellation_tracker_data_recorder_output();

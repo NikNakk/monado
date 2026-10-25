@@ -1432,6 +1432,12 @@ Set in the service process, alongside the existing opt-in Sense 6DoF settings:
   velocity) while orientation stays valid. Without it OpenXR places the
   controller at the tracking origin (`m_space.cpp` upgrades orientation-only
   relations), about 6 m away on the 25 Oct survey. Reset on reconnect.
+- `CONSTELLATION_TRACKER_PRIOR_REACQUIRE=1` (default off; joint path): after
+  stereo and oriented bootstrap fail, search within 20 cm of the predicted (or
+  last solved) position at the IMU orientation, accepting 3+ matches at RMS
+  ≤ 1 px. A result within 100 ms and 5 cm of the previous solve continues that
+  track towards the usual three-solve confirmation. `JOINT_STATUS` reports
+  `prior=` and `prior_continued=`.
 - `PSSENSE_COAST_POSITION=1` (default off; implies the hold): after position
   validity expires, advance the held position by the filter's velocity on each
   IMU sample, but only while the IMU shows motion (|gyro| > 0.3 rad/s or
