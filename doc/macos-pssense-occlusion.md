@@ -116,6 +116,41 @@ from the last tracked position after long holds). `PSSENSE_HOLD_POSITION=1`
 continues. A headset check with `--generic-controller` is prepared in
 `20261025-depth-hold-v4`.
 
+## Offline coast and blob evidence (25 October 2026)
+
+Dataset: `20261025-controller-survey-both-mode16-v3/constellation.ctd` (518 s,
+both controllers, detector blobs, 66 Hz IMU). Ground truth is the offline joint
+tracker (`constellation_replay --tracker --tracker-csv`, 93% of exposures, RMS
+0.3–0.4 px). `--filter-eval` now takes tool-only `FILTER_GAP_MS`,
+`FILTER_GAP_PERIOD_MS`, `FILTER_DAMP_MS` and `FILTER_STILL_GATE=1`, and writes gap
+age, hold and damped/gated estimates per hidden exposure. Errors by time since
+the last delivered optical pose, 3 s gaps every 6 s (`moving`: truth more than
+5 cm from the hold position; p50 / p95 mm):
+
+| Since optical | Hold | EKF coast | Still-gated coast |
+| --- | --- | --- | --- |
+| 0.15–0.3 s, all / moving | 2 / 21, 82 / 146 | 2 / 8, 5 / 15 | 2 / 10, 7 / 12 |
+| 0.5–1 s | 5 / 46, 138 / 304 | 13 / 50, 22 / 66 | 6 / 32, 26 / 59 |
+| 1–2 s | 9 / 168, 157 / 457 | 51 / 196, 56 / 140 | 9 / 81, 46 / 124 |
+| 2–3 s | 13 / 245, 173 / 468 | 169 / 545, 165 / 395 | 14 / 164, 74 / 218 |
+
+The EKF coast is far better than holding while the hand moves, even beyond 1 s,
+but drifts while it rests. Integrating the filter velocity only while the IMU
+shows motion (|gyro| > 0.3 rad/s or |accel| more than 0.5 m/s² from 1 g) keeps
+both benefits. Exponential velocity damping (100–400 ms) was worse than either.
+Runs of metres seen at first were real tracker losses coasted unboundedly, not
+IMU faults; the live 300 ms validity limit already prevents those.
+
+Blobs during real losses (the offline tracker's gaps over 250 ms, projected
+from the nearer of the last/next solved pose; projection checked at 6–7 px on
+tracked exposures): behind-shoulder and shoulder losses have essentially no
+unowned blobs near the predicted position. In-view losses (low, side, palm-up,
+cross-body) often have 4–9 unowned blobs there, frequently in both lower
+cameras: the controller is visible but not solved. These could constrain
+position with the IMU orientation (partial-blob updates), which needs tracker
+changes and is not attempted here. The offline tracker loses some poses the live
+run kept (trial 16 low: 92% live), so these counts are indicative.
+
 ## Next user-operated capture
 
 Build the service used by the Alyx launcher from these sources. Its recorded
