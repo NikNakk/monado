@@ -507,6 +507,11 @@ psvr2_get_face_tracking(struct xrt_device *xdev,
 xrt_result_t
 psvr2_set_passthrough_sinks(struct xrt_device *xdev, struct xrt_frame_sink *left, struct xrt_frame_sink *right);
 
+//! Whether the LED detector stream, not the camera frames, announces exposures for Sense LED timing.
+//! True with PSVR2_LED_DETECTOR_BLOBS in any camera mode other than 4. Caller holds data_lock.
+bool
+psvr2_led_detector_owns_exposure_timing(const struct psvr2_hmd *hmd);
+
 //! Internal camera delivery path, also exercised with synthetic packets by driver tests.
 void
 psvr2_push_mode4_passthrough(struct psvr2_hmd *hmd,

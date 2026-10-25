@@ -438,3 +438,16 @@ TEST_CASE("Mode 4 passthrough detach drains an in-flight sink callback")
 	CHECK(hmd.mode4_passthrough_pushes_in_flight == 0);
 	os_mutex_destroy(&hmd.data_lock);
 }
+
+TEST_CASE("LED detector owns Sense exposure timing outside mode 4")
+{
+	struct psvr2_hmd hmd{};
+	hmd.camera_mode = PSVR2_CAMERA_MODE_4;
+	CHECK_FALSE(psvr2_led_detector_owns_exposure_timing(&hmd));
+	hmd.led_detector_blobs = true;
+	CHECK_FALSE(psvr2_led_detector_owns_exposure_timing(&hmd));
+	hmd.camera_mode = PSVR2_CAMERA_MODE_BOTTOM_SBS_BC4;
+	CHECK(psvr2_led_detector_owns_exposure_timing(&hmd));
+	hmd.led_detector_blobs = false;
+	CHECK_FALSE(psvr2_led_detector_owns_exposure_timing(&hmd));
+}

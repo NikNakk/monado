@@ -1233,6 +1233,14 @@ status_xfer_cb(struct libusb_transfer *xfer)
 }
 
 bool
+psvr2_led_detector_owns_exposure_timing(const struct psvr2_hmd *hmd)
+{
+	// Outside mode 4 the camera frames (e.g. mode-16 passthrough) are not the exposures the headset's LED
+	// detections come from, so they must not drive the Sense LED schedule.
+	return hmd->led_detector_blobs && hmd->camera_mode != PSVR2_CAMERA_MODE_4;
+}
+
+bool
 psvr2_led_detector_blobs_requested(void)
 {
 	return debug_get_bool_option_psvr2_led_detector_blobs();
@@ -1380,7 +1388,8 @@ img_xfer_cb(struct libusb_transfer *xfer)
 					diag->last_vts_monotonic_ns = hmd->last_imu_vts_ns + hmd->hw2mono_vts +
 					                              (int64_t)camera_to_imu_us * U_TIME_1US_IN_NS;
 					camera_timestamp_ns = diag->last_vts_monotonic_ns;
-					if (diag->last_vts_us != hmd->last_camera_event_vts_us) {
+					if (diag->last_vts_us != hmd->last_camera_event_vts_us &&
+					    !psvr2_led_detector_owns_exposure_timing(hmd)) {
 						uint32_t interval_us =
 						    diag->last_vts_us - hmd->last_camera_event_vts_us;
 						uint32_t sequence_delta =
@@ -1897,10 +1906,11 @@ psvr2_led_detector_process(struct psvr2_hmd *hmd, const uint8_t *data, uint32_t 
 			psvr2_latency_diag_add_locked(hmd, 2, received_ns, exposure_ns);
 			psvr2_latency_diag_maybe_log_locked(hmd, received_ns);
 		}
-		// Without camera frames nothing else announces exposures, which the Sense LED schedule follows.
+		// The Sense LED schedule follows exposures. Announce them from here when no camera frames arrive, or
+		// when the camera mode's frames are not the detector's exposures.
 		bool cameras_flowing = hmd->last_camera_frame_ns != 0 &&
 		                       received_ns - hmd->last_camera_frame_ns < 200 * (int64_t)U_TIME_1MS_IN_NS;
-		if (hmd->led_detector_blobs && !cameras_flowing) {
+		if (hmd->led_detector_blobs && (!cameras_flowing || psvr2_led_detector_owns_exposure_timing(hmd))) {
 			uint32_t interval_us = device_us - hmd->last_led_detector_event_vts_us;
 			uint32_t frames = counter - hmd->last_led_detector_event_counter;
 			bool have_previous = hmd->last_led_detector_event_vts_us != 0 && frames != 0 && frames < 8;

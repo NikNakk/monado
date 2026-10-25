@@ -222,3 +222,23 @@ high-contrast conversion benchmark measured 0.548 ms per stereo pair on this
 host. This is a short CPU-only measurement, not a headset latency or loaded
 tracking regression result. Visual confirmation remains pending. The installed
 LaunchAgent and previous capture folders are unchanged.
+
+## Version 4: mode-16 passthrough with detector tracking (untested)
+
+Mode 4 is not needed for Sense tracking here. The 6DoF defaults set
+`PSVR2_LED_DETECTOR_BLOBS=1`, so blobs come from the headset's LED detections
+on interface 8, not from camera images; the 5 Oct cameras-off sessions tracked
+as well as mode 4. `PSVR2_CAMERA_MODE=4` remains a default from the earlier
+image-blob pipeline. The obstacle to native mode-16 passthrough was timing:
+every camera frame announced an exposure, so mode-16 frames would have driven
+the Sense LED schedule. With detector blobs on and any camera mode other than
+4, the detector stream now announces exposures and camera frames do not
+(`psvr2_led_detector_owns_exposure_timing`, with a unit test). Mode 4 is
+unchanged.
+
+The `20261025-controller-survey-both-mode16-v3` evidence folder matches v2 plus
+`PSVR2_CAMERA_MODE=16`. Hardware gates: interface 8 populated in mode 16 (only
+mode 4 and cameras-off have been confirmed), LED lock and tracked fraction
+compared with v2, and passthrough image quality. The detector-to-VTS offset is
+not measured without mode-4 frames and uses `PSVR2_LED_DETECTOR_VTS_OFFSET_US`
+(default 0, as measured on 5 Oct).

@@ -260,3 +260,8 @@ lower pair into the existing BC4 transport while keeping Sense's mode 4 active.
 The path runs only for an attached passthrough consumer. Pixel/delivery/lifetime
 tests pass; simultaneous camera image, alignment and tracking quality still need
 hardware validation. See [the source diagnosis and limits](macos-pssense-controller-survey.md#version-3-mode-4-passthrough-and-options-reset).
+
+With `PSVR2_LED_DETECTOR_BLOBS` (a 6DoF default), Sense tracking does not need
+mode 4, and `PSVR2_CAMERA_MODE=16` gives native passthrough alongside it; the
+detector stream then owns exposure timing. Hardware validation is pending. See
+[version 4](macos-pssense-controller-survey.md#version-4-mode-16-passthrough-with-detector-tracking-untested).
