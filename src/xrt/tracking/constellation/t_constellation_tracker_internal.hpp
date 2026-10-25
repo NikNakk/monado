@@ -460,6 +460,7 @@ struct JointDeviceState
 	struct Loss
 	{
 		bool active{false};
+		int64_t last_report_ns{0};
 		int64_t last_confirmed_ns{0};
 		//! Position of the last confirmed solve, the reference while the device has no predicted position.
 		xrt_vec3 last_confirmed_position{};

@@ -658,12 +658,12 @@ JointProcessor::accountLosses(int64_t timestamp_ns,
 				        "lit_ambiguous=%u lit_single=%u dark_in_view=%u dark_out_of_view=%u "
 				        "dark_unpredicted=%u oriented=%u "
 				        "max_excess_blobs=%.1f start_cameras=%u start_in_view=%u start_margin_px=%.0f "
-				        "background=%s",
+				        "background=%s timestamp_ns=%" PRId64,
 				        (unsigned)device->id, (double)gap_ns / 1e6, loss.exposures, loss.acquiring,
 				        loss.lit_multi, loss.lit_ambiguous, loss.lit_single, loss.dark_in_view,
 				        loss.dark_out_of_view, loss.dark_unpredicted, loss.oriented,
 				        loss.max_excess_blobs, loss.start_cameras, loss.start_in_view,
-				        loss.start_margin_px, background.c_str());
+				        loss.start_margin_px, background.c_str(), timestamp_ns);
 			}
 			loss = JointDeviceState::Loss{};
 			loss.last_confirmed_ns = timestamp_ns;
@@ -721,6 +721,22 @@ JointProcessor::accountLosses(int64_t timestamp_ns,
 			loss.dark_in_view++;
 		} else {
 			loss.dark_out_of_view++;
+		}
+
+		// Report while still missing: a loss that never recovers must leave evidence too.
+		if (timestamp_ns - loss.last_confirmed_ns >= kLossLogMinNs &&
+		    (loss.last_report_ns == 0 || timestamp_ns - loss.last_report_ns >= kStatusIntervalNs)) {
+			CT_WARN(ct,
+			        "JOINT_LOSS_ACTIVE device=%u timestamp_ns=%" PRId64
+			        " gap_ms=%.1f exposures=%u acquiring=%u lit_multi=%u lit_ambiguous=%u "
+			        "lit_single=%u dark_in_view=%u dark_out_of_view=%u dark_unpredicted=%u "
+			        "start_cameras=%u start_in_view=%u start_margin_px=%.0f prediction=%u in_view=%u",
+			        (unsigned)device->id, timestamp_ns,
+			        (double)(timestamp_ns - loss.last_confirmed_ns) / 1e6, loss.exposures, loss.acquiring,
+			        loss.lit_multi, loss.lit_ambiguous, loss.lit_single, loss.dark_in_view,
+			        loss.dark_out_of_view, loss.dark_unpredicted, loss.start_cameras, loss.start_in_view,
+			        loss.start_margin_px, have_prediction ? 1u : 0u, in_view);
+			loss.last_report_ns = timestamp_ns;
 		}
 	}
 }

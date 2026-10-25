@@ -260,3 +260,60 @@ TEST_CASE("IMU optical filter predicts ahead from the latest IMU state")
 	CHECK((rel.relation_flags & XRT_SPACE_RELATION_POSITION_TRACKED_BIT) != 0);
 	t_imu_optical_filter_destroy(&f);
 }
+
+TEST_CASE("Application inertial fallback bridges occlusion without extending the solver prior")
+{
+	t_imu_optical_filter_params params;
+	t_imu_optical_filter_default_params(&params);
+	t_imu_optical_filter *f = t_imu_optical_filter_create(&params);
+	Sim sim;
+	sim.imu_period_ns = 15'000'000; // approximately the Sense's 66 Hz input rate
+	sim.run(f, 6.0, always, nothing);
+	sim.run(f, 0.45, [](double) { return false; }, nothing);
+	xrt_space_relation normal, fallback;
+	REQUIRE(t_imu_optical_filter_get_relation(f, sim.t_ns, &normal));
+	REQUIRE(t_imu_optical_filter_get_relation_with_fallback(f, sim.t_ns, 600'000'000, &fallback));
+	CHECK((normal.relation_flags & XRT_SPACE_RELATION_POSITION_VALID_BIT) == 0);
+	CHECK((fallback.relation_flags & XRT_SPACE_RELATION_POSITION_VALID_BIT) != 0);
+	CHECK((fallback.relation_flags & XRT_SPACE_RELATION_POSITION_TRACKED_BIT) == 0);
+	// Same integrated estimate, different validity policy. Querying fallback must not mutate the solver policy.
+	CHECK(fallback.pose.position.x == normal.pose.position.x);
+	CHECK(sim.error(f).first < 0.08); // synthetic 66 Hz motion, not a bound on real controller drift
+	REQUIRE(t_imu_optical_filter_get_relation(f, sim.t_ns, &normal));
+	CHECK((normal.relation_flags & XRT_SPACE_RELATION_POSITION_VALID_BIT) == 0);
+
+	sim.run(f, 0.3, [](double) { return false; }, nothing);
+	REQUIRE(t_imu_optical_filter_get_relation_with_fallback(f, sim.t_ns, 600'000'000, &fallback));
+	CHECK((fallback.relation_flags & XRT_SPACE_RELATION_POSITION_VALID_BIT) == 0);
+	// Even an excessive caller limit cannot permit more than one second of drift.
+	sim.run(f, 0.4, [](double) { return false; }, nothing);
+	REQUIRE(t_imu_optical_filter_get_relation_with_fallback(f, sim.t_ns, 10'000'000'000, &fallback));
+	CHECK((fallback.relation_flags & XRT_SPACE_RELATION_POSITION_VALID_BIT) == 0);
+
+	sim.run(f, 0.5, always, nothing);
+	REQUIRE(t_imu_optical_filter_get_relation(f, sim.t_ns, &normal));
+	CHECK((normal.relation_flags & XRT_SPACE_RELATION_POSITION_TRACKED_BIT) != 0);
+	CHECK(sim.error(f).first < 0.02);
+	t_imu_optical_filter_destroy(&f);
+}
+
+TEST_CASE("IMU loss expires tracking even with fresh optics and extended fallback")
+{
+	t_imu_optical_filter *f = make_filter();
+	Sim sim;
+	sim.run(f, 4.0, always, nothing);
+	xrt_space_relation rel;
+	// Stop all input, query beyond the maximum forward prediction. A clamped pose is not fresh tracking.
+	REQUIRE(t_imu_optical_filter_get_relation_with_fallback(f, sim.t_ns + 101'000'000, 600'000'000, &rel));
+	CHECK((rel.relation_flags & XRT_SPACE_RELATION_POSITION_VALID_BIT) == 0);
+	CHECK((rel.relation_flags & XRT_SPACE_RELATION_POSITION_TRACKED_BIT) == 0);
+	CHECK((rel.relation_flags & XRT_SPACE_RELATION_LINEAR_VELOCITY_VALID_BIT) == 0);
+	CHECK((rel.relation_flags & XRT_SPACE_RELATION_ORIENTATION_TRACKED_BIT) == 0);
+	CHECK((rel.relation_flags & XRT_SPACE_RELATION_ANGULAR_VELOCITY_VALID_BIT) == 0);
+	CHECK((rel.relation_flags & XRT_SPACE_RELATION_ORIENTATION_VALID_BIT) != 0);
+	t_imu_optical_filter_stats stats;
+	t_imu_optical_filter_get_stats(f, &stats);
+	CHECK(stats.last_imu_ns == sim.t_ns);
+	CHECK(stats.last_accepted_pose_ns > 0);
+	t_imu_optical_filter_destroy(&f);
+}

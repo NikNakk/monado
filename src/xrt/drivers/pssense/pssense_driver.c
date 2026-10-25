@@ -146,6 +146,10 @@ DEBUG_GET_ONCE_BOOL_OPTION(pssense_gyro_bias_auto, "PSSENSE_GYRO_BIAS_AUTO", fal
  * from interpolated optical poses and orientation from the IMU fusion's own world.
  */
 DEBUG_GET_ONCE_BOOL_OPTION(pssense_filter, "PSSENSE_FILTER", false)
+//! Application-only position validity after optical loss; zero retains the filter's 300 ms default.
+DEBUG_GET_ONCE_NUM_OPTION(pssense_imu_fallback_ms, "PSSENSE_IMU_FALLBACK_MS", 0)
+//! Application pose state transitions plus one heartbeat per second, under controller_thread lock.
+DEBUG_GET_ONCE_BOOL_OPTION(pssense_pose_diag, "PSSENSE_POSE_DIAG", false)
 DEBUG_GET_ONCE_BOOL_OPTION(pssense_joint, "CONSTELLATION_TRACKER_JOINT", false)
 /*
  * On shutdown, send LED_ALL_OFF for ~150 ms before closing, instead of stopping mid-schedule. The always-lit fault has
@@ -528,6 +532,8 @@ struct pssense_device
 		//! PSSENSE_FILTER: IMU + optical EKF; NULL when off. Locked by controller_thread.
 		struct t_imu_optical_filter *filter;
 		uint64_t filter_last_logged_updates;
+		int64_t pose_diag_last_ns;
+		uint32_t pose_diag_flags;
 		struct xrt_pose pose;
 
 		uint32_t received_frames;
@@ -1724,6 +1730,7 @@ pssense_reset_connection_locked(struct pssense_device *pssense)
 	}
 	pssense->tracking.have_last_fused_pose = false;
 	pssense->tracking.last_optical_timestamp_ns = 0;
+	pssense->tracking.pose_diag_last_ns = 0;
 	pssense->orientation_alignment_initialized = false;
 
 	t_led_phase_bootstrap_stop(&pssense->tracking.led_bootstrap);
@@ -3106,21 +3113,24 @@ pssense_commit_optical_pose_locked(struct pssense_device *pssense,
 		struct t_imu_optical_filter_stats stats;
 		t_imu_optical_filter_get_stats(pssense->tracking.filter, &stats);
 		if (result == T_IMU_OPTICAL_FILTER_INITIALISED || result == T_IMU_OPTICAL_FILTER_REINITIALISED ||
+		    (debug_get_bool_option_pssense_pose_diag() && result == T_IMU_OPTICAL_FILTER_REJECTED &&
+		     (stats.rejections == 1 || stats.rejections % 30 == 0)) ||
 		    stats.updates >= pssense->tracking.filter_last_logged_updates + 300) {
 			pssense->tracking.filter_last_logged_updates = stats.updates;
 			PSSENSE_INFO(pssense,
-			             "FILTER side=%c event=%s updates=%" PRIu64 " rejections=%" PRIu64
-			             " reinitialisations=%" PRIu64
+			             "FILTER side=%c event=%s timestamp_ns=%" PRId64 " updates=%" PRIu64
+			             " rejections=%" PRIu64 " reinitialisations=%" PRIu64
 			             " mahalanobis2=%.2f gyro_bias_deg_s=%.2f,%.2f,%.2f "
 			             "accel_bias_m_s2=%.3f,%.3f,%.3f",
 			             pssense->hand == XRT_HAND_LEFT ? 'L' : 'R',
 			             result == T_IMU_OPTICAL_FILTER_INITIALISED     ? "initialised"
 			             : result == T_IMU_OPTICAL_FILTER_REINITIALISED ? "reinitialised"
+			             : result == T_IMU_OPTICAL_FILTER_REJECTED      ? "rejected"
 			                                                            : "status",
-			             stats.updates, stats.rejections, stats.reinitialisations, stats.last_mahalanobis2,
-			             stats.gyro_bias_rad_s.x * 180.0 / M_PI, stats.gyro_bias_rad_s.y * 180.0 / M_PI,
-			             stats.gyro_bias_rad_s.z * 180.0 / M_PI, stats.accel_bias_m_s2.x,
-			             stats.accel_bias_m_s2.y, stats.accel_bias_m_s2.z);
+			             sample->timestamp_ns, stats.updates, stats.rejections, stats.reinitialisations,
+			             stats.last_mahalanobis2, stats.gyro_bias_rad_s.x * 180.0 / M_PI,
+			             stats.gyro_bias_rad_s.y * 180.0 / M_PI, stats.gyro_bias_rad_s.z * 180.0 / M_PI,
+			             stats.accel_bias_m_s2.x, stats.accel_bias_m_s2.y, stats.accel_bias_m_s2.z);
 		}
 	}
 
@@ -3945,7 +3955,43 @@ pssense_get_tracked_pose(struct xrt_device *xdev,
 
 	os_thread_helper_lock(&pssense->controller_thread);
 	if (pssense->tracking.use_constellation) {
-		pssense_get_constellation_pose(pssense, at_timestamp_ns, rel);
+		int64_t fallback_ms = CLAMP(debug_get_num_option_pssense_imu_fallback_ms(), 0, 1000);
+		bool have_fallback =
+		    pssense->tracking.filter != NULL && fallback_ms > 0 &&
+		    t_imu_optical_filter_get_relation_with_fallback(pssense->tracking.filter, at_timestamp_ns,
+		                                                    fallback_ms * U_TIME_1MS_IN_NS, rel);
+		if (!have_fallback) {
+			pssense_get_constellation_pose(pssense, at_timestamp_ns, rel);
+		}
+		if (debug_get_bool_option_pssense_pose_diag() && pssense->tracking.filter != NULL) {
+			const int64_t now = os_monotonic_get_ns();
+			uint32_t flags = (uint32_t)rel->relation_flags;
+			if (pssense->tracking.pose_diag_last_ns == 0 || flags != pssense->tracking.pose_diag_flags ||
+			    now - pssense->tracking.pose_diag_last_ns >= U_TIME_1S_IN_NS) {
+				struct t_imu_optical_filter_stats stats;
+				t_imu_optical_filter_get_stats(pssense->tracking.filter, &stats);
+				PSSENSE_INFO(
+				    pssense,
+				    "POSE_STATE side=%c device=%u now_ns=%" PRId64 " target_ns=%" PRId64
+				    " flags=0x%x state=%s optical_age_ms=%.1f imu_age_ms=%.1f last_cameras=%u "
+				    "updates=%" PRIu64 " rejections=%" PRIu64 " reinitialisations=%" PRIu64
+				    " fallback_ms=%" PRId64 " position_m=%.4f,%.4f,%.4f",
+				    pssense->hand == XRT_HAND_LEFT ? 'L' : 'R',
+				    (unsigned)pssense->tracking.constellation_device_id, now, at_timestamp_ns, flags,
+				    (flags & XRT_SPACE_RELATION_POSITION_TRACKED_BIT)      ? "tracked"
+				    : (flags & XRT_SPACE_RELATION_POSITION_VALID_BIT)      ? "inertial"
+				    : (flags & XRT_SPACE_RELATION_ORIENTATION_TRACKED_BIT) ? "orientation_only"
+				                                                           : "untracked",
+				    stats.last_accepted_pose_ns ? (double)(now - stats.last_accepted_pose_ns) / 1e6
+				                                : -1.0,
+				    stats.last_imu_ns ? (double)(now - stats.last_imu_ns) / 1e6 : -1.0,
+				    pssense->tracking.last_fused_camera_count, stats.updates, stats.rejections,
+				    stats.reinitialisations, fallback_ms, rel->pose.position.x, rel->pose.position.y,
+				    rel->pose.position.z);
+				pssense->tracking.pose_diag_last_ns = now;
+				pssense->tracking.pose_diag_flags = flags;
+			}
+		}
 	} else {
 		pssense_get_imu_fusion_pose(pssense, at_timestamp_ns, rel);
 	}
