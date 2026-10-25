@@ -21,6 +21,8 @@
 DEBUG_GET_ONCE_BOOL_OPTION(macos_passthrough_rotation, "XRT_MACOS_PASSTHROUGH_ROTATION", true)
 DEBUG_GET_ONCE_NUM_OPTION(macos_passthrough_fov_deg, "XRT_MACOS_PASSTHROUGH_FOV_DEG", 150)
 DEBUG_GET_ONCE_NUM_OPTION(macos_passthrough_convergence_milli, "XRT_MACOS_PASSTHROUGH_CONVERGENCE_MILLI", 100)
+//! Experimental fixed mapping depth from each eye in millimetres; 0 keeps the rotation-only mapping at infinity.
+DEBUG_GET_ONCE_NUM_OPTION(macos_passthrough_depth_mm, "XRT_MACOS_PASSTHROUGH_DEPTH_MM", 0)
 DEBUG_GET_ONCE_NUM_OPTION(macos_passthrough_brightness_percent, "XRT_MACOS_PASSTHROUGH_BRIGHTNESS_PERCENT", 160)
 
 struct psvr2_passthrough_sink
@@ -114,6 +116,28 @@ psvr2_passthrough_create_uv_maps(struct comp_psvr2_passthrough *pt)
 		COMP_WARN(pt->c, "Passthrough rotation requires a valid calibrated mapping; using static view");
 	}
 
+	/* Eye positions in head space for the fixed-depth mapping. The IPD is the headset's value at map creation;
+	 * later dial changes are not followed. */
+	double depth_m = 0;
+	struct xrt_vec3 eye_positions[2] = {{-0.0315f, 0, 0}, {0.0315f, 0, 0}};
+	long depth_mm = debug_get_num_option_macos_passthrough_depth_mm();
+	if (calibrated && depth_mm > 0) {
+		depth_m = (double)(depth_mm < 200 ? 200 : depth_mm > 100000 ? 100000 : depth_mm) / 1000.0;
+		struct xrt_vec3 eye_relation = {0.063f, 0, 0};
+		struct xrt_space_relation head = XRT_SPACE_RELATION_ZERO;
+		struct xrt_fov fovs[XRT_MAX_VIEWS] = XRT_STRUCT_INIT;
+		struct xrt_pose poses[XRT_MAX_VIEWS] = XRT_STRUCT_INIT;
+		if (xrt_device_get_view_poses(xdev, &eye_relation, os_monotonic_get_ns(), XRT_VIEW_TYPE_STEREO, 2,
+		                              &head, fovs, poses) == XRT_SUCCESS) {
+			eye_positions[0] = poses[0].position;
+			eye_positions[1] = poses[1].position;
+		}
+		COMP_INFO(pt->c, "Experimental passthrough mapping depth %.2f m (eyes at x %.4f/%.4f m)", depth_m,
+		          eye_positions[0].x, eye_positions[1].x);
+	} else if (depth_mm > 0) {
+		COMP_WARN(pt->c, "XRT_MACOS_PASSTHROUGH_DEPTH_MM requires a valid calibration; ignored");
+	}
+
 	const float fx = 0.3585564f;
 	const float fy = 0.3762281f;
 	const float camera_width_ratio = 1016.0f / 1024.0f;
@@ -159,10 +183,24 @@ psvr2_passthrough_create_uv_maps(struct comp_psvr2_passthrough *pt)
 				map[index + 2] = tan_x;
 				map[index + 3] = tan_y_down;
 				if (calibrated) {
-					/* PS VR2 view orientations are identity relative to the head.
-					 * At infinity, eye/camera translations do not affect the ray. */
-					struct xrt_vec3 head_ray = {tan_x, -tan_y_down, -1.0f};
+					/* PS VR2 view orientations are identity relative to the head. At infinity,
+					 * eye/camera translations do not affect the ray; at a fixed depth the stored ray
+					 * becomes the camera-centred direction to that point, which GPU rotation then
+					 * uses unchanged (its translation is taken at the display pose). */
+					struct xrt_vec3 eye_ray = {tan_x, -tan_y_down, -1.0f};
+					struct xrt_vec3 head_ray;
 					struct xrt_vec2 uv;
+					if (!u_passthrough_calibration_depth_ray(&calibration.cameras[eye],
+					                                         &eye_positions[eye], &eye_ray, depth_m,
+					                                         &head_ray)) {
+						map[index + 0] = -1.0f;
+						map[index + 1] = -1.0f;
+						map[index + 2] = NAN;
+						map[index + 3] = NAN;
+						continue;
+					}
+					map[index + 2] = head_ray.x;
+					map[index + 3] = -head_ray.y;
 					if (u_passthrough_calibration_project(&calibration.cameras[eye], &head_ray,
 					                                      &uv)) {
 						map[index + 0] = uv.x;

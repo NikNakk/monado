@@ -265,3 +265,29 @@ With `PSVR2_LED_DETECTOR_BLOBS` (a 6DoF default), Sense tracking does not need
 mode 4, and `PSVR2_CAMERA_MODE=16` gives native passthrough alongside it; the
 detector stream then owns exposure timing. Hardware validation is pending. See
 [version 4](macos-pssense-controller-survey.md#version-4-mode-16-passthrough-with-detector-tracking-untested).
+
+## Near-object swim during head rotation (2026-10-25)
+
+With Sense tracking verified world-stable during head turns, the user sees
+fixed hands move slightly in the passthrough image as the head rotates. This is
+the expected limit of the rotation-only mapping at infinity: the lower cameras
+are several centimetres ahead of and below the eyes, so the camera ray to a
+nearby point differs from the eye ray by an amount that changes with where the
+point sits in the view. The installed calibration's translations (about 10 cm
+forward, 2 cm down; hand-eye translation not trusted in the source) predict a
+few degrees at 0.45 m and under about 1° beyond 3 m. The next step is an opt-in
+fixed-depth reprojection: intersect each eye ray with a sphere at a chosen
+distance and project that point from the camera centre, then compare
+infinity with about 0.5 m and 1 m.
+
+`XRT_MACOS_PASSTHROUGH_DEPTH_MM` now implements this as an opt-in (default 0,
+infinity). Each optical eye ray meets a sphere of the given radius around its
+eye; the map stores the direction to that point from the calibrated camera
+centre, which the existing GPU rotation then uses unchanged. The camera
+translation is therefore taken at the display pose rather than the capture
+pose, an error of roughly translation × rotation during capture-to-display
+latency divided by depth: under 1° for fast turns at 0.5 m. The eye positions
+use the headset IPD at map creation. Rays whose point would be level with or
+behind the camera are masked. Built into both the Metal and Vulkan presenters,
+with unit tests; the comparison of infinity, 2 m, 1 m and 0.5 m on the headset
+is prepared in `20261025-depth-hold-v4/commands.txt` and is pending.

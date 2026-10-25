@@ -228,6 +228,13 @@ remain opt-in. See the [calibration guide](macos-psvr2-passthrough-calibration.m
 
 ## Passthrough rotational reprojection (2026-10-08)
 
+`XRT_MACOS_PASSTHROUGH_DEPTH_MM` (default `0`, infinity) maps calibrated
+passthrough at a fixed distance from each eye instead, clamped to 200–100000 mm.
+It uses the calibration's camera positions and the eye positions at map
+creation, and applies in both the Metal and Vulkan presenters. Set it where the
+map is built: in the client for client compositing, in the service otherwise.
+Experimental; see [near-object swim](macos-psvr2-passthrough.md#near-object-swim-during-head-rotation-2026-10-25).
+
 `XRT_MACOS_PASSTHROUGH_ROTATION` (default `1`) enables the macOS presenter's
 camera rotational reprojection when a valid calibration is loaded, either
 automatically or through `XRT_MACOS_PASSTHROUGH_CALIBRATION`. Set it to `0`
