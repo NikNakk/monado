@@ -1,0 +1,26 @@
+{
+  "requested_driver": "kosmickrisp",
+  "icd": "/opt/homebrew/Cellar/molten-vk/1.4.2/etc/vulkan/icd.d/MoltenVK_icd.json",
+  "icd_contents": {
+    "file_format_version": "1.0.0",
+    "ICD": {
+      "library_path": "../../../lib/libMoltenVK.dylib",
+      "api_version": "1.4.0",
+      "is_portability_driver": true
+    }
+  },
+  "library": "/opt/homebrew/Cellar/molten-vk/1.4.2/lib/libMoltenVK.dylib",
+  "library_sha256": "05df2d2145b9ef5b86b08ed93a7a6e916815c2bbac244298a50b2d58061600d1",
+  "loader": "/opt/homebrew/Cellar/vulkan-loader/1.4.363.0/lib/libvulkan.1.4.363.dylib",
+  "command": [
+    "/usr/bin/true"
+  ],
+  "selection": {
+    "VK_DRIVER_FILES": "/opt/homebrew/Cellar/molten-vk/1.4.2/etc/vulkan/icd.d/MoltenVK_icd.json",
+    "XRIZER_VULKAN_LIBRARY": "/opt/homebrew/Cellar/vulkan-loader/1.4.363.0/lib/libvulkan.1.4.363.dylib",
+    "KL_VULKAN_LIBRARY": "/opt/homebrew/Cellar/vulkan-loader/1.4.363.0/lib/libvulkan.1.4.363.dylib"
+  },
+  "started_unix": 1792446055.681016,
+  "exit_code": 1,
+  "error": "ICD census failed or selected driver differs from request"
+}

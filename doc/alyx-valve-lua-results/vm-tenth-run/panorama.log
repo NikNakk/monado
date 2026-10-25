@@ -1,0 +1,384 @@
+[platform-vm] guest commit=4096 host protection=16384; subpage protections are combined; 4KiB guard faults unavailable
+  [dl] /private/tmp/alyx-native-guest-libs-runtime/libpanorama_text_pango.so: 6 DT_NEEDED
+  [dl]     needs libstdc++.so.6
+  [dl]     needs libssl.so.3
+  [dl]     needs libcrypto.so.3
+  [dl]     needs libtier0.so
+  [dl]     needs libvstdlib.so
+  [dl]     needs libc.so.6
+  [dl]     libstdc++.so.6 -> loading (/private/tmp/alyx-native-guest-libs-runtime/libstdc++.so.6)
+  [dl] /private/tmp/alyx-native-guest-libs-runtime/libstdc++.so.6: 3 DT_NEEDED
+  [dl]     needs libm.so.6
+  [dl]     needs libc.so.6
+  [dl]     needs libgcc_s.so.1
+  [dl]     libm.so.6 -> shim-served (skip)
+  [dl]     libc.so.6 -> shim-served (skip)
+  [dl]     libgcc_s.so.1 -> loading (/private/tmp/alyx-native-guest-libs-runtime/libgcc_s.so.1)
+  [dl] /private/tmp/alyx-native-guest-libs-runtime/libgcc_s.so.1: 1 DT_NEEDED
+  [dl]     needs libc.so.6
+  [dl]     libc.so.6 -> shim-served (skip)
+  [dl]     libssl.so.3 -> loading (/private/tmp/alyx-native-guest-libs-runtime/libssl.so.3)
+  [dl] /private/tmp/alyx-native-guest-libs-runtime/libssl.so.3: 3 DT_NEEDED
+  [dl]     needs libcrypto.so.3
+  [dl]     needs libc.so.6
+  [dl]     needs ld-linux-aarch64.so.1
+  [dl]     libcrypto.so.3 -> loading (/private/tmp/alyx-native-guest-libs-runtime/libcrypto.so.3)
+  [dl] /private/tmp/alyx-native-guest-libs-runtime/libcrypto.so.3: 4 DT_NEEDED
+  [dl]     needs libz.so.1
+  [dl]     needs libzstd.so.1
+  [dl]     needs libc.so.6
+  [dl]     needs ld-linux-aarch64.so.1
+  [dl]     libz.so.1 -> loading (/private/tmp/alyx-native-guest-libs-runtime/libz.so.1)
+  [dl] /private/tmp/alyx-native-guest-libs-runtime/libz.so.1: 2 DT_NEEDED
+  [dl]     needs libc.so.6
+  [dl]     needs ld-linux-aarch64.so.1
+  [dl]     libc.so.6 -> shim-served (skip)
+  [dl]     ld-linux-aarch64.so.1 -> shim-served (skip)
+  [dl]     libzstd.so.1 -> loading (/private/tmp/alyx-native-guest-libs-runtime/libzstd.so.1)
+  [dl] /private/tmp/alyx-native-guest-libs-runtime/libzstd.so.1: 2 DT_NEEDED
+  [dl]     needs libc.so.6
+  [dl]     needs ld-linux-aarch64.so.1
+  [dl]     libc.so.6 -> shim-served (skip)
+  [dl]     ld-linux-aarch64.so.1 -> shim-served (skip)
+  [dl]     libc.so.6 -> shim-served (skip)
+  [dl]     ld-linux-aarch64.so.1 -> shim-served (skip)
+  [dl]     libc.so.6 -> shim-served (skip)
+  [dl]     ld-linux-aarch64.so.1 -> shim-served (skip)
+  [dl]     libcrypto.so.3 -> loading (/private/tmp/alyx-native-guest-libs-runtime/libcrypto.so.3)
+  [dl]     libtier0.so -> loading (/private/tmp/alyx-native-guest-libs-runtime/libtier0.so)
+  [dl] /private/tmp/alyx-native-guest-libs-runtime/libtier0.so: 3 DT_NEEDED
+  [dl]     needs libm.so.6
+  [dl]     needs libstdc++.so.6
+  [dl]     needs libc.so.6
+  [dl]     libm.so.6 -> shim-served (skip)
+  [dl]     libstdc++.so.6 -> loading (/private/tmp/alyx-native-guest-libs-runtime/libstdc++.so.6)
+  [dl]     libc.so.6 -> shim-served (skip)
+  [dl]     libvstdlib.so -> loading (/private/tmp/alyx-native-guest-libs-runtime/libvstdlib.so)
+  [dl] /private/tmp/alyx-native-guest-libs-runtime/libvstdlib.so: 4 DT_NEEDED
+  [dl]     needs libm.so.6
+  [dl]     needs libstdc++.so.6
+  [dl]     needs libtier0.so
+  [dl]     needs libc.so.6
+  [dl]     libm.so.6 -> shim-served (skip)
+  [dl]     libstdc++.so.6 -> loading (/private/tmp/alyx-native-guest-libs-runtime/libstdc++.so.6)
+  [dl]     libtier0.so -> loading (/private/tmp/alyx-native-guest-libs-runtime/libtier0.so)
+  [dl]     libc.so.6 -> shim-served (skip)
+  [dl]     libc.so.6 -> shim-served (skip)
+[proc] synthetic /proc and /sys at /var/folders/gs/rb65_ql96tj5nh0pm2_6jgt80000gn/T/klepton-proc.cubQtc (10 cpus, 6144 MB budget)
+RUNTIME constructors pass: libpanorama_text_pango.so
+  [dl] /private/tmp/alyx-native-guest-libs-runtime/libharfbuzz-icu.so: 3 DT_NEEDED
+  [dl]     needs libharfbuzz.so.0
+  [dl]     needs libicuuc.so.67
+  [dl]     needs libc.so.6
+  [dl]     libharfbuzz.so.0 -> loading (/private/tmp/alyx-native-guest-libs-runtime/libharfbuzz.so.0)
+  [dl] /private/tmp/alyx-native-guest-libs-runtime/libharfbuzz.so.0: 5 DT_NEEDED
+  [dl]     needs libm.so.6
+  [dl]     needs libfreetype.so.6
+  [dl]     needs libglib-2.0.so.0
+  [dl]     needs libpthread.so.0
+  [dl]     needs libc.so.6
+  [dl]     libm.so.6 -> shim-served (skip)
+  [dl]     libfreetype.so.6 -> loading (/private/tmp/alyx-native-guest-libs-runtime/libfreetype.so.6)
+  [dl] /private/tmp/alyx-native-guest-libs-runtime/libfreetype.so.6: 5 DT_NEEDED
+  [dl]     needs libbz2.so.1.0
+  [dl]     needs libpng16.so.16
+  [dl]     needs libharfbuzz.so.0
+  [dl]     needs libbrotlidec.so.1
+  [dl]     needs libc.so.6
+  [dl]     libbz2.so.1.0 -> loading (/private/tmp/alyx-native-guest-libs-runtime/libbz2.so.1.0)
+  [dl] /private/tmp/alyx-native-guest-libs-runtime/libbz2.so.1.0: 2 DT_NEEDED
+  [dl]     needs libc.so.6
+  [dl]     needs ld-linux-aarch64.so.1
+  [dl]     libc.so.6 -> shim-served (skip)
+  [dl]     ld-linux-aarch64.so.1 -> shim-served (skip)
+  [dl]     libpng16.so.16 -> loading (/private/tmp/alyx-native-guest-libs-runtime/libpng16.so.16)
+  [dl] /private/tmp/alyx-native-guest-libs-runtime/libpng16.so.16: 4 DT_NEEDED
+  [dl]     needs libz.so.1
+  [dl]     needs libm.so.6
+  [dl]     needs libc.so.6
+  [dl]     needs ld-linux-aarch64.so.1
+  [dl]     libz.so.1 -> loading (/private/tmp/alyx-native-guest-libs-runtime/libz.so.1)
+  [dl]     libm.so.6 -> shim-served (skip)
+  [dl]     libc.so.6 -> shim-served (skip)
+  [dl]     ld-linux-aarch64.so.1 -> shim-served (skip)
+  [dl]     libharfbuzz.so.0 -> loading (/private/tmp/alyx-native-guest-libs-runtime/libharfbuzz.so.0)
+  [dl] libharfbuzz.so.0 is already being loaded (dependency cycle) — bound late
+  [dl]     libbrotlidec.so.1 -> loading (/private/tmp/alyx-native-guest-libs-runtime/libbrotlidec.so.1)
+  [dl] /private/tmp/alyx-native-guest-libs-runtime/libbrotlidec.so.1: 3 DT_NEEDED
+  [dl]     needs libbrotlicommon.so.1
+  [dl]     needs libc.so.6
+  [dl]     needs ld-linux-aarch64.so.1
+  [dl]     libbrotlicommon.so.1 -> loading (/private/tmp/alyx-native-guest-libs-runtime/libbrotlicommon.so.1)
+  [dl] /private/tmp/alyx-native-guest-libs-runtime/libbrotlicommon.so.1: 1 DT_NEEDED
+  [dl]     needs libc.so.6
+  [dl]     libc.so.6 -> shim-served (skip)
+  [dl]     libc.so.6 -> shim-served (skip)
+  [dl]     ld-linux-aarch64.so.1 -> shim-served (skip)
+  [dl]     libc.so.6 -> shim-served (skip)
+  [dl]     libglib-2.0.so.0 -> loading (/private/tmp/alyx-native-guest-libs-runtime/libglib-2.0.so.0)
+  [dl] /private/tmp/alyx-native-guest-libs-runtime/libglib-2.0.so.0: 5 DT_NEEDED
+  [dl]     needs libatomic.so.1
+  [dl]     needs libm.so.6
+  [dl]     needs libpcre2-8.so.0
+  [dl]     needs libc.so.6
+  [dl]     needs ld-linux-aarch64.so.1
+  [dl]     libatomic.so.1 -> loading (/private/tmp/alyx-native-guest-libs-runtime/libatomic.so.1)
+  [dl] /private/tmp/alyx-native-guest-libs-runtime/libatomic.so.1: 1 DT_NEEDED
+  [dl]     needs libc.so.6
+  [dl]     libc.so.6 -> shim-served (skip)
+  [dl]     libm.so.6 -> shim-served (skip)
+  [dl]     libpcre2-8.so.0 -> loading (/private/tmp/alyx-native-guest-libs-runtime/libpcre2-8.so.0)
+  [dl] /private/tmp/alyx-native-guest-libs-runtime/libpcre2-8.so.0: 2 DT_NEEDED
+  [dl]     needs libc.so.6
+  [dl]     needs ld-linux-aarch64.so.1
+  [dl]     libc.so.6 -> shim-served (skip)
+  [dl]     ld-linux-aarch64.so.1 -> shim-served (skip)
+  [dl]     libc.so.6 -> shim-served (skip)
+  [dl]     ld-linux-aarch64.so.1 -> shim-served (skip)
+  [dl]     libpthread.so.0 -> shim-served (skip)
+  [dl]     libc.so.6 -> shim-served (skip)
+  [dl]     libicuuc.so.67 -> loading (/private/tmp/alyx-native-guest-libs-runtime/libicuuc.so.67)
+  [dl] /private/tmp/alyx-native-guest-libs-runtime/libicuuc.so.67: 8 DT_NEEDED
+  [dl]     needs libicudata.so.67
+  [dl]     needs libpthread.so.0
+  [dl]     needs libdl.so.2
+  [dl]     needs libstdc++.so.6
+  [dl]     needs libm.so.6
+  [dl]     needs libgcc_s.so.1
+  [dl]     needs libc.so.6
+  [dl]     needs ld-linux-aarch64.so.1
+  [dl]     libicudata.so.67 -> loading (/private/tmp/alyx-native-guest-libs-runtime/libicudata.so.67)
+  [dl] /private/tmp/alyx-native-guest-libs-runtime/libicudata.so.67: 0 DT_NEEDED
+  [dl]     libpthread.so.0 -> shim-served (skip)
+  [dl]     libdl.so.2 -> shim-served (skip)
+  [dl]     libstdc++.so.6 -> loading (/private/tmp/alyx-native-guest-libs-runtime/libstdc++.so.6)
+  [dl]     libm.so.6 -> shim-served (skip)
+  [dl]     libgcc_s.so.1 -> loading (/private/tmp/alyx-native-guest-libs-runtime/libgcc_s.so.1)
+  [dl]     libc.so.6 -> shim-served (skip)
+  [dl]     ld-linux-aarch64.so.1 -> shim-served (skip)
+  [dl]     libc.so.6 -> shim-served (skip)
+  [dl] /private/tmp/alyx-native-guest-libs-runtime/libfreetype.so.6: 29 import(s) bound late (dependency cycle)
+RUNTIME constructors pass: libharfbuzz-icu.so
+  [dl] /private/tmp/alyx-native-guest-libs-runtime/libvorbisfile.so: 3 DT_NEEDED
+  [dl]     needs libvorbis.so.0
+  [dl]     needs libogg.so.0
+  [dl]     needs libc.so.6
+  [dl]     libvorbis.so.0 -> loading (/private/tmp/alyx-native-guest-libs-runtime/libvorbis.so.0)
+  [dl] /private/tmp/alyx-native-guest-libs-runtime/libvorbis.so.0: 3 DT_NEEDED
+  [dl]     needs libm.so.6
+  [dl]     needs libogg.so.0
+  [dl]     needs libc.so.6
+  [dl]     libm.so.6 -> shim-served (skip)
+  [dl]     libogg.so.0 -> loading (/private/tmp/alyx-native-guest-libs-runtime/libogg.so.0)
+  [dl] /private/tmp/alyx-native-guest-libs-runtime/libogg.so.0: 2 DT_NEEDED
+  [dl]     needs libc.so.6
+  [dl]     needs ld-linux-aarch64.so.1
+  [dl]     libc.so.6 -> shim-served (skip)
+  [dl]     ld-linux-aarch64.so.1 -> shim-served (skip)
+  [dl]     libc.so.6 -> shim-served (skip)
+  [dl]     libogg.so.0 -> loading (/private/tmp/alyx-native-guest-libs-runtime/libogg.so.0)
+  [dl]     libc.so.6 -> shim-served (skip)
+RUNTIME constructors pass: libvorbisfile.so
+  [dl] /private/tmp/alyx-native-guest-libs-runtime/libpanorama.so: 13 DT_NEEDED
+  [dl]     needs libm.so.6
+  [dl]     needs libstdc++.so.6
+  [dl]     needs libssl.so.3
+  [dl]     needs libcrypto.so.3
+  [dl]     needs libSDL2.so
+  [dl]     needs libX11.so.6
+  [dl]     needs libtier0.so
+  [dl]     needs libvstdlib.so
+  [dl]     needs libvideo.so
+  [dl]     needs libsteam_api.so
+  [dl]     needs libv8_libplatform.so
+  [dl]     needs libv8.so
+  [dl]     needs libc.so.6
+  [dl]     libm.so.6 -> shim-served (skip)
+  [dl]     libstdc++.so.6 -> loading (/private/tmp/alyx-native-guest-libs-runtime/libstdc++.so.6)
+  [dl]     libssl.so.3 -> loading (/private/tmp/alyx-native-guest-libs-runtime/libssl.so.3)
+  [dl]     libcrypto.so.3 -> loading (/private/tmp/alyx-native-guest-libs-runtime/libcrypto.so.3)
+  [dl]     libSDL2.so -> loading (/private/tmp/alyx-native-guest-libs-runtime/libSDL2.so)
+  [dl] /private/tmp/alyx-native-guest-libs-runtime/libSDL2.so: 3 DT_NEEDED
+  [dl]     needs libm.so.6
+  [dl]     needs libc.so.6
+  [dl]     needs ld-linux-aarch64.so.1
+  [dl]     libm.so.6 -> shim-served (skip)
+  [dl]     libc.so.6 -> shim-served (skip)
+  [dl]     ld-linux-aarch64.so.1 -> shim-served (skip)
+  [dl]     libX11.so.6 -> shim-served (skip)
+  [dl]     libtier0.so -> loading (/private/tmp/alyx-native-guest-libs-runtime/libtier0.so)
+  [dl]     libvstdlib.so -> loading (/private/tmp/alyx-native-guest-libs-runtime/libvstdlib.so)
+  [dl]     libvideo.so -> loading (/private/tmp/alyx-native-guest-libs-runtime/libvideo.so)
+  [dl] /private/tmp/alyx-native-guest-libs-runtime/libvideo.so: 11 DT_NEEDED
+  [dl]     needs libdl.so.2
+  [dl]     needs librt.so.1
+  [dl]     needs ld-linux-aarch64.so.1
+  [dl]     needs libavcodec.so.58
+  [dl]     needs libavformat.so.58
+  [dl]     needs libavresample.so.4
+  [dl]     needs libavutil.so.56
+  [dl]     needs libswscale.so.5
+  [dl]     needs libm.so.6
+  [dl]     needs libpthread.so.0
+  [dl]     needs libc.so.6
+  [dl]     libdl.so.2 -> shim-served (skip)
+  [dl]     librt.so.1 -> shim-served (skip)
+  [dl]     ld-linux-aarch64.so.1 -> shim-served (skip)
+  [dl]     libavcodec.so.58 -> loading (/private/tmp/alyx-native-guest-libs-runtime/libavcodec.so.58)
+  [dl] /private/tmp/alyx-native-guest-libs-runtime/libavcodec.so.58: 5 DT_NEEDED
+  [dl]     needs libavutil.so.56
+  [dl]     needs libvpx.so.6
+  [dl]     needs libm.so.6
+  [dl]     needs libpthread.so.0
+  [dl]     needs libc.so.6
+  [dl]     libavutil.so.56 -> loading (/private/tmp/alyx-native-guest-libs-runtime/libavutil.so.56)
+  [dl] /private/tmp/alyx-native-guest-libs-runtime/libavutil.so.56: 4 DT_NEEDED
+  [dl]     needs libm.so.6
+  [dl]     needs libdrm.so.2
+  [dl]     needs libpthread.so.0
+  [dl]     needs libc.so.6
+  [dl]     libm.so.6 -> shim-served (skip)
+  [dl]     libdrm.so.2 -> shim-served (skip)
+  [dl]     libpthread.so.0 -> shim-served (skip)
+  [dl]     libc.so.6 -> shim-served (skip)
+  [dl]     libvpx.so.6 -> loading (/private/tmp/alyx-native-guest-libs-runtime/libvpx.so.6)
+  [dl] /private/tmp/alyx-native-guest-libs-runtime/libvpx.so.6: 3 DT_NEEDED
+  [dl]     needs libpthread.so.0
+  [dl]     needs libm.so.6
+  [dl]     needs libc.so.6
+  [dl]     libpthread.so.0 -> shim-served (skip)
+  [dl]     libm.so.6 -> shim-served (skip)
+  [dl]     libc.so.6 -> shim-served (skip)
+  [dl]     libm.so.6 -> shim-served (skip)
+  [dl]     libpthread.so.0 -> shim-served (skip)
+  [dl]     libc.so.6 -> shim-served (skip)
+  [dl]     libavformat.so.58 -> loading (/private/tmp/alyx-native-guest-libs-runtime/libavformat.so.58)
+  [dl] /private/tmp/alyx-native-guest-libs-runtime/libavformat.so.58: 6 DT_NEEDED
+  [dl]     needs libavcodec.so.58
+  [dl]     needs libavutil.so.56
+  [dl]     needs libm.so.6
+  [dl]     needs libz.so.1
+  [dl]     needs libpthread.so.0
+  [dl]     needs libc.so.6
+  [dl]     libavcodec.so.58 -> loading (/private/tmp/alyx-native-guest-libs-runtime/libavcodec.so.58)
+  [dl]     libavutil.so.56 -> loading (/private/tmp/alyx-native-guest-libs-runtime/libavutil.so.56)
+  [dl]     libm.so.6 -> shim-served (skip)
+  [dl]     libz.so.1 -> loading (/private/tmp/alyx-native-guest-libs-runtime/libz.so.1)
+  [dl]     libpthread.so.0 -> shim-served (skip)
+  [dl]     libc.so.6 -> shim-served (skip)
+  [dl]     libavresample.so.4 -> loading (/private/tmp/alyx-native-guest-libs-runtime/libavresample.so.4)
+  [dl] /private/tmp/alyx-native-guest-libs-runtime/libavresample.so.4: 3 DT_NEEDED
+  [dl]     needs libavutil.so.56
+  [dl]     needs libm.so.6
+  [dl]     needs libc.so.6
+  [dl]     libavutil.so.56 -> loading (/private/tmp/alyx-native-guest-libs-runtime/libavutil.so.56)
+  [dl]     libm.so.6 -> shim-served (skip)
+  [dl]     libc.so.6 -> shim-served (skip)
+  [dl]     libavutil.so.56 -> loading (/private/tmp/alyx-native-guest-libs-runtime/libavutil.so.56)
+  [dl]     libswscale.so.5 -> loading (/private/tmp/alyx-native-guest-libs-runtime/libswscale.so.5)
+  [dl] /private/tmp/alyx-native-guest-libs-runtime/libswscale.so.5: 3 DT_NEEDED
+  [dl]     needs libavutil.so.56
+  [dl]     needs libm.so.6
+  [dl]     needs libc.so.6
+  [dl]     libavutil.so.56 -> loading (/private/tmp/alyx-native-guest-libs-runtime/libavutil.so.56)
+  [dl]     libm.so.6 -> shim-served (skip)
+  [dl]     libc.so.6 -> shim-served (skip)
+  [dl]     libm.so.6 -> shim-served (skip)
+  [dl]     libpthread.so.0 -> shim-served (skip)
+  [dl]     libc.so.6 -> shim-served (skip)
+  [klepton] /private/tmp/alyx-native-guest-libs-runtime/libvideo.so: 1 data range(s) inside executable sections, 151552 bytes — left alone
+  [dl]     libsteam_api.so -> loading (/private/tmp/alyx-native-guest-libs-runtime/libsteam_api.so)
+  [dl] /private/tmp/alyx-native-guest-libs-runtime/libsteam_api.so: 4 DT_NEEDED
+  [dl]     needs libdl.so.2
+  [dl]     needs ld-linux-aarch64.so.1
+  [dl]     needs libpthread.so.0
+  [dl]     needs libc.so.6
+  [dl]     libdl.so.2 -> shim-served (skip)
+  [dl]     ld-linux-aarch64.so.1 -> shim-served (skip)
+  [dl]     libpthread.so.0 -> shim-served (skip)
+  [dl]     libc.so.6 -> shim-served (skip)
+  [dl]     libv8_libplatform.so -> loading (/private/tmp/alyx-native-guest-libs-runtime/libv8_libplatform.so)
+  [dl] /private/tmp/alyx-native-guest-libs-runtime/libv8_libplatform.so: 3 DT_NEEDED
+  [dl]     needs libv8_libbase.so
+  [dl]     needs libv8_libcpp.so
+  [dl]     needs libc.so.6
+  [dl]     libv8_libbase.so -> loading (/private/tmp/alyx-native-guest-libs-runtime/libv8_libbase.so)
+  [dl] /private/tmp/alyx-native-guest-libs-runtime/libv8_libbase.so: 6 DT_NEEDED
+  [dl]     needs libv8_libcpp.so
+  [dl]     needs libdl.so.2
+  [dl]     needs libpthread.so.0
+  [dl]     needs libm.so.6
+  [dl]     needs libc.so.6
+  [dl]     needs ld-linux-aarch64.so.1
+  [dl]     libv8_libcpp.so -> loading (/private/tmp/alyx-native-guest-libs-runtime/libv8_libcpp.so)
+  [dl] /private/tmp/alyx-native-guest-libs-runtime/libv8_libcpp.so: 4 DT_NEEDED
+  [dl]     needs libpthread.so.0
+  [dl]     needs libgcc_s.so.1
+  [dl]     needs libc.so.6
+  [dl]     needs ld-linux-aarch64.so.1
+  [dl]     libpthread.so.0 -> shim-served (skip)
+  [dl]     libgcc_s.so.1 -> loading (/private/tmp/alyx-native-guest-libs-runtime/libgcc_s.so.1)
+  [dl]     libc.so.6 -> shim-served (skip)
+  [dl]     ld-linux-aarch64.so.1 -> shim-served (skip)
+  [dl]     libdl.so.2 -> shim-served (skip)
+  [dl]     libpthread.so.0 -> shim-served (skip)
+  [dl]     libm.so.6 -> shim-served (skip)
+  [dl]     libc.so.6 -> shim-served (skip)
+  [dl]     ld-linux-aarch64.so.1 -> shim-served (skip)
+  [dl]     libv8_libcpp.so -> loading (/private/tmp/alyx-native-guest-libs-runtime/libv8_libcpp.so)
+  [dl]     libc.so.6 -> shim-served (skip)
+  [dl]     libv8.so -> loading (/private/tmp/alyx-native-guest-libs-runtime/libv8.so)
+  [dl] /private/tmp/alyx-native-guest-libs-runtime/libv8.so: 9 DT_NEEDED
+  [dl]     needs libv8_libbase.so
+  [dl]     needs libv8_icui18n.so
+  [dl]     needs libv8_icuuc.so
+  [dl]     needs libv8_zlib.so
+  [dl]     needs libv8_libcpp.so
+  [dl]     needs libpthread.so.0
+  [dl]     needs libm.so.6
+  [dl]     needs libc.so.6
+  [dl]     needs ld-linux-aarch64.so.1
+  [dl]     libv8_libbase.so -> loading (/private/tmp/alyx-native-guest-libs-runtime/libv8_libbase.so)
+  [dl]     libv8_icui18n.so -> loading (/private/tmp/alyx-native-guest-libs-runtime/libv8_icui18n.so)
+  [dl] /private/tmp/alyx-native-guest-libs-runtime/libv8_icui18n.so: 5 DT_NEEDED
+  [dl]     needs libv8_icuuc.so
+  [dl]     needs libv8_libcpp.so
+  [dl]     needs libm.so.6
+  [dl]     needs libc.so.6
+  [dl]     needs ld-linux-aarch64.so.1
+  [dl]     libv8_icuuc.so -> loading (/private/tmp/alyx-native-guest-libs-runtime/libv8_icuuc.so)
+  [dl] /private/tmp/alyx-native-guest-libs-runtime/libv8_icuuc.so: 5 DT_NEEDED
+  [dl]     needs libv8_libcpp.so
+  [dl]     needs libpthread.so.0
+  [dl]     needs libm.so.6
+  [dl]     needs libc.so.6
+  [dl]     needs ld-linux-aarch64.so.1
+  [dl]     libv8_libcpp.so -> loading (/private/tmp/alyx-native-guest-libs-runtime/libv8_libcpp.so)
+  [dl]     libpthread.so.0 -> shim-served (skip)
+  [dl]     libm.so.6 -> shim-served (skip)
+  [dl]     libc.so.6 -> shim-served (skip)
+  [dl]     ld-linux-aarch64.so.1 -> shim-served (skip)
+  [dl]     libv8_libcpp.so -> loading (/private/tmp/alyx-native-guest-libs-runtime/libv8_libcpp.so)
+  [dl]     libm.so.6 -> shim-served (skip)
+  [dl]     libc.so.6 -> shim-served (skip)
+  [dl]     ld-linux-aarch64.so.1 -> shim-served (skip)
+  [dl]     libv8_icuuc.so -> loading (/private/tmp/alyx-native-guest-libs-runtime/libv8_icuuc.so)
+  [dl]     libv8_zlib.so -> loading (/private/tmp/alyx-native-guest-libs-runtime/libv8_zlib.so)
+  [dl] /private/tmp/alyx-native-guest-libs-runtime/libv8_zlib.so: 2 DT_NEEDED
+  [dl]     needs libpthread.so.0
+  [dl]     needs libc.so.6
+  [dl]     libpthread.so.0 -> shim-served (skip)
+  [dl]     libc.so.6 -> shim-served (skip)
+  [dl]     libv8_libcpp.so -> loading (/private/tmp/alyx-native-guest-libs-runtime/libv8_libcpp.so)
+  [dl]     libpthread.so.0 -> shim-served (skip)
+  [dl]     libm.so.6 -> shim-served (skip)
+  [dl]     libc.so.6 -> shim-served (skip)
+  [dl]     ld-linux-aarch64.so.1 -> shim-served (skip)
+  [dl]     libc.so.6 -> shim-served (skip)
+  [glibc] guest crash handlers are not installed (KL_GLIBC_GUEST_CRASH_HANDLERS=1 to install)
+RUNTIME constructors pass: libpanorama.so
+RUNTIME Panorama relocation adapter binding pass: Plat_VirtualAlloc
+RUNTIME Panorama relocation adapter binding pass: Plat_VirtualFree
+RUNTIME OpenSSL: OpenSSL 3.5.7 9 Jun 2026
+  [glibc] 506 table entries, 62 aliases, 0 stub calls
+PASS: Panorama constructors, OpenSSL SHA256/RNG/TLS object lifecycle, ICU67 integration and Vorbis dependencies; no network or authentication tests

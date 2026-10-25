@@ -1,0 +1,8 @@
+PREFLIGHT libavutil.so.56 imports=0 TLS=0 x18=896 CTR=0 SVC=0 trapped=0 refused=0/0/0
+PREFLIGHT libvpx.so.6 imports=0 TLS=0 x18=4153 CTR=0 SVC=0 trapped=0 refused=0/0/0
+PREFLIGHT libavcodec.so.58 imports=0 TLS=0 x18=4360 CTR=0 SVC=0 trapped=0 refused=0/0/0
+PREFLIGHT libavformat.so.58 imports=0 TLS=0 x18=24 CTR=0 SVC=0 trapped=0 refused=0/0/0
+PREFLIGHT libavresample.so.4 imports=0 TLS=0 x18=0 CTR=0 SVC=0 trapped=0 refused=0/0/0
+PREFLIGHT libswscale.so.5 imports=0 TLS=0 x18=837 CTR=0 SVC=0 trapped=0 refused=0/0/0
+PREFLIGHT libvideo.so imports=0 TLS=35 x18=1426 CTR=0 SVC=1703 trapped=1703 refused=0/0/0
+PREFLIGHT result=PASS loaded=7 no guest constructors/entry points executed

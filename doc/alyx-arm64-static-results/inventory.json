@@ -1,0 +1,2024 @@
+[
+  {
+    "file": "game/bin/linuxsteamrtarm64/libengine2.so",
+    "sha256": "43ff2a7ce24488690b408d61976a3d0f9609dc61ca4d5675d3e07f5b038bf333",
+    "bytes": 12403216,
+    "build_ids": [
+      "b99ac384a6aad379a962d7689507c69745d98182"
+    ],
+    "strings": [
+      {
+        "va": 3996880,
+        "section": ".rodata.str1.8",
+        "text": "-vulkan"
+      }
+    ],
+    "direct_string_references": [
+      {
+        "instruction_va": 5598416,
+        "string_va": 3996880,
+        "text": "-vulkan"
+      },
+      {
+        "instruction_va": 5600352,
+        "string_va": 3996880,
+        "text": "-vulkan"
+      }
+    ],
+    "relevant_symbols": [
+      {
+        "name": "Plat_VirtualFree",
+        "value": 0,
+        "size": 0,
+        "defined": false,
+        "type": 2
+      },
+      {
+        "name": "Plat_VirtualAlloc",
+        "value": 0,
+        "size": 0,
+        "defined": false,
+        "type": 2
+      },
+      {
+        "name": "SteamInternal_CreateInterface",
+        "value": 0,
+        "size": 0,
+        "defined": false,
+        "type": 2
+      },
+      {
+        "name": "CreateInterface",
+        "value": 6886912,
+        "size": 4,
+        "defined": true,
+        "type": 2
+      },
+      {
+        "name": "Source2Main",
+        "value": 4735200,
+        "size": 344,
+        "defined": true,
+        "type": 2
+      }
+    ]
+  },
+  {
+    "file": "game/bin/linuxsteamrtarm64/libharfbuzz.so.0.61010.0",
+    "sha256": "3ca921901cf1790939e962a4030e3ba130e47a1b700b3e031684284bb90ea643",
+    "bytes": 1610968,
+    "build_ids": [
+      "d9f0583faec1cd5381edb728fb8e56bd356a5085"
+    ],
+    "strings": [
+      {
+        "va": 1283096,
+        "section": ".rodata",
+        "text": " fdm KOM ydm ELM nem EDM oem YLM afm AFM afm YLM bfm YLM efm EFM efm PPC pfm PPC agm AGS chm NYM rhm AML vhm KRA nim NIM nim YLM zim"
+      }
+    ],
+    "direct_string_references": [],
+    "relevant_symbols": []
+  },
+  {
+    "file": "game/bin/linuxsteamrtarm64/libmaterialsystem2.so",
+    "sha256": "8760a0be956b26b170dabbf7a2aa6164cd0bdc086ba869744916624a8c0c383c",
+    "bytes": 2018304,
+    "build_ids": [
+      "53ec87e05c1cae5d727ed4e2f731df14a283a8f4"
+    ],
+    "strings": [
+      {
+        "va": 374256,
+        "section": ".rodata.str1.8",
+        "text": "-vulkan_use_ios_vcs"
+      },
+      {
+        "va": 410856,
+        "section": ".rodata.str1.8",
+        "text": "-vulkan_use_android_vcs"
+      }
+    ],
+    "direct_string_references": [
+      {
+        "instruction_va": 505032,
+        "string_va": 374256,
+        "text": "-vulkan_use_ios_vcs"
+      },
+      {
+        "instruction_va": 505160,
+        "string_va": 410856,
+        "text": "-vulkan_use_android_vcs"
+      }
+    ],
+    "relevant_symbols": [
+      {
+        "name": "CreateInterface",
+        "value": 971968,
+        "size": 4,
+        "defined": true,
+        "type": 2
+      }
+    ]
+  },
+  {
+    "file": "game/bin/linuxsteamrtarm64/libparticles.so",
+    "sha256": "58491b25c38fa4d1c4a2041854742ad5733e00da322e45dff52c19fb55c1aed7",
+    "bytes": 5662000,
+    "build_ids": [
+      "ac348866d4cda61c96573444bd253d95ed396953"
+    ],
+    "strings": [
+      {
+        "va": 1766240,
+        "section": ".rodata.str1.8",
+        "text": "-vulkan_disable_particle_descriptor_set"
+      }
+    ],
+    "direct_string_references": [
+      {
+        "instruction_va": 2146488,
+        "string_va": 1766240,
+        "text": "-vulkan_disable_particle_descriptor_set"
+      }
+    ],
+    "relevant_symbols": [
+      {
+        "name": "CreateInterface",
+        "value": 3750848,
+        "size": 4,
+        "defined": true,
+        "type": 2
+      }
+    ]
+  },
+  {
+    "file": "game/bin/linuxsteamrtarm64/librenderingpipelines.so",
+    "sha256": "182feb86e286d6b4cce1327ec4c27e862638e21a1f4061bb3e53fcbdb40ae5f9",
+    "bytes": 1739460,
+    "build_ids": [
+      "3b85a8fe8706d708bde9f83d328361afecf24175"
+    ],
+    "strings": [
+      {
+        "va": 295496,
+        "section": ".rodata.str1.8",
+        "text": "Tune the foveated minimum value (radial only)"
+      },
+      {
+        "va": 295728,
+        "section": ".rodata.str1.8",
+        "text": "Tune the foveated inner region size (radial only)"
+      },
+      {
+        "va": 298816,
+        "section": ".rodata.str1.8",
+        "text": "Use subsampled rendering with FDM."
+      },
+      {
+        "va": 302200,
+        "section": ".rodata.str1.8",
+        "text": "/tmp/fdm_%s_%d_%d.ppm"
+      },
+      {
+        "va": 307080,
+        "section": ".rodata.str1.8",
+        "text": "Dump FDMs to disk."
+      },
+      {
+        "va": 314960,
+        "section": ".rodata.str1.8",
+        "text": "Tune the foveated outer region size (radial only)"
+      },
+      {
+        "va": 322992,
+        "section": ".rodata.str1.8",
+        "text": "Set the foveation level"
+      },
+      {
+        "va": 324120,
+        "section": ".rodata.str1.8",
+        "text": "Enable use of a fragment density map for foveated rendering"
+      },
+      {
+        "va": 328280,
+        "section": ".rodata.str1.8",
+        "text": "Set whether to use square or radial foveation"
+      },
+      {
+        "va": 332600,
+        "section": ".rodata.str1.8",
+        "text": "Enable tiler optimizations for eg. Steam Frame."
+      },
+      {
+        "va": 333152,
+        "section": ".rodata.str1.8",
+        "text": "foveated_fdm_texture_%d_%d_%d"
+      },
+      {
+        "va": 334608,
+        "section": ".rodata.str1.8",
+        "text": "vr_fdm"
+      }
+    ],
+    "direct_string_references": [
+      {
+        "instruction_va": 431180,
+        "string_va": 302200,
+        "text": "/tmp/fdm_%s_%d_%d.ppm"
+      },
+      {
+        "instruction_va": 432900,
+        "string_va": 295728,
+        "text": "Tune the foveated inner region size (radial only)"
+      },
+      {
+        "instruction_va": 432972,
+        "string_va": 314960,
+        "text": "Tune the foveated outer region size (radial only)"
+      },
+      {
+        "instruction_va": 433092,
+        "string_va": 295496,
+        "text": "Tune the foveated minimum value (radial only)"
+      },
+      {
+        "instruction_va": 433152,
+        "string_va": 322992,
+        "text": "Set the foveation level"
+      },
+      {
+        "instruction_va": 433212,
+        "string_va": 328280,
+        "text": "Set whether to use square or radial foveation"
+      },
+      {
+        "instruction_va": 433336,
+        "string_va": 307080,
+        "text": "Dump FDMs to disk."
+      },
+      {
+        "instruction_va": 530532,
+        "string_va": 333152,
+        "text": "foveated_fdm_texture_%d_%d_%d"
+      },
+      {
+        "instruction_va": 607280,
+        "string_va": 324120,
+        "text": "Enable use of a fragment density map for foveated rendering"
+      },
+      {
+        "instruction_va": 607288,
+        "string_va": 334608,
+        "text": "vr_fdm"
+      },
+      {
+        "instruction_va": 607336,
+        "string_va": 332600,
+        "text": "Enable tiler optimizations for eg. Steam Frame."
+      },
+      {
+        "instruction_va": 607392,
+        "string_va": 298816,
+        "text": "Use subsampled rendering with FDM."
+      }
+    ],
+    "relevant_symbols": [
+      {
+        "name": "CreateInterface",
+        "value": 636832,
+        "size": 4,
+        "defined": true,
+        "type": 2
+      }
+    ]
+  },
+  {
+    "file": "game/bin/linuxsteamrtarm64/librendersystemempty.so",
+    "sha256": "de8c5b517d43451d7e5dac3bf5ac68224e162efd5891f4a33dc9ee87bb4de165",
+    "bytes": 1755544,
+    "build_ids": [
+      "0399d2f59a81ee9fbaa189463e75aa2b283f83c3"
+    ],
+    "strings": [
+      {
+        "va": 336120,
+        "section": ".rodata.str1.8",
+        "text": "-vulkan"
+      },
+      {
+        "va": 366608,
+        "section": ".rodata.str1.8",
+        "text": "TSPEC_FRAGMENT_DENSITY_MAP"
+      }
+    ],
+    "direct_string_references": [
+      {
+        "instruction_va": 520352,
+        "string_va": 336120,
+        "text": "-vulkan"
+      },
+      {
+        "instruction_va": 520592,
+        "string_va": 336120,
+        "text": "-vulkan"
+      }
+    ],
+    "relevant_symbols": [
+      {
+        "name": "Plat_VirtualFree",
+        "value": 0,
+        "size": 0,
+        "defined": false,
+        "type": 2
+      },
+      {
+        "name": "Plat_VirtualAlloc",
+        "value": 0,
+        "size": 0,
+        "defined": false,
+        "type": 2
+      },
+      {
+        "name": "CreateInterface",
+        "value": 667584,
+        "size": 4,
+        "defined": true,
+        "type": 2
+      }
+    ]
+  },
+  {
+    "file": "game/bin/linuxsteamrtarm64/librendersystemgl.so",
+    "sha256": "7e26362633052504ea01cea527f897ee90d1bdbc698ea0599fd954045d8a5208",
+    "bytes": 2530824,
+    "build_ids": [
+      "a23601b32c4c00976c8ecf939cea7dc63c699066"
+    ],
+    "strings": [
+      {
+        "va": 554648,
+        "section": ".rodata.str1.8",
+        "text": "-vulkan"
+      },
+      {
+        "va": 607752,
+        "section": ".rodata.str1.8",
+        "text": "TSPEC_FRAGMENT_DENSITY_MAP"
+      }
+    ],
+    "direct_string_references": [
+      {
+        "instruction_va": 777472,
+        "string_va": 554648,
+        "text": "-vulkan"
+      },
+      {
+        "instruction_va": 777712,
+        "string_va": 554648,
+        "text": "-vulkan"
+      }
+    ],
+    "relevant_symbols": [
+      {
+        "name": "Plat_VirtualFree",
+        "value": 0,
+        "size": 0,
+        "defined": false,
+        "type": 2
+      },
+      {
+        "name": "Plat_VirtualAlloc",
+        "value": 0,
+        "size": 0,
+        "defined": false,
+        "type": 2
+      },
+      {
+        "name": "CreateInterface",
+        "value": 1350112,
+        "size": 4,
+        "defined": true,
+        "type": 2
+      }
+    ]
+  },
+  {
+    "file": "game/bin/linuxsteamrtarm64/librendersystemvulkan.so",
+    "sha256": "02edbf8f2040cd8a3103038583447865ca7d34f36f13daacab9d4d194cb9d04d",
+    "bytes": 10278524,
+    "build_ids": [
+      "52e3a74656682c2ccedd9a35ba3e977e33ebe6b4"
+    ],
+    "strings": [
+      {
+        "va": 1442664,
+        "section": ".rodata.str1.8",
+        "text": "-vulkan_disable_ext_validation_cache"
+      },
+      {
+        "va": 1445608,
+        "section": ".rodata.str1.8",
+        "text": "-vulkan_disable_khr_descriptor_update_template"
+      },
+      {
+        "va": 1451280,
+        "section": ".rodata.str1.8",
+        "text": "-vulkan_disable_validation_api_parameters"
+      },
+      {
+        "va": 1453592,
+        "section": ".rodata.str1.8",
+        "text": "-vulkan_allow_nv_optimus_layer"
+      },
+      {
+        "va": 1454416,
+        "section": ".rodata.str1.8",
+        "text": "-vulkan_minimal_validation"
+      },
+      {
+        "va": 1454656,
+        "section": ".rodata.str1.8",
+        "text": "VK_EXT_fragment_density_map_offset"
+      },
+      {
+        "va": 1457271,
+        "section": ".rodata.str1.8",
+        "text": "#define GL_EXT_fragment_shading_rate 1"
+      },
+      {
+        "va": 1477464,
+        "section": ".rodata.str1.8",
+        "text": "Using VK_EXT_fragment_density_map_offset for eyetracking support."
+      },
+      {
+        "va": 1485752,
+        "section": ".rodata.str1.8",
+        "text": "vr_fdm_offset"
+      },
+      {
+        "va": 1491736,
+        "section": ".rodata.str1.8",
+        "text": "-vulkan_aggressive_command_pool_rebalancing"
+      },
+      {
+        "va": 1510376,
+        "section": ".rodata.str1.8",
+        "text": "-vulkan_enable_gpu_validation"
+      },
+      {
+        "va": 1516784,
+        "section": ".rodata.str1.8",
+        "text": "-vulkan_disable_async_compute"
+      },
+      {
+        "va": 1524776,
+        "section": ".rodata.str1.8",
+        "text": "SPV_KHR_fragment_shading_rate"
+      },
+      {
+        "va": 1532248,
+        "section": ".rodata.str1.8",
+        "text": "-vulkan_metal_validation"
+      },
+      {
+        "va": 1551576,
+        "section": ".rodata.str1.8",
+        "text": "-vulkan_disable_validation_core_checks"
+      },
+      {
+        "va": 1560400,
+        "section": ".rodata.str1.8",
+        "text": "use-vulkan-memory-model"
+      },
+      {
+        "va": 1565112,
+        "section": ".rodata.str1.8",
+        "text": "BindRenderTargets (bFDM)"
+      },
+      {
+        "va": 1572376,
+        "section": ".rodata.str1.8",
+        "text": "-vulkan_diagnostic_checkpoints"
+      },
+      {
+        "va": 1584648,
+        "section": ".rodata.str1.8",
+        "text": "-vulkan_ignore_known_validation_errors"
+      },
+      {
+        "va": 1585336,
+        "section": ".rodata.str1.8",
+        "text": "-vulkanrenderthreadstack"
+      },
+      {
+        "va": 1586632,
+        "section": ".rodata.str1.8",
+        "text": "-vulkan_scene_system_job_cost"
+      },
+      {
+        "va": 1589648,
+        "section": ".rodata.str1.8",
+        "text": "-vulkan"
+      },
+      {
+        "va": 1604416,
+        "section": ".rodata.str1.8",
+        "text": "-vulkan_disable_ext_fragment_density_map"
+      },
+      {
+        "va": 1610520,
+        "section": ".rodata.str1.8",
+        "text": "-vulkan_disable_validation_unique_handles"
+      },
+      {
+        "va": 1619624,
+        "section": ".rodata.str1.8",
+        "text": "VK_EXT_fragment_density_map"
+      },
+      {
+        "va": 1629264,
+        "section": ".rodata.str1.8",
+        "text": "-vulkan_disable_khr_maintenance1"
+      },
+      {
+        "va": 1632648,
+        "section": ".rodata.str1.8",
+        "text": "-vulkan_disable_ext_dynamic_state_3"
+      },
+      {
+        "va": 1642074,
+        "section": ".rodata.str1.8",
+        "text": "#define GL_EXT_fragment_shading_rate 1"
+      },
+      {
+        "va": 1652848,
+        "section": ".rodata.str1.8",
+        "text": "-vulkan_depth_texture_as_r32f"
+      },
+      {
+        "va": 1657856,
+        "section": ".rodata.str1.8",
+        "text": "vr_fdm_offset_flip_y"
+      },
+      {
+        "va": 1680648,
+        "section": ".rodata.str1.8",
+        "text": "GL_EXT_fragment_shading_rate"
+      },
+      {
+        "va": 1680856,
+        "section": ".rodata.str1.8",
+        "text": "-vulkan_descriptor_sets_per_pool"
+      },
+      {
+        "va": 1707520,
+        "section": ".rodata.str1.8",
+        "text": "-vulkan_alloc_callbacks"
+      },
+      {
+        "va": 1708104,
+        "section": ".rodata.str1.8",
+        "text": "-vulkan_no_image_transitions"
+      },
+      {
+        "va": 1709096,
+        "section": ".rodata.str1.8",
+        "text": "-vulkan_disable_validation_object_lifetimes"
+      },
+      {
+        "va": 1720632,
+        "section": ".rodata.str1.8",
+        "text": "-vulkan_disable_validation_shaders"
+      },
+      {
+        "va": 1757168,
+        "section": ".rodata.str1.8",
+        "text": "-vulkan_disable_device_coherent_allocations"
+      },
+      {
+        "va": 1757712,
+        "section": ".rodata.str1.8",
+        "text": "-vulkan_disable_amd_memory_overallocation_behavior"
+      },
+      {
+        "va": 1758192,
+        "section": ".rodata.str1.8",
+        "text": "-vulkan-no-async-compute"
+      },
+      {
+        "va": 1764792,
+        "section": ".rodata.str1.8",
+        "text": "-vulkan_prefers_transform_constant_buffer"
+      },
+      {
+        "va": 1766184,
+        "section": ".rodata.str1.8",
+        "text": "-vulkan_disable_ext_load_store_op_none"
+      },
+      {
+        "va": 1768272,
+        "section": ".rodata.str1.8",
+        "text": "-vulkan-no-atoc"
+      },
+      {
+        "va": 1768312,
+        "section": ".rodata.str1.8",
+        "text": "-vulkan_disable_nv_dedicated_allocation"
+      },
+      {
+        "va": 1768912,
+        "section": ".rodata.str1.8",
+        "text": "-vulkan_aggressive_command_pool_rebalancing_2gb"
+      },
+      {
+        "va": 1769200,
+        "section": ".rodata.str1.8",
+        "text": "-vulkan_trim_command_pools"
+      },
+      {
+        "va": 1805224,
+        "section": ".rodata.str1.8",
+        "text": "-vulkan_enable_debug_utils"
+      },
+      {
+        "va": 1808384,
+        "section": ".rodata.str1.8",
+        "text": "Should we alternate samples to emulate 4xMSAA with 2xMSAA? Helps mostly with edges in the subsampled area outside the foveated region with FDM."
+      },
+      {
+        "va": 1823784,
+        "section": ".rodata.str1.8",
+        "text": "-vulkan-no-stencil"
+      },
+      {
+        "va": 1824512,
+        "section": ".rodata.str1.8",
+        "text": "-vulkan_disable_khr_maintenance2"
+      },
+      {
+        "va": 1826224,
+        "section": ".rodata.str1.8",
+        "text": "-vulkan_disable_ext_custom_resolve"
+      },
+      {
+        "va": 1826808,
+        "section": ".rodata.str1.8",
+        "text": "-vulkan_enable_robust_buffer_access"
+      },
+      {
+        "va": 1834824,
+        "section": ".rodata.str1.8",
+        "text": "-vulkan_cmd_buffer_pool_size"
+      },
+      {
+        "va": 1835592,
+        "section": ".rodata.str1.8",
+        "text": "-vulkan_disable_khr_dynamic_rendering"
+      },
+      {
+        "va": 1835760,
+        "section": ".rodata.str1.8",
+        "text": "-vulkan_disable_khr_image_format_list"
+      },
+      {
+        "va": 1844072,
+        "section": ".rodata.str1.8",
+        "text": "-vulkan_disable_ext_separate_stencil_usage"
+      },
+      {
+        "va": 1862296,
+        "section": ".rodata.str1.8",
+        "text": "-vulkan_trim_command_pools_2gb"
+      },
+      {
+        "va": 1864400,
+        "section": ".rodata.str1.8",
+        "text": "-vulkan_force_sm30"
+      },
+      {
+        "va": 1870000,
+        "section": ".rodata.str1.8",
+        "text": "-vulkan_disable_pipeline_cache"
+      },
+      {
+        "va": 1877208,
+        "section": ".rodata.str1.8",
+        "text": "-vulkan_trim_all_command_pools"
+      },
+      {
+        "va": 1880800,
+        "section": ".rodata.str1.8",
+        "text": "-vulkan_amd_disable_bind_vertex_buffers_workaround"
+      },
+      {
+        "va": 1887144,
+        "section": ".rodata.str1.8",
+        "text": "-vulkan_enable_validation"
+      },
+      {
+        "va": 1887496,
+        "section": ".rodata.str1.8",
+        "text": "-vulkan_disable_swapchain_sampling"
+      },
+      {
+        "va": 1890768,
+        "section": ".rodata.str1.8",
+        "text": "-vulkan_disable_mipgen_compute_shader"
+      },
+      {
+        "va": 1890848,
+        "section": ".rodata.str1.8",
+        "text": "-vulkan_disable_external_subpass_dependency"
+      },
+      {
+        "va": 1901168,
+        "section": ".rodata.str1.8",
+        "text": "-vulkan_disable_validation_thread_safety"
+      },
+      {
+        "va": 1967496,
+        "section": ".rodata.str1.8",
+        "text": "-vulkan_dump_shaders"
+      },
+      {
+        "va": 1980736,
+        "section": ".rodata.str1.8",
+        "text": "-vulkan_disable_occlusion_queries"
+      },
+      {
+        "va": 1997744,
+        "section": ".rodata.str1.8",
+        "text": "-vulkan_force_sm40"
+      },
+      {
+        "va": 1999904,
+        "section": ".rodata.str1.8",
+        "text": "-vulkan_disable_ext_memory_budget"
+      },
+      {
+        "va": 2004696,
+        "section": ".rodata.str1.8",
+        "text": "vr_fdm_offset_debug"
+      },
+      {
+        "va": 2005512,
+        "section": ".rodata.str1.8",
+        "text": "-vulkan_disable_pool_textures"
+      },
+      {
+        "va": 2006208,
+        "section": ".rodata.str1.8",
+        "text": "-vulkan_convert_relaxed_to_float16"
+      },
+      {
+        "va": 2012384,
+        "section": ".rodata.str1.8",
+        "text": "-vulkan_disable_khr_swapchain_mutable_format"
+      },
+      {
+        "va": 2056064,
+        "section": ".rodata.str1.8",
+        "text": "-vulkan_disable_ext_host_image_copy"
+      },
+      {
+        "va": 2067040,
+        "section": ".rodata.str1.8",
+        "text": "-vulkan_disable_ext_memory_priority"
+      },
+      {
+        "va": 2068800,
+        "section": ".rodata.str1.8",
+        "text": "-vulkan_validation_warnings"
+      },
+      {
+        "va": 2071184,
+        "section": ".rodata.str1.8",
+        "text": "TSPEC_FRAGMENT_DENSITY_MAP"
+      },
+      {
+        "va": 2079680,
+        "section": ".rodata.str1.8",
+        "text": "-vulkan_trim_all_command_pools_2gb"
+      },
+      {
+        "va": 2080584,
+        "section": ".rodata.str1.8",
+        "text": "-vulkan_disable_secondary_command_buffers"
+      },
+      {
+        "va": 2080720,
+        "section": ".rodata.str1.8",
+        "text": "FDM Offset Info:"
+      },
+      {
+        "va": 2080738,
+        "section": ".rodata.str1.8",
+        "text": "bShouldUseFDMOffset: %s"
+      },
+      {
+        "va": 2080763,
+        "section": ".rodata.str1.8",
+        "text": "bGotEyeTracking: %s"
+      },
+      {
+        "va": 2080784,
+        "section": ".rodata.str1.8",
+        "text": "Foveation Center: [%f, %f]   [%f, %f]"
+      },
+      {
+        "va": 2080843,
+        "section": ".rodata.str1.8",
+        "text": "FDM Granularity: %ux%u"
+      },
+      {
+        "va": 2080867,
+        "section": ".rodata.str1.8",
+        "text": "FDM Offsets: [%d, %d]   [%d, %d]"
+      }
+    ],
+    "direct_string_references": [
+      {
+        "instruction_va": 2249472,
+        "string_va": 1589648,
+        "text": "-vulkan"
+      },
+      {
+        "instruction_va": 2249712,
+        "string_va": 1589648,
+        "text": "-vulkan"
+      },
+      {
+        "instruction_va": 2398180,
+        "string_va": 1834824,
+        "text": "-vulkan_cmd_buffer_pool_size"
+      },
+      {
+        "instruction_va": 2398260,
+        "string_va": 1757168,
+        "text": "-vulkan_disable_device_coherent_allocations"
+      },
+      {
+        "instruction_va": 2398584,
+        "string_va": 1491736,
+        "text": "-vulkan_aggressive_command_pool_rebalancing"
+      },
+      {
+        "instruction_va": 2398760,
+        "string_va": 1768912,
+        "text": "-vulkan_aggressive_command_pool_rebalancing_2gb"
+      },
+      {
+        "instruction_va": 2455776,
+        "string_va": 1864400,
+        "text": "-vulkan_force_sm30"
+      },
+      {
+        "instruction_va": 2455868,
+        "string_va": 1870000,
+        "text": "-vulkan_disable_pipeline_cache"
+      },
+      {
+        "instruction_va": 2490056,
+        "string_va": 1768272,
+        "text": "-vulkan-no-atoc"
+      },
+      {
+        "instruction_va": 2512260,
+        "string_va": 1980736,
+        "text": "-vulkan_disable_occlusion_queries"
+      },
+      {
+        "instruction_va": 2512612,
+        "string_va": 1980736,
+        "text": "-vulkan_disable_occlusion_queries"
+      },
+      {
+        "instruction_va": 2535616,
+        "string_va": 2080720,
+        "text": "FDM Offset Info:"
+      },
+      {
+        "instruction_va": 2573964,
+        "string_va": 1565112,
+        "text": "BindRenderTargets (bFDM)"
+      },
+      {
+        "instruction_va": 2587880,
+        "string_va": 1657856,
+        "text": "vr_fdm_offset_flip_y"
+      },
+      {
+        "instruction_va": 2587928,
+        "string_va": 1485752,
+        "text": "vr_fdm_offset"
+      },
+      {
+        "instruction_va": 2587976,
+        "string_va": 2004696,
+        "text": "vr_fdm_offset_debug"
+      },
+      {
+        "instruction_va": 2588016,
+        "string_va": 1808384,
+        "text": "Should we alternate samples to emulate 4xMSAA with 2xMSAA? Helps mostly with edges in the subsampled area outside the foveated region with FDM."
+      },
+      {
+        "instruction_va": 2632568,
+        "string_va": 1585336,
+        "text": "-vulkanrenderthreadstack"
+      },
+      {
+        "instruction_va": 2644000,
+        "string_va": 1890768,
+        "text": "-vulkan_disable_mipgen_compute_shader"
+      },
+      {
+        "instruction_va": 2644148,
+        "string_va": 1880800,
+        "text": "-vulkan_amd_disable_bind_vertex_buffers_workaround"
+      },
+      {
+        "instruction_va": 2662244,
+        "string_va": 1887496,
+        "text": "-vulkan_disable_swapchain_sampling"
+      },
+      {
+        "instruction_va": 2679532,
+        "string_va": 1680856,
+        "text": "-vulkan_descriptor_sets_per_pool"
+      },
+      {
+        "instruction_va": 2679564,
+        "string_va": 1708104,
+        "text": "-vulkan_no_image_transitions"
+      },
+      {
+        "instruction_va": 2680060,
+        "string_va": 1532248,
+        "text": "-vulkan_metal_validation"
+      },
+      {
+        "instruction_va": 2680096,
+        "string_va": 1769200,
+        "text": "-vulkan_trim_command_pools"
+      },
+      {
+        "instruction_va": 2680140,
+        "string_va": 1877208,
+        "text": "-vulkan_trim_all_command_pools"
+      },
+      {
+        "instruction_va": 2680408,
+        "string_va": 2079680,
+        "text": "-vulkan_trim_all_command_pools_2gb"
+      },
+      {
+        "instruction_va": 2680488,
+        "string_va": 1862296,
+        "text": "-vulkan_trim_command_pools_2gb"
+      },
+      {
+        "instruction_va": 2683176,
+        "string_va": 1823784,
+        "text": "-vulkan-no-stencil"
+      },
+      {
+        "instruction_va": 2697176,
+        "string_va": 1967496,
+        "text": "-vulkan_dump_shaders"
+      },
+      {
+        "instruction_va": 2715984,
+        "string_va": 1768312,
+        "text": "-vulkan_disable_nv_dedicated_allocation"
+      },
+      {
+        "instruction_va": 2716016,
+        "string_va": 1445608,
+        "text": "-vulkan_disable_khr_descriptor_update_template"
+      },
+      {
+        "instruction_va": 2716048,
+        "string_va": 1835760,
+        "text": "-vulkan_disable_khr_image_format_list"
+      },
+      {
+        "instruction_va": 2716080,
+        "string_va": 1629264,
+        "text": "-vulkan_disable_khr_maintenance1"
+      },
+      {
+        "instruction_va": 2716112,
+        "string_va": 1824512,
+        "text": "-vulkan_disable_khr_maintenance2"
+      },
+      {
+        "instruction_va": 2716144,
+        "string_va": 1844072,
+        "text": "-vulkan_disable_ext_separate_stencil_usage"
+      },
+      {
+        "instruction_va": 2716176,
+        "string_va": 2012384,
+        "text": "-vulkan_disable_khr_swapchain_mutable_format"
+      },
+      {
+        "instruction_va": 2716208,
+        "string_va": 1766184,
+        "text": "-vulkan_disable_ext_load_store_op_none"
+      },
+      {
+        "instruction_va": 2716324,
+        "string_va": 1835592,
+        "text": "-vulkan_disable_khr_dynamic_rendering"
+      },
+      {
+        "instruction_va": 2716356,
+        "string_va": 1604416,
+        "text": "-vulkan_disable_ext_fragment_density_map"
+      },
+      {
+        "instruction_va": 2716388,
+        "string_va": 2056064,
+        "text": "-vulkan_disable_ext_host_image_copy"
+      },
+      {
+        "instruction_va": 2716420,
+        "string_va": 1826224,
+        "text": "-vulkan_disable_ext_custom_resolve"
+      },
+      {
+        "instruction_va": 2716452,
+        "string_va": 1632648,
+        "text": "-vulkan_disable_ext_dynamic_state_3"
+      },
+      {
+        "instruction_va": 2716592,
+        "string_va": 2067040,
+        "text": "-vulkan_disable_ext_memory_priority"
+      },
+      {
+        "instruction_va": 2716624,
+        "string_va": 1757712,
+        "text": "-vulkan_disable_amd_memory_overallocation_behavior"
+      },
+      {
+        "instruction_va": 2716656,
+        "string_va": 1572376,
+        "text": "-vulkan_diagnostic_checkpoints"
+      },
+      {
+        "instruction_va": 2716768,
+        "string_va": 2006208,
+        "text": "-vulkan_convert_relaxed_to_float16"
+      },
+      {
+        "instruction_va": 2718148,
+        "string_va": 1768312,
+        "text": "-vulkan_disable_nv_dedicated_allocation"
+      },
+      {
+        "instruction_va": 2718264,
+        "string_va": 1445608,
+        "text": "-vulkan_disable_khr_descriptor_update_template"
+      },
+      {
+        "instruction_va": 2718380,
+        "string_va": 1835760,
+        "text": "-vulkan_disable_khr_image_format_list"
+      },
+      {
+        "instruction_va": 2718496,
+        "string_va": 1629264,
+        "text": "-vulkan_disable_khr_maintenance1"
+      },
+      {
+        "instruction_va": 2718612,
+        "string_va": 1824512,
+        "text": "-vulkan_disable_khr_maintenance2"
+      },
+      {
+        "instruction_va": 2718728,
+        "string_va": 1844072,
+        "text": "-vulkan_disable_ext_separate_stencil_usage"
+      },
+      {
+        "instruction_va": 2718844,
+        "string_va": 2012384,
+        "text": "-vulkan_disable_khr_swapchain_mutable_format"
+      },
+      {
+        "instruction_va": 2719180,
+        "string_va": 1516784,
+        "text": "-vulkan_disable_async_compute"
+      },
+      {
+        "instruction_va": 2719384,
+        "string_va": 1758192,
+        "text": "-vulkan-no-async-compute"
+      },
+      {
+        "instruction_va": 2720452,
+        "string_va": 2006208,
+        "text": "-vulkan_convert_relaxed_to_float16"
+      },
+      {
+        "instruction_va": 2720628,
+        "string_va": 1826808,
+        "text": "-vulkan_enable_robust_buffer_access"
+      },
+      {
+        "instruction_va": 2721940,
+        "string_va": 1890848,
+        "text": "-vulkan_disable_external_subpass_dependency"
+      },
+      {
+        "instruction_va": 2723280,
+        "string_va": 1619624,
+        "text": "VK_EXT_fragment_density_map"
+      },
+      {
+        "instruction_va": 2723380,
+        "string_va": 1454656,
+        "text": "VK_EXT_fragment_density_map_offset"
+      },
+      {
+        "instruction_va": 2724048,
+        "string_va": 1442664,
+        "text": "-vulkan_disable_ext_validation_cache"
+      },
+      {
+        "instruction_va": 2724840,
+        "string_va": 1619624,
+        "text": "VK_EXT_fragment_density_map"
+      },
+      {
+        "instruction_va": 2724896,
+        "string_va": 1454656,
+        "text": "VK_EXT_fragment_density_map_offset"
+      },
+      {
+        "instruction_va": 2732492,
+        "string_va": 1477464,
+        "text": "Using VK_EXT_fragment_density_map_offset for eyetracking support."
+      },
+      {
+        "instruction_va": 2775192,
+        "string_va": 1584648,
+        "text": "-vulkan_ignore_known_validation_errors"
+      },
+      {
+        "instruction_va": 2779052,
+        "string_va": 1887144,
+        "text": "-vulkan_enable_validation"
+      },
+      {
+        "instruction_va": 2779084,
+        "string_va": 1454416,
+        "text": "-vulkan_minimal_validation"
+      },
+      {
+        "instruction_va": 2779220,
+        "string_va": 1999904,
+        "text": "-vulkan_disable_ext_memory_budget"
+      },
+      {
+        "instruction_va": 2780120,
+        "string_va": 1510376,
+        "text": "-vulkan_enable_gpu_validation"
+      },
+      {
+        "instruction_va": 2780156,
+        "string_va": 1720632,
+        "text": "-vulkan_disable_validation_shaders"
+      },
+      {
+        "instruction_va": 2780168,
+        "string_va": 1901168,
+        "text": "-vulkan_disable_validation_thread_safety"
+      },
+      {
+        "instruction_va": 2780172,
+        "string_va": 1451280,
+        "text": "-vulkan_disable_validation_api_parameters"
+      },
+      {
+        "instruction_va": 2780192,
+        "string_va": 1709096,
+        "text": "-vulkan_disable_validation_object_lifetimes"
+      },
+      {
+        "instruction_va": 2780200,
+        "string_va": 1551576,
+        "text": "-vulkan_disable_validation_core_checks"
+      },
+      {
+        "instruction_va": 2780204,
+        "string_va": 1610520,
+        "text": "-vulkan_disable_validation_unique_handles"
+      },
+      {
+        "instruction_va": 2780508,
+        "string_va": 1707520,
+        "text": "-vulkan_alloc_callbacks"
+      },
+      {
+        "instruction_va": 2781948,
+        "string_va": 1999904,
+        "text": "-vulkan_disable_ext_memory_budget"
+      },
+      {
+        "instruction_va": 2782204,
+        "string_va": 1453592,
+        "text": "-vulkan_allow_nv_optimus_layer"
+      },
+      {
+        "instruction_va": 2783764,
+        "string_va": 1764792,
+        "text": "-vulkan_prefers_transform_constant_buffer"
+      },
+      {
+        "instruction_va": 2784068,
+        "string_va": 2080584,
+        "text": "-vulkan_disable_secondary_command_buffers"
+      },
+      {
+        "instruction_va": 2784176,
+        "string_va": 1586632,
+        "text": "-vulkan_scene_system_job_cost"
+      },
+      {
+        "instruction_va": 2784212,
+        "string_va": 1864400,
+        "text": "-vulkan_force_sm30"
+      },
+      {
+        "instruction_va": 2784832,
+        "string_va": 1864400,
+        "text": "-vulkan_force_sm30"
+      },
+      {
+        "instruction_va": 2784864,
+        "string_va": 1997744,
+        "text": "-vulkan_force_sm40"
+      },
+      {
+        "instruction_va": 2785460,
+        "string_va": 2068800,
+        "text": "-vulkan_validation_warnings"
+      },
+      {
+        "instruction_va": 2785936,
+        "string_va": 1805224,
+        "text": "-vulkan_enable_debug_utils"
+      },
+      {
+        "instruction_va": 2886168,
+        "string_va": 1652848,
+        "text": "-vulkan_depth_texture_as_r32f"
+      },
+      {
+        "instruction_va": 2894540,
+        "string_va": 2005512,
+        "text": "-vulkan_disable_pool_textures"
+      },
+      {
+        "instruction_va": 2896252,
+        "string_va": 2005512,
+        "text": "-vulkan_disable_pool_textures"
+      },
+      {
+        "instruction_va": 5242464,
+        "string_va": 1560400,
+        "text": "use-vulkan-memory-model"
+      },
+      {
+        "instruction_va": 5247792,
+        "string_va": 1560400,
+        "text": "use-vulkan-memory-model"
+      },
+      {
+        "instruction_va": 5292596,
+        "string_va": 1560400,
+        "text": "use-vulkan-memory-model"
+      },
+      {
+        "instruction_va": 5293792,
+        "string_va": 1560400,
+        "text": "use-vulkan-memory-model"
+      },
+      {
+        "instruction_va": 5295584,
+        "string_va": 1560400,
+        "text": "use-vulkan-memory-model"
+      },
+      {
+        "instruction_va": 5518264,
+        "string_va": 1680648,
+        "text": "GL_EXT_fragment_shading_rate"
+      },
+      {
+        "instruction_va": 6224560,
+        "string_va": 1680648,
+        "text": "GL_EXT_fragment_shading_rate"
+      },
+      {
+        "instruction_va": 6233176,
+        "string_va": 1524776,
+        "text": "SPV_KHR_fragment_shading_rate"
+      },
+      {
+        "instruction_va": 6235064,
+        "string_va": 1524776,
+        "text": "SPV_KHR_fragment_shading_rate"
+      },
+      {
+        "instruction_va": 6673744,
+        "string_va": 1524776,
+        "text": "SPV_KHR_fragment_shading_rate"
+      },
+      {
+        "instruction_va": 7519948,
+        "string_va": 1524776,
+        "text": "SPV_KHR_fragment_shading_rate"
+      },
+      {
+        "instruction_va": 8711528,
+        "string_va": 1524776,
+        "text": "SPV_KHR_fragment_shading_rate"
+      },
+      {
+        "instruction_va": 8741512,
+        "string_va": 1524776,
+        "text": "SPV_KHR_fragment_shading_rate"
+      },
+      {
+        "instruction_va": 8756532,
+        "string_va": 1524776,
+        "text": "SPV_KHR_fragment_shading_rate"
+      }
+    ],
+    "relevant_symbols": [
+      {
+        "name": "Plat_VirtualFree",
+        "value": 0,
+        "size": 0,
+        "defined": false,
+        "type": 2
+      },
+      {
+        "name": "Plat_VirtualAlloc",
+        "value": 0,
+        "size": 0,
+        "defined": false,
+        "type": 2
+      },
+      {
+        "name": "CreateInterface",
+        "value": 3016352,
+        "size": 4,
+        "defined": true,
+        "type": 2
+      }
+    ]
+  },
+  {
+    "file": "game/bin/linuxsteamrtarm64/libtier0.so",
+    "sha256": "1e51a94385ea01e61ac87d087efc5a30255ef08656a0bdd6faca008012adbb5d",
+    "bytes": 615556,
+    "build_ids": [
+      "d6fe7ac89706d724c355befd18180b94cca0ce52"
+    ],
+    "strings": [],
+    "direct_string_references": [],
+    "relevant_symbols": [
+      {
+        "name": "Plat_VirtualFree",
+        "value": 459916,
+        "size": 152,
+        "defined": true,
+        "type": 2
+      },
+      {
+        "name": "Plat_VirtualAlloc",
+        "value": 462112,
+        "size": 708,
+        "defined": true,
+        "type": 2
+      },
+      {
+        "name": "Plat_VirtualProtect",
+        "value": 459852,
+        "size": 64,
+        "defined": true,
+        "type": 2
+      },
+      {
+        "name": "Plat_VirtualAccessFlags",
+        "value": 459712,
+        "size": 8,
+        "defined": true,
+        "type": 2
+      }
+    ]
+  },
+  {
+    "file": "game/bin/linuxsteamrtarm64/libv8_icuuc.so",
+    "sha256": "0d011981587132b8ffa0c52e2931e8cb70af07c80e292017048cb846cda01671",
+    "bytes": 2382472,
+    "build_ids": [
+      "fbd5608c8dbd369f"
+    ],
+    "strings": [
+      {
+        "va": 439254,
+        "section": ".rodata",
+        "text": "fDm\\t|z"
+      }
+    ],
+    "direct_string_references": [],
+    "relevant_symbols": []
+  },
+  {
+    "file": "game/bin/linuxsteamrtarm64/libvideo.so",
+    "sha256": "00f5f64e0d901e8e12e637499532216fd7d046a7bf20b703f18321d8f5b8a446",
+    "bytes": 6320384,
+    "build_ids": [
+      "8fddabbc37dc81f1820136bef558fb5ec5a5d301"
+    ],
+    "strings": [],
+    "direct_string_references": [],
+    "relevant_symbols": [
+      {
+        "name": "CreateInterface",
+        "value": 735688,
+        "size": 128,
+        "defined": true,
+        "type": 2
+      }
+    ]
+  },
+  {
+    "file": "game/bin/linuxsteamrtarm64/libvr.so",
+    "sha256": "9cf81a8406fd732ec1bb651a58473345131cceb3ac9d6179da843af6c92246dc",
+    "bytes": 2714020,
+    "build_ids": [
+      "15aa3fb3b7e37567fc4afb6197b1e2a5f4212ce5"
+    ],
+    "strings": [
+      {
+        "va": 470320,
+        "section": ".rodata.str1.8",
+        "text": "IVRSystem_026"
+      },
+      {
+        "va": 482080,
+        "section": ".rodata.str1.8",
+        "text": "vr_foveated_inner_scalar"
+      },
+      {
+        "va": 483808,
+        "section": ".rodata.str1.8",
+        "text": "vr_foveation_disable"
+      },
+      {
+        "va": 495192,
+        "section": ".rodata.str1.8",
+        "text": "vr_foveation_disable_for_invisible_hands"
+      },
+      {
+        "va": 498224,
+        "section": ".rodata.str1.8",
+        "text": "vr_foveated_boundary"
+      },
+      {
+        "va": 503504,
+        "section": ".rodata.str1.8",
+        "text": "IVRCompositor_029"
+      },
+      {
+        "va": 506744,
+        "section": ".rodata.str1.8",
+        "text": "vr_foveated_outer_scalar"
+      },
+      {
+        "va": 509384,
+        "section": ".rodata.str1.8",
+        "text": "vr_foveated_overlap"
+      },
+      {
+        "va": 513200,
+        "section": ".rodata.str1.8",
+        "text": "IVRInput_011"
+      },
+      {
+        "va": 523440,
+        "section": ".rodata.str1.8",
+        "text": "Foveated 2x."
+      },
+      {
+        "va": 525272,
+        "section": ".rodata.str1.8",
+        "text": "IVRMailbox_001"
+      },
+      {
+        "va": 532976,
+        "section": ".rodata.str1.8",
+        "text": "0=Off, 1=VerticalSplit, 2=Checker, 3=FixedFoveated2x"
+      }
+    ],
+    "direct_string_references": [
+      {
+        "instruction_va": 694352,
+        "string_va": 523440,
+        "text": "Foveated 2x."
+      },
+      {
+        "instruction_va": 723920,
+        "string_va": 470320,
+        "text": "IVRSystem_026"
+      },
+      {
+        "instruction_va": 724372,
+        "string_va": 513200,
+        "text": "IVRInput_011"
+      },
+      {
+        "instruction_va": 724736,
+        "string_va": 525272,
+        "text": "IVRMailbox_001"
+      },
+      {
+        "instruction_va": 724868,
+        "string_va": 503504,
+        "text": "IVRCompositor_029"
+      },
+      {
+        "instruction_va": 801604,
+        "string_va": 532976,
+        "text": "0=Off, 1=VerticalSplit, 2=Checker, 3=FixedFoveated2x"
+      },
+      {
+        "instruction_va": 801672,
+        "string_va": 482080,
+        "text": "vr_foveated_inner_scalar"
+      },
+      {
+        "instruction_va": 801724,
+        "string_va": 506744,
+        "text": "vr_foveated_outer_scalar"
+      },
+      {
+        "instruction_va": 801772,
+        "string_va": 498224,
+        "text": "vr_foveated_boundary"
+      },
+      {
+        "instruction_va": 801824,
+        "string_va": 509384,
+        "text": "vr_foveated_overlap"
+      },
+      {
+        "instruction_va": 803136,
+        "string_va": 483808,
+        "text": "vr_foveation_disable"
+      },
+      {
+        "instruction_va": 803184,
+        "string_va": 495192,
+        "text": "vr_foveation_disable_for_invisible_hands"
+      }
+    ],
+    "relevant_symbols": [
+      {
+        "name": "CreateInterface",
+        "value": 838208,
+        "size": 4,
+        "defined": true,
+        "type": 2
+      }
+    ]
+  },
+  {
+    "file": "game/bin/linuxsteamrtarm64/libvscript.so",
+    "sha256": "2b05810471b739983d5f6156243c11c9cf00af975341327a5df278cedac69c7c",
+    "bytes": 921184,
+    "build_ids": [
+      "c83ebd7a671cb30d45253b35aa767b50fe823267"
+    ],
+    "strings": [],
+    "direct_string_references": [],
+    "relevant_symbols": [
+      {
+        "name": "Plat_VirtualFree",
+        "value": 0,
+        "size": 0,
+        "defined": false,
+        "type": 2
+      },
+      {
+        "name": "Plat_VirtualAlloc",
+        "value": 0,
+        "size": 0,
+        "defined": false,
+        "type": 2
+      },
+      {
+        "name": "lua_VALVE_HOOK_ALLOCATIONS",
+        "value": 824704,
+        "size": 48,
+        "defined": true,
+        "type": 2
+      },
+      {
+        "name": "luaL_newstate",
+        "value": 827520,
+        "size": 44,
+        "defined": true,
+        "type": 2
+      },
+      {
+        "name": "lua_newstate",
+        "value": 603872,
+        "size": 408,
+        "defined": true,
+        "type": 2
+      },
+      {
+        "name": "CreateInterface",
+        "value": 431616,
+        "size": 4,
+        "defined": true,
+        "type": 2
+      },
+      {
+        "name": "lua_VALVE_OVERRIDE_MMAP",
+        "value": 824224,
+        "size": 24,
+        "defined": true,
+        "type": 2
+      }
+    ]
+  },
+  {
+    "file": "game/bin/linuxsteamrtarm64/libvulkan_freedreno_hlvr.so",
+    "sha256": "65adfb51f1efa1ed142f045abb6882e56a52eec11e6b1f7a76d5e6f240d50a01",
+    "bytes": 17199656,
+    "build_ids": [
+      "c358839c6ea51be85f1895010792e45edf3d6fc1"
+    ],
+    "strings": [
+      {
+        "va": 5848368,
+        "section": ".rodata",
+        "text": "warning_fdm_force_disabled(command_buffer_handle=%lu)"
+      },
+      {
+        "va": 5848736,
+        "section": ".rodata",
+        "text": "warning_fdm_force_disabled"
+      },
+      {
+        "va": 5857256,
+        "section": ".rodata",
+        "text": "FRAGMENT_DENSITY_MAP_OFFSET_BIT attachment used without depth attachment clear"
+      },
+      {
+        "va": 5862368,
+        "section": ".rodata",
+        "text": "fdmoffset"
+      },
+      {
+        "va": 5862416,
+        "section": ".rodata",
+        "text": "nofdm"
+      },
+      {
+        "va": 6113448,
+        "section": ".rodata",
+        "text": "VK_STRUCTURE_TYPE_RENDERING_FRAGMENT_SHADING_RATE_ATTACHMENT_INFO_KHR"
+      },
+      {
+        "va": 6133848,
+        "section": ".rodata",
+        "text": "VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FRAGMENT_DENSITY_MAP_FEATURES_EXT"
+      },
+      {
+        "va": 6133920,
+        "section": ".rodata",
+        "text": "VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FRAGMENT_DENSITY_MAP_PROPERTIES_EXT"
+      },
+      {
+        "va": 6133992,
+        "section": ".rodata",
+        "text": "VK_STRUCTURE_TYPE_RENDER_PASS_FRAGMENT_DENSITY_MAP_CREATE_INFO_EXT"
+      },
+      {
+        "va": 6134336,
+        "section": ".rodata",
+        "text": "VK_STRUCTURE_TYPE_FRAGMENT_SHADING_RATE_ATTACHMENT_INFO_KHR"
+      },
+      {
+        "va": 6134400,
+        "section": ".rodata",
+        "text": "VK_STRUCTURE_TYPE_PIPELINE_FRAGMENT_SHADING_RATE_STATE_CREATE_INFO_KHR"
+      },
+      {
+        "va": 6134472,
+        "section": ".rodata",
+        "text": "VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FRAGMENT_SHADING_RATE_PROPERTIES_KHR"
+      },
+      {
+        "va": 6134544,
+        "section": ".rodata",
+        "text": "VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FRAGMENT_SHADING_RATE_FEATURES_KHR"
+      },
+      {
+        "va": 6134616,
+        "section": ".rodata",
+        "text": "VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FRAGMENT_SHADING_RATE_KHR"
+      },
+      {
+        "va": 6143896,
+        "section": ".rodata",
+        "text": "VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FRAGMENT_SHADING_RATE_ENUMS_FEATURES_NV"
+      },
+      {
+        "va": 6143976,
+        "section": ".rodata",
+        "text": "VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FRAGMENT_SHADING_RATE_ENUMS_PROPERTIES_NV"
+      },
+      {
+        "va": 6148008,
+        "section": ".rodata",
+        "text": "VK_STRUCTURE_TYPE_PIPELINE_FRAGMENT_SHADING_RATE_ENUM_STATE_CREATE_INFO_NV"
+      },
+      {
+        "va": 6148504,
+        "section": ".rodata",
+        "text": "VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FRAGMENT_DENSITY_MAP_2_FEATURES_EXT"
+      },
+      {
+        "va": 6148576,
+        "section": ".rodata",
+        "text": "VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FRAGMENT_DENSITY_MAP_2_PROPERTIES_EXT"
+      },
+      {
+        "va": 6157048,
+        "section": ".rodata",
+        "text": "VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FRAGMENT_DENSITY_MAP_OFFSET_FEATURES_EXT"
+      },
+      {
+        "va": 6157128,
+        "section": ".rodata",
+        "text": "VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FRAGMENT_DENSITY_MAP_OFFSET_PROPERTIES_EXT"
+      },
+      {
+        "va": 6157208,
+        "section": ".rodata",
+        "text": "VK_STRUCTURE_TYPE_SUBPASS_FRAGMENT_DENSITY_MAP_OFFSET_END_INFO_QCOM"
+      },
+      {
+        "va": 6178976,
+        "section": ".rodata",
+        "text": "VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FRAGMENT_DENSITY_MAP_LAYERED_FEATURES_VALVE"
+      },
+      {
+        "va": 6179056,
+        "section": ".rodata",
+        "text": "VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FRAGMENT_DENSITY_MAP_LAYERED_PROPERTIES_VALVE"
+      },
+      {
+        "va": 6179136,
+        "section": ".rodata",
+        "text": "VK_STRUCTURE_TYPE_PIPELINE_FRAGMENT_DENSITY_MAP_LAYERED_CREATE_INFO_VALVE"
+      },
+      {
+        "va": 6182112,
+        "section": ".rodata",
+        "text": "VK_STRUCTURE_TYPE_RENDERING_FRAGMENT_DENSITY_MAP_ATTACHMENT_INFO_EXT"
+      },
+      {
+        "va": 14859184,
+        "section": ".rodata",
+        "text": "VK_KHR_fragment_shading_rate"
+      },
+      {
+        "va": 14894024,
+        "section": ".rodata",
+        "text": "VK_EXT_fragment_density_map"
+      },
+      {
+        "va": 14894284,
+        "section": ".rodata",
+        "text": "VK_EXT_fragment_density_map2"
+      },
+      {
+        "va": 14894544,
+        "section": ".rodata",
+        "text": "VK_EXT_fragment_density_map_offset"
+      },
+      {
+        "va": 14944984,
+        "section": ".rodata",
+        "text": "VK_NV_fragment_shading_rate_enums"
+      },
+      {
+        "va": 14955124,
+        "section": ".rodata",
+        "text": "VK_QCOM_fragment_density_map_offset"
+      },
+      {
+        "va": 14960584,
+        "section": ".rodata",
+        "text": "VK_VALVE_fragment_density_map_layered"
+      }
+    ],
+    "direct_string_references": [
+      {
+        "instruction_va": 794752,
+        "string_va": 5848368,
+        "text": "warning_fdm_force_disabled(command_buffer_handle=%lu)"
+      },
+      {
+        "instruction_va": 1517048,
+        "string_va": 5857256,
+        "text": "FRAGMENT_DENSITY_MAP_OFFSET_BIT attachment used without depth attachment clear"
+      },
+      {
+        "instruction_va": 1517100,
+        "string_va": 5857256,
+        "text": "FRAGMENT_DENSITY_MAP_OFFSET_BIT attachment used without depth attachment clear"
+      },
+      {
+        "instruction_va": 5445088,
+        "string_va": 6133992,
+        "text": "VK_STRUCTURE_TYPE_RENDER_PASS_FRAGMENT_DENSITY_MAP_CREATE_INFO_EXT"
+      },
+      {
+        "instruction_va": 5449716,
+        "string_va": 6113448,
+        "text": "VK_STRUCTURE_TYPE_RENDERING_FRAGMENT_SHADING_RATE_ATTACHMENT_INFO_KHR"
+      },
+      {
+        "instruction_va": 5450960,
+        "string_va": 6157208,
+        "text": "VK_STRUCTURE_TYPE_SUBPASS_FRAGMENT_DENSITY_MAP_OFFSET_END_INFO_QCOM"
+      },
+      {
+        "instruction_va": 5455836,
+        "string_va": 6179056,
+        "text": "VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FRAGMENT_DENSITY_MAP_LAYERED_PROPERTIES_VALVE"
+      },
+      {
+        "instruction_va": 5456288,
+        "string_va": 6134336,
+        "text": "VK_STRUCTURE_TYPE_FRAGMENT_SHADING_RATE_ATTACHMENT_INFO_KHR"
+      },
+      {
+        "instruction_va": 5461696,
+        "string_va": 6157128,
+        "text": "VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FRAGMENT_DENSITY_MAP_OFFSET_PROPERTIES_EXT"
+      },
+      {
+        "instruction_va": 5462176,
+        "string_va": 6148008,
+        "text": "VK_STRUCTURE_TYPE_PIPELINE_FRAGMENT_SHADING_RATE_ENUM_STATE_CREATE_INFO_NV"
+      },
+      {
+        "instruction_va": 5462580,
+        "string_va": 6182112,
+        "text": "VK_STRUCTURE_TYPE_RENDERING_FRAGMENT_DENSITY_MAP_ATTACHMENT_INFO_EXT"
+      },
+      {
+        "instruction_va": 5462636,
+        "string_va": 6134544,
+        "text": "VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FRAGMENT_SHADING_RATE_FEATURES_KHR"
+      },
+      {
+        "instruction_va": 5462696,
+        "string_va": 6134616,
+        "text": "VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FRAGMENT_SHADING_RATE_KHR"
+      },
+      {
+        "instruction_va": 5463628,
+        "string_va": 6133920,
+        "text": "VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FRAGMENT_DENSITY_MAP_PROPERTIES_EXT"
+      },
+      {
+        "instruction_va": 5465848,
+        "string_va": 6148504,
+        "text": "VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FRAGMENT_DENSITY_MAP_2_FEATURES_EXT"
+      },
+      {
+        "instruction_va": 5465908,
+        "string_va": 6178976,
+        "text": "VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FRAGMENT_DENSITY_MAP_LAYERED_FEATURES_VALVE"
+      },
+      {
+        "instruction_va": 5465956,
+        "string_va": 6179136,
+        "text": "VK_STRUCTURE_TYPE_PIPELINE_FRAGMENT_DENSITY_MAP_LAYERED_CREATE_INFO_VALVE"
+      },
+      {
+        "instruction_va": 5466016,
+        "string_va": 6143896,
+        "text": "VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FRAGMENT_SHADING_RATE_ENUMS_FEATURES_NV"
+      },
+      {
+        "instruction_va": 5466028,
+        "string_va": 6143976,
+        "text": "VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FRAGMENT_SHADING_RATE_ENUMS_PROPERTIES_NV"
+      },
+      {
+        "instruction_va": 5466556,
+        "string_va": 6157048,
+        "text": "VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FRAGMENT_DENSITY_MAP_OFFSET_FEATURES_EXT"
+      },
+      {
+        "instruction_va": 5469936,
+        "string_va": 6134472,
+        "text": "VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FRAGMENT_SHADING_RATE_PROPERTIES_KHR"
+      },
+      {
+        "instruction_va": 5469948,
+        "string_va": 6134400,
+        "text": "VK_STRUCTURE_TYPE_PIPELINE_FRAGMENT_SHADING_RATE_STATE_CREATE_INFO_KHR"
+      },
+      {
+        "instruction_va": 5470524,
+        "string_va": 6148576,
+        "text": "VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FRAGMENT_DENSITY_MAP_2_PROPERTIES_EXT"
+      },
+      {
+        "instruction_va": 5470688,
+        "string_va": 6133848,
+        "text": "VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FRAGMENT_DENSITY_MAP_FEATURES_EXT"
+      }
+    ],
+    "relevant_symbols": []
+  },
+  {
+    "file": "game/hlvr/bin/linuxsteamrtarm64/libclient.so",
+    "sha256": "e9f0002d9dafdb79134b7f0935705918cfbac9595128002934f5aea7862ca6e1",
+    "bytes": 39068056,
+    "build_ids": [
+      "457f4f40157ec02aaeefc057295ab23973a0cfa1"
+    ],
+    "strings": [
+      {
+        "va": 13259320,
+        "section": ".rodata.str1.8",
+        "text": "-vulkan"
+      },
+      {
+        "va": 13771024,
+        "section": ".rodata.str1.8",
+        "text": "Half-Life: Alyx on Steam Frame is currently using a bundled graphics driver."
+      }
+    ],
+    "direct_string_references": [
+      {
+        "instruction_va": 16239428,
+        "string_va": 13259320,
+        "text": "-vulkan"
+      },
+      {
+        "instruction_va": 18338356,
+        "string_va": 13771024,
+        "text": "Half-Life: Alyx on Steam Frame is currently using a bundled graphics driver."
+      }
+    ],
+    "relevant_symbols": [
+      {
+        "name": "Plat_VirtualFree",
+        "value": 0,
+        "size": 0,
+        "defined": false,
+        "type": 2
+      },
+      {
+        "name": "Plat_VirtualAlloc",
+        "value": 0,
+        "size": 0,
+        "defined": false,
+        "type": 2
+      },
+      {
+        "name": "SteamInternal_CreateInterface",
+        "value": 0,
+        "size": 0,
+        "defined": false,
+        "type": 2
+      },
+      {
+        "name": "CreateInterface",
+        "value": 23504800,
+        "size": 4,
+        "defined": true,
+        "type": 2
+      }
+    ]
+  }
+]

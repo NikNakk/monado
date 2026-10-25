@@ -1,0 +1,22 @@
+PREFLIGHT libpcre2-8.so.0 imports=0 TLS=0 x18=464 CTR=1 SVC=0 trapped=0 refused=0/0/0
+PREFLIGHT libglib-2.0.so.0 imports=0 TLS=0 x18=225 CTR=0 SVC=0 trapped=0 refused=0/0/0
+PREFLIGHT libffi.so.8 imports=0 TLS=0 x18=3 CTR=1 SVC=0 trapped=0 refused=0/0/0
+PREFLIGHT libgobject-2.0.so.0 imports=0 TLS=0 x18=0 CTR=0 SVC=0 trapped=0 refused=0/0/0
+PREFLIGHT libgmodule-2.0.so.0 imports=0 TLS=0 x18=0 CTR=0 SVC=0 trapped=0 refused=0/0/0
+PREFLIGHT libz.so.1 imports=0 TLS=0 x18=93 CTR=0 SVC=0 trapped=0 refused=0/0/0
+PREFLIGHT libblkid.so.1 imports=0 TLS=3 x18=76 CTR=0 SVC=0 trapped=0 refused=0/0/0
+PREFLIGHT libselinux.so.1 imports=0 TLS=38 x18=61 CTR=0 SVC=0 trapped=0 refused=0/0/0
+PREFLIGHT libmount.so.1 imports=0 TLS=3 x18=76 CTR=0 SVC=0 trapped=0 refused=0/0/0
+PREFLIGHT libgio-2.0.so.0 imports=0 TLS=0 x18=12 CTR=0 SVC=0 trapped=0 refused=0/0/0
+PREFLIGHT libfribidi.so.0 imports=0 TLS=0 x18=11 CTR=0 SVC=0 trapped=0 refused=0/0/0
+PREFLIGHT libbz2.so.1.0 imports=0 TLS=0 x18=118 CTR=0 SVC=0 trapped=0 refused=0/0/0
+PREFLIGHT libpng16.so.16 imports=0 TLS=0 x18=16 CTR=0 SVC=0 trapped=0 refused=0/0/0
+PREFLIGHT libbrotlicommon.so.1 imports=0 TLS=0 x18=4 CTR=0 SVC=0 trapped=0 refused=0/0/0
+PREFLIGHT libbrotlidec.so.1 imports=0 TLS=0 x18=58 CTR=0 SVC=0 trapped=0 refused=0/0/0
+PREFLIGHT libfreetype.so.6 imports=0 TLS=0 x18=280 CTR=0 SVC=0 trapped=0 refused=0/0/0
+PREFLIGHT libharfbuzz.so.0 imports=0 TLS=0 x18=624 CTR=0 SVC=0 trapped=0 refused=0/0/0
+PREFLIGHT libpango-1.0.so.0 imports=0 TLS=0 x18=33 CTR=0 SVC=0 trapped=0 refused=0/0/0
+PREFLIGHT libexpat.so.1 imports=0 TLS=0 x18=0 CTR=0 SVC=0 trapped=0 refused=0/0/0
+PREFLIGHT libfontconfig.so.1 imports=0 TLS=0 x18=9 CTR=0 SVC=0 trapped=0 refused=0/0/0
+PREFLIGHT libpangoft2-1.0.so imports=0 TLS=0 x18=0 CTR=0 SVC=0 trapped=0 refused=0/0/0
+PREFLIGHT result=PASS loaded=21 no guest constructors/entry points executed

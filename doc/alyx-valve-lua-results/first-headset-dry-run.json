@@ -1,0 +1,61 @@
+{
+  "command": [
+    "python3",
+    "/private/tmp/xrizer-dual-vulkan/tools/macos/run-vulkan-backend.py",
+    "--driver",
+    "moltenvk",
+    "--output",
+    "/private/tmp/alyx-monado-first/backend",
+    "--",
+    "/private/tmp/alyx-constrained-host-build/alyx_host",
+    "--run-constrained",
+    "--libdir",
+    "/private/tmp/alyx-native-guest-libs-ready",
+    "--game",
+    "/private/tmp/alyx-native-game-root",
+    "--",
+    "-vr",
+    "-steam",
+    "-vulkan",
+    "-nowindow",
+    "-console",
+    "+map",
+    "startup"
+  ],
+  "environment": {
+    "VERANTYX_GUEST_HOME": "/private/tmp/alyx-monado-first/state/guest-home",
+    "VERANTYX_OPENVR_ROOT": "/private/tmp/alyx-monado-first/state/openvr",
+    "VERANTYX_REQUIRE_STEAM": "1",
+    "XRIZER_VRCLIENT": "/private/tmp/xrizer-dual-vulkan/target/debug/libxrizer.dylib",
+    "XRIZER_OPENXR_LOADER": "/Users/nickkennedy/Code/OpenXR-SDK/build/macos/src/loader/Release/libopenxr_loader.dylib",
+    "XR_RUNTIME_JSON": "/Users/nickkennedy/Code/monado-2/build/arm64/openxr_monado-dev.json",
+    "XDG_CACHE_HOME": "/private/tmp/alyx-monado-first/cache",
+    "XDG_CONFIG_HOME": "/private/tmp/alyx-monado-first/config",
+    "KL_VK_FOVEATION_TRACE": "1",
+    "ALYX_RESULT_FILE": "/private/tmp/alyx-monado-first/engine-result.log"
+  },
+  "timeout": 120,
+  "headless": false,
+  "binaries": {
+    "host": {
+      "path": "/private/tmp/alyx-constrained-host-build/alyx_host",
+      "sha256": "2c52520a1bbd35e1cf33ed65cbcdc329e4f00d411d20595a437f87e0673075b4"
+    },
+    "xrizer": {
+      "path": "/private/tmp/xrizer-dual-vulkan/target/debug/libxrizer.dylib",
+      "sha256": "1c295dccb81f92b1a177e1120f093e2f46ab55cf1c9a7ad80fbd12bc1107cd55"
+    },
+    "openxr_loader": {
+      "path": "/Users/nickkennedy/Code/OpenXR-SDK/build/macos/src/loader/Release/libopenxr_loader.dylib",
+      "sha256": "965161677bbc6415110ebc264216891114963eb89689db5153316b55802642a0"
+    },
+    "engine": {
+      "path": "/private/tmp/alyx-native-game-root/game/bin/linuxsteamrtarm64/libengine2.so",
+      "sha256": "43ff2a7ce24488690b408d61976a3d0f9609dc61ca4d5675d3e07f5b038bf333"
+    },
+    "monado_runtime": {
+      "path": "/Users/nickkennedy/Code/monado-2/build/arm64/src/xrt/targets/openxr/libopenxr_monado.dylib",
+      "sha256": "71f382ce7528bb5263db48e759e5b5ac1c3911d47c383f5fd1b16fd15c656902"
+    }
+  }
+}

@@ -1,0 +1,102 @@
+[
+  {
+    "va": "0x249070",
+    "type": "FDM_FEATURES",
+    "value": 1000218000
+  },
+  {
+    "va": "0x2492f0",
+    "type": "FDM_FEATURES",
+    "value": 1000218000
+  },
+  {
+    "va": "0x249364",
+    "type": "FDM_FEATURES",
+    "value": 1000218000
+  },
+  {
+    "va": "0x2495e0",
+    "type": "FDM_FEATURES",
+    "value": 1000218000
+  },
+  {
+    "va": "0x2496d4",
+    "type": "FDM_FEATURES",
+    "value": 1000218000
+  },
+  {
+    "va": "0x24afc8",
+    "type": "FDM_FEATURES",
+    "value": 1000218000
+  },
+  {
+    "va": "0x24b04c",
+    "type": "FDM_FEATURES",
+    "value": 1000218000
+  },
+  {
+    "va": "0x24b1e4",
+    "type": "FDM_FEATURES",
+    "value": 1000218000
+  },
+  {
+    "va": "0x24be40",
+    "type": "FDM_FEATURES",
+    "value": 1000218000
+  },
+  {
+    "va": "0x24fee8",
+    "type": "FDM_FEATURES",
+    "value": 1000218000
+  },
+  {
+    "va": "0x25006c",
+    "type": "FDM_FEATURES",
+    "value": 1000218000
+  },
+  {
+    "va": "0x250214",
+    "type": "FDM_FEATURES",
+    "value": 1000218000
+  },
+  {
+    "va": "0x250374",
+    "type": "FDM_FEATURES",
+    "value": 1000218000
+  },
+  {
+    "va": "0x250478",
+    "type": "FDM_FEATURES",
+    "value": 1000218000
+  },
+  {
+    "va": "0x26abc8",
+    "type": "FDM_FEATURES",
+    "value": 1000218000
+  },
+  {
+    "va": "0x26b02c",
+    "type": "OFFSET_END_INFO",
+    "value": 1000425002
+  },
+  {
+    "va": "0x26b650",
+    "type": "FDM_FEATURES",
+    "value": 1000218000
+  },
+  {
+    "va": "0x298084",
+    "type": "FDM_FEATURES",
+    "value": 1000218000
+  },
+  {
+    "va": "0x298120",
+    "type": "OFFSET_FEATURES",
+    "value": 1000425000
+  },
+  {
+    "va": "0x298214",
+    "type": "OFFSET_PROPERTIES",
+    "value": 1000425001
+  }
+]

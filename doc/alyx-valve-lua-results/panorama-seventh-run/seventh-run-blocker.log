@@ -1,0 +1,5 @@
+  [klepton] DT_NEEDED libatomic.so.1 of /private/tmp/alyx-native-guest-libs-fonts/libglib-2.0.so.0 is neither loadable nor shim-served — its imports will be UNRESOLVED
+  [klepton] DT_NEEDED libssl.so.3 of /private/tmp/alyx-native-game-root/game/bin/linuxsteamrtarm64/libpanorama_text_pango.so is neither loadable nor shim-served — its imports will be UNRESOLVED
+  [klepton] DT_NEEDED libcrypto.so.3 of /private/tmp/alyx-native-game-root/game/bin/linuxsteamrtarm64/libpanorama_text_pango.so is neither loadable nor shim-served — its imports will be UNRESOLVED
+[constrained-image] /private/tmp/alyx-native-game-root/game/bin/linuxsteamrtarm64/libpanorama_text_pango.so missing=39 TLS=1 x18=1238 CTR=0 SVC=0 trapped=0 refused=0/0/0
+[constrained-image] unresolved imports or unsafe ABI translation; refusing constructors

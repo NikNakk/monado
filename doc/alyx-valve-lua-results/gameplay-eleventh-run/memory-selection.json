@@ -1,0 +1,6 @@
+{
+  "guest_memory_mb_requested": 24576,
+  "guest_memory_source": "hw.memsize",
+  "KL_MEM_TOTAL_MB": "24576",
+  "dry_run_output_directory_created": false
+}

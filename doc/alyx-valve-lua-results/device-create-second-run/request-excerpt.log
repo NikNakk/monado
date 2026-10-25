@@ -1,0 +1,77 @@
+[engine ch45] Vulkan extension enabled: VK_KHR_swapchain
+[engine ch45] Vulkan extension enabled: VK_KHR_dedicated_allocation
+[engine ch45] Vulkan extension enabled: VK_KHR_external_fence
+[engine ch45] Vulkan extension enabled: VK_KHR_external_memory
+[engine ch45] Vulkan extension enabled: VK_KHR_external_semaphore
+[engine ch45] Vulkan extension enabled: VK_KHR_get_memory_requirements2
+[engine ch45] Vulkan extension enabled: VK_KHR_image_format_list
+[engine ch45] Vulkan extension enabled: VK_EXT_metal_objects
+[engine ch45] Vulkan extension enabled: VK_KHR_descriptor_update_template
+[engine ch45] Vulkan extension enabled: VK_KHR_image_format_list
+[engine ch45] Vulkan extension enabled: VK_KHR_maintenance1
+[engine ch45] Vulkan extension enabled: VK_KHR_maintenance2
+[engine ch45] Vulkan extension enabled: VK_EXT_separate_stencil_usage
+[engine ch45] Vulkan extension enabled: VK_KHR_swapchain_mutable_format
+[engine ch45] Vulkan extension enabled: VK_KHR_dynamic_rendering
+[engine ch45] Vulkan extension enabled: VK_KHR_dynamic_rendering_local_read
+[engine ch45] Vulkan extension enabled: VK_KHR_depth_stencil_resolve
+[engine ch45] Vulkan extension enabled: VK_KHR_create_renderpass2
+[engine ch45] Vulkan extension enabled: VK_EXT_host_image_copy
+[engine ch45] Vulkan extension enabled: VK_EXT_extended_dynamic_state
+[engine ch45] Vulkan extension enabled: VK_EXT_extended_dynamic_state3
+[engine ch45] Vulkan extension enabled: VK_EXT_sample_locations
+[engine ch45] Vulkan extension enabled: VK_KHR_multiview
+  [vk] fdm strict-device-request extension=VK_KHR_swapchain
+  [vk] fdm strict-device-request extension=VK_KHR_dedicated_allocation
+  [vk] fdm strict-device-request extension=VK_KHR_external_fence
+  [vk] fdm strict-device-request extension=VK_KHR_external_memory
+  [vk] fdm strict-device-request extension=VK_KHR_external_semaphore
+  [vk] fdm strict-device-request extension=VK_KHR_get_memory_requirements2
+  [vk] fdm strict-device-request extension=VK_KHR_image_format_list
+  [vk] fdm strict-device-request extension=VK_EXT_metal_objects
+  [vk] fdm strict-device-request extension=VK_KHR_descriptor_update_template
+  [vk] fdm strict-device-request extension=VK_KHR_image_format_list
+  [vk] fdm strict-device-request extension=VK_KHR_maintenance1
+  [vk] fdm strict-device-request extension=VK_KHR_maintenance2
+  [vk] fdm strict-device-request extension=VK_EXT_separate_stencil_usage
+  [vk] fdm strict-device-request extension=VK_KHR_swapchain_mutable_format
+  [vk] fdm strict-device-request extension=VK_KHR_dynamic_rendering
+  [vk] fdm strict-device-request extension=VK_KHR_dynamic_rendering_local_read
+  [vk] fdm strict-device-request extension=VK_KHR_depth_stencil_resolve
+  [vk] fdm strict-device-request extension=VK_KHR_create_renderpass2
+  [vk] fdm strict-device-request extension=VK_EXT_host_image_copy
+  [vk] fdm strict-device-request extension=VK_EXT_extended_dynamic_state
+  [vk] fdm strict-device-request extension=VK_EXT_extended_dynamic_state3
+  [vk] fdm strict-device-request extension=VK_EXT_sample_locations
+  [vk] fdm strict-device-request extension=VK_KHR_multiview
+  [vk] fdm strict-device-request pNext sType=1000053001
+  [vk] fdm strict-device-request pNext sType=1000044003
+  [vk] fdm strict-device-request pNext sType=1000232000
+  [vk] fdm strict-device-request pNext sType=1000270000
+  [vk] fdm strict-device-request pNext sType=1000267000
+  [vk] fdm strict-device-request pNext sType=1000455000
+  [vk] fdm strict-device-forwarded extension=VK_KHR_swapchain
+  [vk] fdm strict-device-forwarded extension=VK_KHR_dedicated_allocation
+  [vk] fdm strict-device-forwarded extension=VK_KHR_external_fence
+  [vk] fdm strict-device-forwarded extension=VK_KHR_external_memory
+  [vk] fdm strict-device-forwarded extension=VK_KHR_external_semaphore
+  [vk] fdm strict-device-forwarded extension=VK_KHR_get_memory_requirements2
+  [vk] fdm strict-device-forwarded extension=VK_KHR_image_format_list
+  [vk] fdm strict-device-forwarded extension=VK_EXT_metal_objects
+  [vk] fdm strict-device-forwarded extension=VK_KHR_descriptor_update_template
+  [vk] fdm strict-device-forwarded extension=VK_KHR_image_format_list
+  [vk] fdm strict-device-forwarded extension=VK_KHR_maintenance1
+  [vk] fdm strict-device-forwarded extension=VK_KHR_maintenance2
+  [vk] fdm strict-device-forwarded extension=VK_EXT_separate_stencil_usage
+  [vk] fdm strict-device-forwarded extension=VK_KHR_swapchain_mutable_format
+  [vk] fdm strict-device-forwarded extension=VK_KHR_dynamic_rendering
+  [vk] fdm strict-device-forwarded extension=VK_KHR_dynamic_rendering_local_read
+  [vk] fdm strict-device-forwarded extension=VK_KHR_depth_stencil_resolve
+  [vk] fdm strict-device-forwarded extension=VK_KHR_create_renderpass2
+  [vk] fdm strict-device-forwarded extension=VK_EXT_host_image_copy
+  [vk] fdm strict-device-forwarded extension=VK_EXT_extended_dynamic_state
+  [vk] fdm strict-device-forwarded extension=VK_EXT_extended_dynamic_state3
+  [vk] fdm strict-device-forwarded extension=VK_EXT_sample_locations
+  [vk] fdm strict-device-forwarded extension=VK_KHR_multiview
+  [vk] fdm strict-device-forwarded extension=VK_KHR_portability_subset
+[engine ch45 warn] vkCreateDevice failed, unable to create Vulkan device.

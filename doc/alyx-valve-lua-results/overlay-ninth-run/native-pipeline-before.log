@@ -1,0 +1,6 @@
+running 1 test
+native overlay device: "Apple M5", driverVersion=10402
+thread 'graphics_backends::vulkan::native_overlay_pipeline_tests::native_overlay_pipeline' (15812869) panicked at src/graphics_backends/vulkan.rs:822:18:
+called `Result::unwrap()` on an `Err` value: ([0x0], ERROR_INITIALIZATION_FAILED)
+test graphics_backends::vulkan::native_overlay_pipeline_tests::native_overlay_pipeline ... FAILED
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 86 filtered out; finished in 0.41s

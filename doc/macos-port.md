@@ -6,6 +6,18 @@ SPDX-License-Identifier: BSL-1.0
 
 # macOS / PS VR2 Port Status
 
+The [native ARM64 Alyx dual-Vulkan investigation](macos-alyx-kosmickrisp.md)
+(19-20 October, from `codex/alyx-dual-vulkan`) records isolated KosmicKrisp and
+MoltenVK selection, the [ARM64 static audit](macos-alyx-arm64-static-audit.md),
+the [constrained host](macos-alyx-constrained-host.md), [strict Vulkan
+tests](macos-alyx-strict-vulkan.md) and the [first native gameplay
+runs](macos-alyx-first-headset-check.md) on the simulated HMD. Its finding that
+KosmicKrisp lacks Metal-object interop was superseded by the later KosmicKrisp
+work on `claude/kk-fdm-stage1`; of that line only the generic external FD sync
+guard and its test are integrated here. The branch's own Vulkan negotiation
+repair (`914b89368`) is not merged, since the main line's `4a873825d` and
+`90a6cdb64` cover it. PS VR2 gameplay and FDM remain unverified.
+
 Presenter selection now uses `XRT_MACOS_PRESENTER=wsi|wsi-adaptive|native`
 (default `native`). `wsi` selects calibrated CV WSI; the old WSI selection
 booleans are retired. See [selector migration](macos-wsi-migration.md#unified-presenter-selector-17-october-2026).

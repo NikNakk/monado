@@ -1,0 +1,15 @@
+{
+  "source_commit": "8417a1d",
+  "build_command": "XRIZER_VERSION=8417a1d cargo build --offline -p xrizer",
+  "previous_binary": {
+    "path": "/private/tmp/xrizer-dual-vulkan/target/debug/libxrizer.dylib",
+    "sha256": "1c295dccb81f92b1a177e1120f093e2f46ab55cf1c9a7ad80fbd12bc1107cd55"
+  },
+  "rebuilt_binary": {
+    "path": "/private/tmp/xrizer-dual-vulkan/target/debug/libxrizer.dylib",
+    "sha256": "24b28582ece09b1758203311f98437e85d37365ecf705d2fce53ccc5698ecfb8"
+  },
+  "baseline_binary_backup": "/private/tmp/xrizer-before-overlay-fix.dylib",
+  "native_pipeline_scope": "Actual xrizer PipelineData builder and shaders, no image views/framebuffer draw/OpenXR/game/headset. Single-sample RGBA and BGRA formats.",
+  "runtime_scope": "Only isolated xrizer debug library rebuilt; installed Monado runtime unchanged."
+}

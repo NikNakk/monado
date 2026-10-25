@@ -1,0 +1,10 @@
+PREFLIGHT libgcc_s.so.1 imports=0 TLS=2 x18=56 CTR=1 SVC=0 trapped=0 refused=0/0/0
+PREFLIGHT libstdc++.so.6 imports=0 TLS=5 x18=217 CTR=0 SVC=0 trapped=0 refused=0/0/0
+PREFLIGHT libz.so.1 imports=0 TLS=0 x18=93 CTR=0 SVC=0 trapped=0 refused=0/0/0
+PREFLIGHT libzstd.so.1 imports=0 TLS=0 x18=2539 CTR=0 SVC=0 trapped=0 refused=0/0/0
+PREFLIGHT libcrypto.so.3 imports=0 TLS=0 x18=1447 CTR=0 SVC=0 trapped=0 refused=0/0/0
+PREFLIGHT libssl.so.3 imports=0 TLS=0 x18=25 CTR=0 SVC=0 trapped=0 refused=0/0/0
+PREFLIGHT libtier0.so imports=0 TLS=63 x18=22 CTR=0 SVC=0 trapped=0 refused=0/0/0
+PREFLIGHT libvstdlib.so imports=0 TLS=10 x18=73 CTR=0 SVC=0 trapped=0 refused=0/0/0
+PREFLIGHT libpanorama_text_pango.so imports=0 TLS=1 x18=1238 CTR=0 SVC=0 trapped=0 refused=0/0/0
+PREFLIGHT result=PASS loaded=9 no guest constructors/entry points executed

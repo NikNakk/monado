@@ -1,0 +1,13 @@
+  [vk] Alyx compatibility: enabled real sample-locations extension and extendedDynamicState3SampleLocationsEnable; caller features preserved
+  [vk] strict vkCreateDevice driver result=0
+[engine ch45 warn] Attempting to purge m_fencedResourceList.Count() = 0, m_pendingFencedResourceQueue.Count() = 1, nCurrentCmdBuffersAvailable = 0, nAllocatedCommandBuffers = 2577
+  [dl] /private/tmp/alyx-native-guest-libs-ready/libpangoft2-1.0.so: 8 DT_NEEDED
+  [klepton] DT_NEEDED libglib-2.0.so.0 of /private/tmp/alyx-native-guest-libs-ready/libpango-1.0.so.0 is neither loadable nor shim-served — its imports will be UNRESOLVED
+  [klepton] DT_NEEDED libgobject-2.0.so.0 of /private/tmp/alyx-native-guest-libs-ready/libpango-1.0.so.0 is neither loadable nor shim-served — its imports will be UNRESOLVED
+  [klepton] DT_NEEDED libgio-2.0.so.0 of /private/tmp/alyx-native-guest-libs-ready/libpango-1.0.so.0 is neither loadable nor shim-served — its imports will be UNRESOLVED
+  [klepton] DT_NEEDED libfribidi.so.0 of /private/tmp/alyx-native-guest-libs-ready/libpango-1.0.so.0 is neither loadable nor shim-served — its imports will be UNRESOLVED
+  [klepton] DT_NEEDED libbz2.so.1.0 of /private/tmp/alyx-native-guest-libs-ready/libfreetype.so.6 is neither loadable nor shim-served — its imports will be UNRESOLVED
+  [klepton] DT_NEEDED libpng16.so.16 of /private/tmp/alyx-native-guest-libs-ready/libfreetype.so.6 is neither loadable nor shim-served — its imports will be UNRESOLVED
+  [klepton] DT_NEEDED libbrotlidec.so.1 of /private/tmp/alyx-native-guest-libs-ready/libfreetype.so.6 is neither loadable nor shim-served — its imports will be UNRESOLVED
+[constrained-image] /private/tmp/alyx-native-guest-libs-ready/libfreetype.so.6 missing=56 TLS=0 x18=280 CTR=0 SVC=0 trapped=0 refused=0/0/0
+[constrained-image] unresolved imports or unsafe ABI translation; refusing constructors

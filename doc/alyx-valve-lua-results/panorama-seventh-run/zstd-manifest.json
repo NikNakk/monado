@@ -1,0 +1,17 @@
+{
+  "index_url": "https://deb.debian.org/debian/dists/trixie/main/binary-arm64/Packages.gz",
+  "index_sha256": "eb08ac2299585e234f64ed3c1dbe5b71e149cd68a84b711ceea85dcfc2627135",
+  "packages": [
+    {
+      "name": "libzstd1",
+      "version": "1.5.7+dfsg-1",
+      "url": "https://deb.debian.org/debian/pool/main/libz/libzstd/libzstd1_1.5.7+dfsg-1_arm64.deb",
+      "sha256": "924540bd59fdbfa77a0604360efdaca54411a43daf11c7e002a3c64791b67448",
+      "files": [
+        "./usr/lib/aarch64-linux-gnu/libzstd.so.1.5.7",
+        "./usr/share/doc/libzstd1/copyright",
+        "./usr/lib/aarch64-linux-gnu/libzstd.so.1"
+      ]
+    }
+  ]
+}

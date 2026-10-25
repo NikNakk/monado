@@ -1,0 +1,71 @@
+{"frames":60,"fps":60.00,"display_hz":60.00,"skipped_display_periods":0,"frame_interval_ms_median":16.705,"frame_interval_ms_p95":19.208,"xrEndFrame_ms_median":0.300,"xrEndFrame_ms_p95":0.850,"gpu_load":1,"cpu_us":0,"async_submit":1}
+OpenXR Vulkan probe created session, 1 swapchain(s), and submitted 60 projection frames.
+LOG in xrCreateInstance: Instance created
+	createInfo->applicationInfo.applicationName: tests_macos_openxr_vulkan_probe
+	createInfo->applicationInfo.applicationVersion: 0
+	createInfo->applicationInfo.engineName: monado
+	createInfo->applicationInfo.engineVersion: 0
+	createInfo->applicationInfo.apiVersion: 1.1.58
+	appinfo.detected.engine.name: (null)
+	appinfo.detected.engine.version: 0.0.0
+	quirks.disable_vulkan_format_depth: false
+	quirks.disable_vulkan_format_depth_stencil: false
+	quirks.disable_quad_views: false
+	quirks.no_validation_error_in_create_ref_space: true
+	quirks.skip_end_session: false
+	quirks.parallel_views: false
+	quirks.no_texture_source_alpha: false
+	quirks.ignore_invalid_swapchain_usage_bits: false
+
+LOG in xrGetSystem: Selected devices
+	Head: 'Qwerty HMD'
+	Eyes: '<none>'
+	Left: 'Qwerty Left Controller'
+	Right: 'Qwerty Right Controller'
+	Gamepad: '<none>'
+	Hand-Tracking Left (unobstructed): '<none>'
+	Hand-Tracking Right (unobstructed): '<none>'
+	Hand-Tracking Left (conforming): '<none>'
+	Hand-Tracking Right (conforming): '<none>'
+2026-10-19 23:40:30.725 tests_macos_openxr_vulkan_probe[21182:14896971] Metal API Validation Enabled
+LOG in xrCreateVulkanInstanceKHR: Creation of VkInstance:
+	result: VK_SUCCESS
+	vulkanInstance: 0x1014d3000
+	extensions:
+		VK_KHR_external_fence_capabilities
+		VK_KHR_external_memory_capabilities
+		VK_KHR_external_semaphore_capabilities
+		VK_KHR_get_physical_device_properties2
+		VK_EXT_debug_utils
+		VK_KHR_portability_enumeration
+LOG in xrCreateVulkanDeviceKHR: Creation of VkDevice:
+	result: VK_SUCCESS
+	vulkanDevice: 0x97f570018
+	vulkanInstance: 0x1014d3000
+	external_fence_fd: false
+	external_semaphore_fd: false
+	timelineSemaphore: true
+	extensions:
+		VK_KHR_dedicated_allocation
+		VK_KHR_external_fence
+		VK_KHR_external_memory
+		VK_KHR_external_semaphore
+		VK_KHR_get_memory_requirements2
+		VK_EXT_metal_objects
+		VK_KHR_portability_subset
+		VK_KHR_image_format_list
+		VK_KHR_timeline_semaphore
+ INFO [ipc_metal_xpc_take_shared_event] Metal XPC took and recreated shared event token=0x000000004dca20d6 device=0x97e97c000 value=0
+ INFO [client_vk_shared_event_create] Vulkan client frame handoff: Metal shared event (service), initial value 0; no queue-idle wait
+ INFO [u_timing_trace_open] Timing trace: /private/tmp/alyx-results/mvk-array/monado_psvr2_21182_metal_release_barrier.csv
+ INFO [client_metal_service_compositor_create] Metal service swapchain path installed: Metal-owned textures are transported through the XPC broker and imported directly into service Vulkan images
+ INFO [metal_service_create_swapchain] Metal service three-image compatibility requested: 896x1007
+ INFO [ipc_metal_xpc_publish_textures] Metal XPC published 3 shared texture handle(s) token=0x000000004df12f5f
+ INFO [client_vk_metal_texture_swapchain_create] Vulkan Metal-backed swapchain: format=44 layers=2 images=3 remote=1
+ INFO [client_vk_metal_texture_import] Vulkan Metal import: image=0x97e8b43c0 source=0x97e97c3c0 exported=0x97e97c3c0 format=44 layers=2; no image memory allocation or bind
+ INFO [client_vk_metal_texture_import] Vulkan Metal import: image=0x97e8b4500 source=0x97e97c500 exported=0x97e97c500 format=44 layers=2; no image memory allocation or bind
+ INFO [client_vk_metal_texture_import] Vulkan Metal import: image=0x97e8b4640 source=0x97e97c640 exported=0x97e97c640 format=44 layers=2; no image memory allocation or bind
+Vulkan probe session state=3
+Vulkan probe session state=4
+Vulkan probe session state=5
+Repeated Vulkan probe iteration 1/1 exit=0

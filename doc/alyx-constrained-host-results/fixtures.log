@@ -1,0 +1,12 @@
+clang -g -O1 -Wall -Wextra -Wno-unused-parameter -arch arm64 -I/opt/homebrew/include -I/private/tmp/alyx-klepton/runtime -I/private/tmp/alyx-klepton/runtime/jni -I/private/tmp/alyx-klepton/runtime/libc -I/private/tmp/alyx-klepton/runtime/gfx -I/private/tmp/alyx-klepton/runtime/xr -I/private/tmp/alyx-klepton/runtime/media -I/private/tmp/alyx-klepton/runtime/guest -I/private/tmp/alyx-klepton/runtime/diag -I/private/tmp/alyx-klepton/vendor-moltenvk/out/include -DALYX_CONSTRAINED_HOST=1 -o /private/tmp/alyx-constrained-host-build/check-lua-builtin tests/lua_builtin.c kl_lua_builtin.c -I.
+/private/tmp/alyx-constrained-host-build/check-lua-builtin
+[lua-builtin] selected built-in mmap allocator (game lifecycle unvalidated)
+[lua-builtin] selected built-in mmap allocator (game lifecycle unvalidated)
+[lua-builtin] original setter unavailable; refusing to continue
+[lua-builtin] original setter unavailable; refusing to continue
+[lua-builtin] original setter unavailable; refusing to continue
+PASS: callback substitution, repeated binding, missing image/symbol and recursion fail closed
+clang -g -O1 -Wall -Wextra -Wno-unused-parameter -arch arm64 -I/opt/homebrew/include -I/private/tmp/alyx-klepton/runtime -I/private/tmp/alyx-klepton/runtime/jni -I/private/tmp/alyx-klepton/runtime/libc -I/private/tmp/alyx-klepton/runtime/gfx -I/private/tmp/alyx-klepton/runtime/xr -I/private/tmp/alyx-klepton/runtime/media -I/private/tmp/alyx-klepton/runtime/guest -I/private/tmp/alyx-klepton/runtime/diag -I/private/tmp/alyx-klepton/vendor-moltenvk/out/include -DALYX_CONSTRAINED_HOST=1 -o /private/tmp/alyx-constrained-host-build/check-thread-probe tests/thread_probe.c kl_thread_probe.c -I.
+/private/tmp/alyx-constrained-host-build/check-thread-probe
+joined pthread kernel probe: 0 (0 means retained kernel thread; guest exit tracking still needed)
+PASS: kernel current/live/terminated/invalid probes; guest pthread-exit semantics remain unverified

@@ -1,0 +1,17 @@
+{
+  "before": {
+    "libvscript.so": "2b05810471b739983d5f6156243c11c9cf00af975341327a5df278cedac69c7c",
+    "libtier0.so": "1e51a94385ea01e61ac87d087efc5a30255ef08656a0bdd6faca008012adbb5d",
+    "libvstdlib.so": "6b15bee50473dcb9e0c22bd289f2771592f4bcc783b7a27b8ee7892770c78403",
+    "libstdc++.so.6": "fff1f0050a33ddf29c44634c7639ac16e2573a61e3daab4fcc4c007b432ccf19",
+    "libgcc_s.so.1": "9a146967dc38c3820c5dc21c3209812655f66b6551264072b187bd0e787947e0"
+  },
+  "after": {
+    "libvscript.so": "2b05810471b739983d5f6156243c11c9cf00af975341327a5df278cedac69c7c",
+    "libtier0.so": "1e51a94385ea01e61ac87d087efc5a30255ef08656a0bdd6faca008012adbb5d",
+    "libvstdlib.so": "6b15bee50473dcb9e0c22bd289f2771592f4bcc783b7a27b8ee7892770c78403",
+    "libstdc++.so.6": "fff1f0050a33ddf29c44634c7639ac16e2573a61e3daab4fcc4c007b432ccf19",
+    "libgcc_s.so.1": "9a146967dc38c3820c5dc21c3209812655f66b6551264072b187bd0e787947e0"
+  },
+  "returncode": 0
+}

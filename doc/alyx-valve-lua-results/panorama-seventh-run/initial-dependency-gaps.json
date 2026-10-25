@@ -1,0 +1,22 @@
+{
+  "libatomic.so.1": [
+    "libglib-2.0.so.0.8400.4"
+  ],
+  "libicuuc.so.67": [
+    "libharfbuzz-icu.so.0.61010.0"
+  ],
+  "libssl.so.3": [
+    "libpanorama.so",
+    "libpanorama_text_pango.so"
+  ],
+  "libcrypto.so.3": [
+    "libpanorama.so",
+    "libpanorama_text_pango.so"
+  ],
+  "libogg.so.0": [
+    "libvorbis.so",
+    "libvorbis.so.0",
+    "libvorbisfile.so",
+    "libvorbisfile.so.3"
+  ]
+}

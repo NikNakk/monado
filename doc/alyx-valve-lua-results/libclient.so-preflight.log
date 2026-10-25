@@ -1,0 +1,21 @@
+PREFLIGHT libgcc_s.so.1 imports=0 TLS=2 x18=56 CTR=1 SVC=0 trapped=0 refused=0/0/0
+PREFLIGHT libstdc++.so.6 imports=0 TLS=5 x18=217 CTR=0 SVC=0 trapped=0 refused=0/0/0
+PREFLIGHT libuuid.so.1 imports=0 TLS=6 x18=66 CTR=0 SVC=0 trapped=0 refused=0/0/0
+PREFLIGHT libtier0.so imports=0 TLS=63 x18=22 CTR=0 SVC=0 trapped=0 refused=0/0/0
+PREFLIGHT libvstdlib.so imports=0 TLS=10 x18=73 CTR=0 SVC=0 trapped=0 refused=0/0/0
+PREFLIGHT libavutil.so.56 imports=0 TLS=0 x18=896 CTR=0 SVC=0 trapped=0 refused=0/0/0
+PREFLIGHT libvpx.so.6 imports=0 TLS=0 x18=4153 CTR=0 SVC=0 trapped=0 refused=0/0/0
+PREFLIGHT libavcodec.so.58 imports=0 TLS=0 x18=4360 CTR=0 SVC=0 trapped=0 refused=0/0/0
+PREFLIGHT libavformat.so.58 imports=0 TLS=0 x18=24 CTR=0 SVC=0 trapped=0 refused=0/0/0
+PREFLIGHT libavresample.so.4 imports=0 TLS=0 x18=0 CTR=0 SVC=0 trapped=0 refused=0/0/0
+PREFLIGHT libswscale.so.5 imports=0 TLS=0 x18=837 CTR=0 SVC=0 trapped=0 refused=0/0/0
+PREFLIGHT libvideo.so imports=0 TLS=35 x18=1426 CTR=0 SVC=1703 trapped=1703 refused=0/0/0
+PREFLIGHT libsteam_api.so imports=0 TLS=5 x18=0 CTR=0 SVC=0 trapped=0 refused=0/0/0
+PREFLIGHT libv8_libcpp.so imports=0 TLS=3 x18=302 CTR=0 SVC=0 trapped=0 refused=0/0/0
+PREFLIGHT libv8_libbase.so imports=0 TLS=1 x18=154 CTR=0 SVC=0 trapped=0 refused=0/0/0
+PREFLIGHT libv8_icuuc.so imports=0 TLS=0 x18=1355 CTR=0 SVC=0 trapped=0 refused=0/0/0
+PREFLIGHT libv8_icui18n.so imports=0 TLS=0 x18=399 CTR=0 SVC=0 trapped=0 refused=0/0/0
+PREFLIGHT libv8_zlib.so imports=0 TLS=0 x18=222 CTR=0 SVC=0 trapped=0 refused=0/0/0
+PREFLIGHT libv8.so imports=0 TLS=643 x18=3312 CTR=1 SVC=0 trapped=0 refused=0/0/0
+PREFLIGHT libclient.so imports=0 TLS=61 x18=6238 CTR=1 SVC=0 trapped=0 refused=0/0/0
+PREFLIGHT result=PASS loaded=20 no guest constructors/entry points executed

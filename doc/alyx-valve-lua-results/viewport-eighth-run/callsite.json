@@ -1,0 +1,13 @@
+{
+  "renderer_sha256": "02edbf8f2040cd8a3103038583447865ca7d34f36f13daacab9d4d194cb9d04d",
+  "signal": 11,
+  "thread": "guest worker",
+  "call_va": "0x26d370",
+  "return_va": "0x26d374",
+  "dispatch_slot": "0xa52788",
+  "dispatch_store_va": "0x2cddc0",
+  "function": "vkCmdSetViewportWithCountEXT",
+  "method": "Read-only return-address/dispatch-loader inspection; no game bytes redistributed.",
+  "captured_device_request": "Eighth-run extension, feature and queue trace equals the fifth-run fixture capture.",
+  "native_fix": "Explicit supported EDS1 feature/extension addition, alongside existing supported sample-location profile; no caller feature rewriting or no-op command."
+}
