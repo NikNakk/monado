@@ -977,6 +977,8 @@ struct application
 	bool passthrough_only = false;
 	bool test_gaze = false;
 	bool test_generic_controller = false;
+	//! Size of the head-relative input panels (1 = full, 0 = hidden); 'p' in the terminal cycles it.
+	float controller_panel_scale = 1.0f;
 	controller_survey_capture controller_survey;
 	diagnostic_scene survey_anchor;
 	struct controller_pose_sample
@@ -2605,16 +2607,30 @@ append_controller_input_panels(application &app, const XrPosef &head_pose)
 	panel.right = rotate_vector(head_pose.orientation, make_float3(1, 0, 0));
 	panel.up = rotate_vector(head_pose.orientation, make_float3(0, 1, 0));
 	panel.forward = rotate_vector(head_pose.orientation, make_float3(0, 0, -1));
+	const float s = app.controller_panel_scale;
+	if (s <= 0.0f)
+		return;
 	const simd_float4 off = make_float4(0.35f, 0.38f, 0.42f, 1);
 	const simd_float4 on = make_float4(0.15f, 1, 0.25f, 1);
 	const simd_float4 inactive = make_float4(1, 0.12f, 0.12f, 1);
 	for (size_t hand = 0; hand < 2; ++hand) {
 		const float x = hand == 0 ? -0.18f : 0.18f;
+		/*
+		 * Layout at full size, then scaled about the panel centre (x, -0.20). Smaller panels also move out
+		 * and down, towards the lower corners of the view, to leave the centre clear.
+		 */
+		const float cx = x * (1.0f + 0.45f * (1.0f - s)), cy = -0.20f - 0.08f * (1.0f - s);
+		auto box = [&](float bx, float by, float z, simd_float3 size, simd_float4 color) {
+			add_world_box(panel, cx + (bx - x) * s, cy + (by + 0.20f) * s, z,
+			              make_float3(size.x * s, size.y * s, size.z), color);
+		};
+		auto text = [&](float tx, float ty, float z, float pixel, const char *str, simd_float4 color) {
+			add_world_text(panel, cx + (tx - x) * s, cy + (ty + 0.20f) * s, z, pixel * s, str, color);
+		};
 		const auto &input = app.controller_inputs[hand];
-		add_world_box(panel, x, -0.20f, 0.82f, make_float3(0.34f, 0.35f, 0.008f),
-		              make_float4(0.015f, 0.02f, 0.025f, 1));
-		add_world_text(panel, x, -0.065f, 0.80f, 0.006f, hand == 0 ? "LEFT" : "RIGHT",
-		               hand == 0 ? make_float4(0.05f, 0.85f, 1, 1) : make_float4(1, 0.35f, 0.05f, 1));
+		box(x, -0.20f, 0.82f, make_float3(0.34f, 0.35f, 0.008f), make_float4(0.015f, 0.02f, 0.025f, 1));
+		text(x, -0.065f, 0.80f, 0.006f, hand == 0 ? "LEFT" : "RIGHT",
+		     hand == 0 ? make_float4(0.05f, 0.85f, 1, 1) : make_float4(1, 0.35f, 0.05f, 1));
 		const char *labels[] = {"FACE 1", "FACE 2", "TRIGGER", "GRIP", "STICK"};
 		const float levels[] = {input.primary ? 1.0f : 0.0f, input.secondary ? 1.0f : 0.0f,
 		                        std::clamp(input.trigger, 0.0f, 1.0f), std::clamp(input.squeeze, 0.0f, 1.0f),
@@ -2622,12 +2638,11 @@ append_controller_input_panels(application &app, const XrPosef &head_pose)
 		for (size_t row = 0; row < 5; ++row) {
 			const float y = -0.11f - (float)row * 0.042f;
 			const simd_float4 color = !input.active[row] ? inactive : levels[row] > 0.05f ? on : off;
-			add_world_text(panel, x - 0.04f, y, 0.80f, 0.0045f, labels[row], color);
-			add_world_box(panel, x + 0.108f, y, 0.80f, make_float3(0.066f, 0.019f, 0.005f), off);
+			text(x - 0.04f, y, 0.80f, 0.0045f, labels[row], color);
+			box(x + 0.108f, y, 0.80f, make_float3(0.066f, 0.019f, 0.005f), off);
 			if (input.active[row] && levels[row] > 0) {
 				const float width = 0.066f * levels[row];
-				add_world_box(panel, x + 0.075f + width / 2, y, 0.795f,
-				              make_float3(width, 0.019f, 0.005f), on);
+				box(x + 0.075f + width / 2, y, 0.795f, make_float3(width, 0.019f, 0.005f), on);
 			}
 		}
 		const auto flags = app.controller_pose_flags[hand][0];
@@ -2637,7 +2652,7 @@ append_controller_input_panels(application &app, const XrPosef &head_pose)
 		    XR_SPACE_LOCATION_POSITION_TRACKED_BIT | XR_SPACE_LOCATION_ORIENTATION_TRACKED_BIT;
 		const bool have_pose = (flags & valid) == valid;
 		const bool tracking = have_pose && (flags & tracked) == tracked;
-		add_world_text(panel, x, -0.33f, 0.80f, 0.0045f,
+		text(x, -0.33f, 0.80f, 0.0045f,
 		               tracking    ? "TRACKED"
 		               : have_pose ? "POSE ONLY"
 		                           : "NO POSE",
@@ -3356,7 +3371,7 @@ set_foveation_profile(application &app, int index)
 static void
 initialize_terminal_controls(application &app)
 {
-	if (!app.gaze_foveation || !isatty(STDIN_FILENO)) {
+	if ((!app.gaze_foveation && !app.test_generic_controller) || !isatty(STDIN_FILENO)) {
 		return;
 	}
 	app.terminal_input.old_flags = fcntl(STDIN_FILENO, F_GETFL, 0);
@@ -3373,9 +3388,14 @@ initialize_terminal_controls(application &app)
 		return;
 	}
 	app.terminal_input.active = true;
-	fprintf(stderr,
-	        "psvr2-openxr-test: live foveation controls: 1=reference 2=strong 3=aggressive 4=aggressive-plus "
-	        "5=near-extreme 6=extreme, [ ]=step, r=reference\n");
+	if (app.gaze_foveation) {
+		fprintf(stderr,
+		        "psvr2-openxr-test: live foveation controls: 1=reference 2=strong 3=aggressive "
+		        "4=aggressive-plus 5=near-extreme 6=extreme, [ ]=step, r=reference\n");
+	}
+	if (app.test_generic_controller) {
+		fprintf(stderr, "psvr2-openxr-test: p cycles the input panel size (100%%, 50%%, 30%%, hidden)\n");
+	}
 }
 
 static void
@@ -3400,6 +3420,22 @@ poll_terminal_controls(application &app)
 	while ((count = read(STDIN_FILENO, buffer, sizeof(buffer))) > 0) {
 		for (ssize_t i = 0; i < count; ++i) {
 			const char key = buffer[i];
+			if ((key == 'p' || key == 'P') && app.test_generic_controller) {
+				const float sizes[] = {1.0f, 0.5f, 0.3f, 0.0f};
+				size_t next = 0;
+				for (size_t k = 0; k < 4; k++) {
+					if (std::fabs(app.controller_panel_scale - sizes[k]) < 0.01f) {
+						next = (k + 1) % 4;
+					}
+				}
+				app.controller_panel_scale = sizes[next];
+				fprintf(stderr, "psvr2-openxr-test: input panels %s\n",
+				        sizes[next] == 0.0f ? "hidden" : sizes[next] == 1.0f ? "100%" : sizes[next] == 0.5f ? "50%" : "30%");
+				continue;
+			}
+			if (!app.gaze_foveation) {
+				continue;
+			}
 			if (key >= '1' && key <= '6') {
 				set_foveation_profile(app, key - '1');
 			} else if (key == ']' || key == '+') {
@@ -3520,6 +3556,7 @@ run(int argc, char **argv)
 	bool passthrough_only = false;
 	bool test_gaze = false;
 	bool test_generic_controller = false;
+	float panel_scale = 1.0f;
 	bool animate = false;
 	bool gaze_calibrate = false;
 	bool gaze_foveation = false;
@@ -3563,6 +3600,11 @@ run(int argc, char **argv)
 			test_generic_controller = true;
 		} else if (strcmp(argv[i], "--generic-controller") == 0) {
 			test_generic_controller = true;
+		} else if (strcmp(argv[i], "--panel-scale") == 0) {
+			char *end = nullptr;
+			if (i + 1 >= argc || (panel_scale = strtof(argv[++i], &end), *end != '\0') || !(panel_scale >= 0) ||
+			    panel_scale > 1)
+				fatal("--panel-scale requires a size from 0 (hidden) to 1 (full)");
 		} else if (strcmp(argv[i], "--animate") == 0) {
 			animate = true;
 		} else if (strcmp(argv[i], "--gaze") == 0) {
@@ -3594,7 +3636,7 @@ run(int argc, char **argv)
 			    stderr,
 			    "Usage: %s [--loader /path/to/libopenxr_loader.1.dylib] [--blendmode Opaque|AlphaBlend] "
 			    "[--depth-layer] "
-			    "[--passthrough|--passthrough-only] [--generic-controller] [--controller-survey "
+			    "[--passthrough|--passthrough-only] [--generic-controller [--panel-scale S]] [--controller-survey "
 			    "NEW-DIRECTORY] [--animate] "
 			    "[--gaze|--gaze-calibrate|--gaze-foveation] "
 			    "[--fb-foveation|--fb-eye-foveation] [--fb-foveation-sparse-check] "
@@ -3608,6 +3650,8 @@ run(int argc, char **argv)
 			    "  --generic-controller validates XR_KHR_generic_controller on both hands and logs action "
 			    "state, draws controller poses and head-relative input panels (green pressed, red "
 			    "inactive).\n"
+			    "  --panel-scale S sizes those panels from 0 (hidden) to 1 (full, default); smaller panels sit "
+			    "lower and further out. In a terminal, p cycles 100%%, 50%%, 30%% and hidden.\n"
 			    "  --controller-survey NEW-DIRECTORY guides both hands through 28 placement/occlusion "
 			    "trials, "
 			    "records poses/events/summary; trigger starts, primary pauses, secondary skips. "
@@ -3669,6 +3713,7 @@ run(int argc, char **argv)
 	}
 	app.test_gaze = test_gaze;
 	app.test_generic_controller = test_generic_controller;
+	app.controller_panel_scale = panel_scale;
 	app.animate = animate;
 	if (animate) {
 		fprintf(stderr, "psvr2-openxr-test: animated objects enabled\n");
