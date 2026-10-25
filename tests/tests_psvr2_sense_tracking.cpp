@@ -490,3 +490,71 @@ TEST_CASE("Sense position hold keeps the last valid position instead of the trac
 	pssense_position_hold_apply(&hold, &rel);
 	CHECK((rel.relation_flags & XRT_SPACE_RELATION_POSITION_VALID_BIT) == 0);
 }
+
+TEST_CASE("Sense coast integrates the filter velocity only while the IMU shows motion, within limits")
+{
+	const xrt_vec3 still_gyro = {0.01f, 0, 0}, still_accel = {0, 9.80665f, 0};
+	const xrt_vec3 moving_gyro = {1.0f, 0, 0};
+	const int64_t ms = 1000000;
+	pssense_position_hold hold{};
+	xrt_space_relation rel{};
+
+	// Tracked: follow the filter position.
+	rel.relation_flags = XRT_SPACE_RELATION_BITMASK_ALL;
+	rel.pose.position = {0.1f, -0.3f, -0.4f};
+	pssense_position_coast_step(&hold, 0, &rel, still_gyro, still_accel);
+	CHECK_FALSE(hold.coasting);
+	CHECK(hold.position.x == 0.1f);
+
+	// Validity expires: the coast starts at the last valid position.
+	rel.relation_flags = (xrt_space_relation_flags)(XRT_SPACE_RELATION_ORIENTATION_VALID_BIT |
+	                                                XRT_SPACE_RELATION_ORIENTATION_TRACKED_BIT);
+	rel.pose.position = {9, 9, 9}; // ignored once invalid
+	rel.linear_velocity = {1.0f, 0, 0};
+	pssense_position_coast_step(&hold, 15 * ms, &rel, moving_gyro, still_accel);
+	REQUIRE(hold.coasting);
+	CHECK(hold.position.x == 0.1f);
+
+	// Moving: integrate 1 m/s for 15 ms; still: stay put.
+	pssense_position_coast_step(&hold, 30 * ms, &rel, moving_gyro, still_accel);
+	CHECK(hold.position.x == Catch::Approx(0.115f).margin(1e-6));
+	pssense_position_coast_step(&hold, 45 * ms, &rel, still_gyro, still_accel);
+	CHECK(hold.position.x == Catch::Approx(0.115f).margin(1e-6));
+	// Linear acceleration alone also counts as motion.
+	pssense_position_coast_step(&hold, 60 * ms, &rel, still_gyro, xrt_vec3{0, 11.0f, 0});
+	CHECK(hold.position.x == Catch::Approx(0.130f).margin(1e-6));
+
+	// Implausible speed and long sample gaps are ignored.
+	rel.linear_velocity = {10.0f, 0, 0};
+	pssense_position_coast_step(&hold, 75 * ms, &rel, moving_gyro, still_accel);
+	CHECK(hold.position.x == Catch::Approx(0.130f).margin(1e-6));
+	rel.linear_velocity = {1.0f, 0, 0};
+	pssense_position_coast_step(&hold, 275 * ms, &rel, moving_gyro, still_accel);
+	CHECK(hold.position.x == Catch::Approx(0.130f).margin(1e-6));
+
+	// Displacement from the coast start is capped.
+	rel.linear_velocity = {3.9f, 0, 0};
+	for (int64_t t = 290; t < 1500; t += 15) {
+		pssense_position_coast_step(&hold, t * ms, &rel, moving_gyro, still_accel);
+	}
+	CHECK(hold.position.x == Catch::Approx(0.1f + PSSENSE_COAST_MAX_DISPLACEMENT_M).margin(1e-4));
+
+	// The application relation reports the coasted position, untracked.
+	xrt_space_relation app{};
+	app.relation_flags = XRT_SPACE_RELATION_ORIENTATION_VALID_BIT;
+	pssense_position_hold_apply(&hold, &app);
+	CHECK((app.relation_flags & XRT_SPACE_RELATION_POSITION_VALID_BIT) != 0);
+	CHECK((app.relation_flags & XRT_SPACE_RELATION_POSITION_TRACKED_BIT) == 0);
+	CHECK(app.pose.position.x == Catch::Approx(0.9f).margin(1e-4));
+
+	// After the time limit, motion no longer moves it; a valid pose ends the coast.
+	rel.linear_velocity = {-1.0f, 0, 0};
+	pssense_position_coast_step(&hold, 3100 * ms, &rel, moving_gyro, still_accel);
+	pssense_position_coast_step(&hold, 3115 * ms, &rel, moving_gyro, still_accel);
+	CHECK(hold.position.x == Catch::Approx(0.9f).margin(1e-4));
+	rel.relation_flags = XRT_SPACE_RELATION_BITMASK_ALL;
+	rel.pose.position = {0.2f, 0, 0};
+	pssense_position_coast_step(&hold, 3130 * ms, &rel, still_gyro, still_accel);
+	CHECK_FALSE(hold.coasting);
+	CHECK(hold.position.x == 0.2f);
+}

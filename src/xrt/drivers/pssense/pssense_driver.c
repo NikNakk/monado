@@ -151,6 +151,8 @@ DEBUG_GET_ONCE_BOOL_OPTION(pssense_filter, "PSSENSE_FILTER", false)
 DEBUG_GET_ONCE_NUM_OPTION(pssense_imu_fallback_ms, "PSSENSE_IMU_FALLBACK_MS", 0)
 //! Hold the last valid position (untracked) after position validity expires; see pssense_position_hold.h.
 DEBUG_GET_ONCE_BOOL_OPTION(pssense_hold_position, "PSSENSE_HOLD_POSITION", false)
+//! Stillness-gated IMU coast after position validity expires (implies the hold); see pssense_position_hold.h.
+DEBUG_GET_ONCE_BOOL_OPTION(pssense_coast_position, "PSSENSE_COAST_POSITION", false)
 //! Application pose state transitions plus one heartbeat per second, under controller_thread lock.
 DEBUG_GET_ONCE_BOOL_OPTION(pssense_pose_diag, "PSSENSE_POSE_DIAG", false)
 DEBUG_GET_ONCE_BOOL_OPTION(pssense_joint, "CONSTELLATION_TRACKER_JOINT", false)
@@ -1123,6 +1125,12 @@ pssense_update_fusion(struct pssense_device *pssense)
 		timepoint_ns host_ns;
 		if (pssense_device_ts_to_host(pssense, pssense->timing.latest_imu_time_ns, &host_ns)) {
 			t_imu_optical_filter_push_imu(pssense->tracking.filter, host_ns, &accel_led, &gyro_led);
+			struct xrt_space_relation filter_rel;
+			if (debug_get_bool_option_pssense_coast_position() &&
+			    t_imu_optical_filter_get_relation(pssense->tracking.filter, host_ns, &filter_rel)) {
+				pssense_position_coast_step(&pssense->tracking.position_hold, host_ns, &filter_rel, gyro,
+				                            accel);
+			}
 		}
 	}
 
@@ -3968,7 +3976,7 @@ pssense_get_tracked_pose(struct xrt_device *xdev,
 		if (!have_fallback) {
 			pssense_get_constellation_pose(pssense, at_timestamp_ns, rel);
 		}
-		if (debug_get_bool_option_pssense_hold_position()) {
+		if (debug_get_bool_option_pssense_hold_position() || debug_get_bool_option_pssense_coast_position()) {
 			pssense_position_hold_apply(&pssense->tracking.position_hold, rel);
 		}
 		if (debug_get_bool_option_pssense_pose_diag() && pssense->tracking.filter != NULL) {

@@ -151,6 +151,16 @@ position with the IMU orientation (partial-blob updates), which needs tracker
 changes and is not attempted here. The offline tracker loses some poses the live
 run kept (trial 16 low: 92% live), so these counts are indicative.
 
+### Driver coast (opt-in)
+
+`PSSENSE_COAST_POSITION=1` implements the still-gated coast in the driver, per
+IMU sample under the controller lock, from the moment the filter's normal
+position validity (300 ms) expires; earlier gaps already use the filter's own
+coast. It adds limits the offline test did not have: 3 s, 0.8 m from the coast
+start and 4 m/s, then holds. Unit tests cover tracking, gating, the limits and
+the application relation. It is enabled in `20261025-depth-hold-v4` with the
+hold; the headset check is pending.
+
 ## Next user-operated capture
 
 Build the service used by the Alyx launcher from these sources. Its recorded

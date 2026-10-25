@@ -1432,6 +1432,11 @@ Set in the service process, alongside the existing opt-in Sense 6DoF settings:
   velocity) while orientation stays valid. Without it OpenXR places the
   controller at the tracking origin (`m_space.cpp` upgrades orientation-only
   relations), about 6 m away on the 25 Oct survey. Reset on reconnect.
+- `PSSENSE_COAST_POSITION=1` (default off; implies the hold): after position
+  validity expires, advance the held position by the filter's velocity on each
+  IMU sample, but only while the IMU shows motion (|gyro| > 0.3 rad/s or
+  |accel| more than 0.5 m/s² from 1 g). Limits: 3 s, 0.8 m from where the coast
+  began, 4 m/s; past them the position holds. Reported valid, never tracked.
 
 This is unvalidated on hardware. See [limits, native Alyx evidence and the
 capture protocol](macos-pssense-occlusion.md). `JOINT_LOSS_ACTIVE` is automatic
