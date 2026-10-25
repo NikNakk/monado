@@ -6,6 +6,51 @@ SPDX-License-Identifier: BSL-1.0
 
 # macOS / PS VR2 environment toggle audit
 
+## Current opt-in WSI experiment (15 October 2026)
+
+The generic target is committed on `claude/macos-wsi-integration`; see
+[the integration notes and review follow-up](macos-wsi-migration.md) for
+validation and limitations.
+
+| Variable | Default | Effect |
+| --- | --- | --- |
+| `XRT_MACOS_PRESENTER` | `native` | `wsi`: calibrated CV-paced Vulkan WSI; `wsi-adaptive`: adaptive display-timing WSI; `native`: Metal presenter. Applies to service and hosted compositors. |
+| `XRT_MACOS_WSI_GENERIC_LATCH_US` | `0` | With `wsi-adaptive`, how long after the desired present time GPU work may finish. |
+| `XRT_MACOS_WSI_PASSTHROUGH` | `0` | Enable GPU-ordered Vulkan camera composition with the compute compositor. |
+| `SIMULATED_DESKTOP` | `0` | Run the simulated HMD in a window on the built-in display, steered with the trackpad. Implies `SIMULATED_ENABLE`. With `QWERTY_ENABLE=1`, the window drives qwerty's HMD and controllers instead. See [the desktop simulation note](macos-desktop-simulation.md). |
+
+Presenter selection is read once per process. Unset selects `native`; an empty
+or unknown value logs a warning and falls back to native. Set it in the service
+and, for client compositing, in the client launch environment. The old
+`XRT_MACOS_WSI_GENERIC`, `_CV`, `_CALIBRATE` and `_ADAPTIVE` selection flags are
+removed and ignored by the runtime. Old capture manifests remain readable by
+the analysis tools. `_LATCH_US` remains an advanced adaptive timing control,
+and passthrough remains independently opt-in.
+
+The native-wrapper `XRT_MACOS_WSI`, its `XRT_MACOS_WSI_MAX_PENDING` credit
+limit, and `XRT_MACOS_GPU_ATTRIBUTION` diagnostic are removed. Old flags and
+commands in historical capture reports do not select executable experiment modes.
+With the WSI target, the compositor now defaults to the graphics path, which goes
+direct to display. `XRT_COMPOSITOR_COMPUTE=1` selects compute; the current
+[private-output candidate](macos-wsi-vulkan-passthrough.md#private-compute-output-candidate)
+keeps shader writes in private images; a [fragment output pass](macos-wsi-vulkan-passthrough.md#fragment-output-pass-18-october-2026)
+(plain, or the camera blend with passthrough) then renders the WSI images, which
+are only render targets.
+The earlier direct-storage implementation was WindowServer-composited and
+failed moving-head checks; visual quality and direct scanout of the candidate
+remain unvalidated. `XRT_MACOS_GPU_QUEUE_PRIORITY` now applies to it too.
+WSI passthrough defaults to compute. With an explicit `XRT_COMPOSITOR_COMPUTE=0`,
+the graphics target remains usable but passthrough creation returns unsupported:
+the graphics path's opaque alpha would hide the camera.
+Native presentation defaults are unchanged pending the calibrated WSI camera
+visual check. The [Vulkan replacement](macos-wsi-vulkan-passthrough.md) removes
+the blocking Metal bridge and its `XRT_MACOS_WSI_PASSTHROUGH_VERIFY` /
+`--verify-passthrough` controls. WSI now uses the native per-headset calibration and rotation
+settings; see [the test procedure and default-switch plan](macos-wsi-migration.md#calibrated-wsi-passthrough-prepared-16-october-2026).
+Sleep/disconnect recovery requires restart.
+
+## Historical audit
+
 Audit of every `DEBUG_GET_ONCE_*` option and raw `getenv()` added on
 `macos-wine-openvr-legacy-unity` since its merge-base with `combined`
 (`9c1dbc39`, which is also the tip of `combined`). Snapshot: `eb607ca`,
@@ -183,6 +228,13 @@ remain opt-in. See the [calibration guide](macos-psvr2-passthrough-calibration.m
 
 ## Passthrough rotational reprojection (2026-10-08)
 
+`XRT_MACOS_PASSTHROUGH_DEPTH_MM` (default `0`, infinity) maps calibrated
+passthrough at a fixed distance from each eye instead, clamped to 200–100000 mm.
+It uses the calibration's camera positions and the eye positions at map
+creation, and applies in both the Metal and Vulkan presenters. Set it where the
+map is built: in the client for client compositing, in the service otherwise.
+Experimental; see [near-object swim](macos-psvr2-passthrough.md#near-object-swim-during-head-rotation-2026-10-25).
+
 `XRT_MACOS_PASSTHROUGH_ROTATION` (default `1`) enables the macOS presenter's
 camera rotational reprojection when a valid calibration is loaded, either
 automatically or through `XRT_MACOS_PASSTHROUGH_CALIBRATION`. Set it to `0`
@@ -205,6 +257,15 @@ the head, once per service run. It is skipped if the STAGE was already moved,
 for example by `monado-ctl --floor-eye-height`, and cannot move a
 driver-provided STAGE (`PSVR2_STAGE_SPACE`). The result is logged at info
 level. See [floor calibration](macos-floor-calibration.md).
+
+The local installed LaunchAgent explicitly enables this at **1.72 m** and
+enables the one-second right Sense Options hold (2026-10-25). These remain
+opt-in runtime settings. Persistent service reinstall now preserves saved
+environment preferences; see the
+[configuration repair](macos-floor-calibration.md#installed-service-configuration-repair-2026-10-25).
+`scripts/macos/rebuild-both --install-local` explicitly selects the personal
+profile, including Sense 6DoF and GPU priority 0; see the
+[profile audit](macos-service-direct-xpc.md#personal-rebuild-and-install-mode-2026-10-25).
 
 `XRT_FLOOR_ALIGN` (default on) makes the same calibration also centre the
 STAGE under the head and turn it so that its -Z is the way the head faced,
@@ -243,7 +304,7 @@ constructing devices; they also work in an in-process runtime:
 | `PSVR2_SENSE_6DOF` | off | Start four-camera Sense tracking with the joint solver + EKF. |
 | `PSVR2_SENSE_6DOF_CALIBRATION` | unset | Required absolute mode-4 calibration path; invalid/missing calibration leaves the existing fallback. |
 | `PSVR2_LED_DETECTOR_RECORD` | unset | Path: open the headset's LED detector stream (USB interface 8) on its own, without the other auxiliary streams or a camera-mode change, and record it compactly (header plus populated records). Read with `scripts/psvr2_led_detector_dump.py`. The session script sets it with `PSVR2_SENSE_RECORD_LED_DETECTOR=1`. |
-| `PSVR2_LED_DETECTOR_BLOBS` | off (on with `PSVR2_SENSE_6DOF`) | Track the Sense controllers from the headset's own LED detections (USB interface 8) instead of blob detection on the camera images. The solvers and LED scheduling are unchanged. Works with `PSVR2_CAMERA_STREAMS=0`: the driver then announces exposures from the detector stream. |
+| `PSVR2_LED_DETECTOR_BLOBS` | off (on with `PSVR2_SENSE_6DOF`) | Track the Sense controllers from the headset's own LED detections (USB interface 8) instead of blob detection on the camera images. The solvers and LED scheduling are unchanged. Works with `PSVR2_CAMERA_STREAMS=0`: the driver then announces exposures from the detector stream. It also announces them in any camera mode other than 4 (for example `PSVR2_CAMERA_MODE=16` for full passthrough), where camera frames are not the detector's exposures. |
 | `PSVR2_LED_DETECTOR_VTS_OFFSET_US` | 0 | Detector device time minus camera VTS for the same exposure, used until camera frames supply it (measured 0 on 5 Oct). |
 | `PSVR2_LATENCY_DIAG` | off | Diagnostic: log `LATENCY_DIAG` every 5 s with percentiles of arrival minus exposure time for the two mode-4 camera transfers and the LED detector stream (which it opens). With `CONSTELLATION_TRACKER_LOG=info`, `JOINT_STATUS` gives `pose_age_ms_p50/p95`, exposure to the end of the joint solve. |
 | `PSVR2_BLOB_PIXEL_THRESHOLD` | 80 (50 with `PSVR2_SENSE_6DOF`) | Pixel threshold. |
@@ -264,7 +325,9 @@ keep-lock/LED-shape/strict/tracking/coverage options, and wide pulse period ID
 CLI series and two OpenBrush runs without lockouts. Later on 5 Oct it also gained
 `PSSENSE_LED_BOOTSTRAP_QUICK_LOCK=1`, `PSVR2_LED_DETECTOR_BLOBS=1` and
 `PSSENSE_RECONNECT=1` (macOS only; ignored elsewhere), validated in CLI
-sessions; the camera streams stay on, so passthrough is unaffected. See `sense_tracking_defaults` in
+sessions. On 25 Oct it gained `PSSENSE_HOLD_POSITION=1`, `PSSENSE_COAST_POSITION=1`
+and `CONSTELLATION_TRACKER_PRIOR_REACQUIRE=1`, validated in the
+`20261025-depth-hold-v4` headset run and offline on the v3 survey; the camera streams stay on, so passthrough is unaffected. See `sense_tracking_defaults` in
 `targets/common/target_psvr2_sense_tracking.c` for exact names. Future LED
 scheduling, experimental clock/filter/bootstrap/model options remain off unless
 requested explicitly or through this 6DoF switch. Linux's full-stream default
@@ -747,7 +810,7 @@ Notes on classification:
 | --- | --- | --- | --- | :-: |
 | `PSSENSE_SYNTHETIC_POSITION` | off | Fixed HMD-relative controller positions for untracked controllers | `7ccfc37` / `f91755f` | a |
 | `PSSENSE_SYNTHETIC_ARM_MODEL` | off | Arm-model positions instead of fixed offsets | `f91755f` / `f91755f` | a |
-| `PSSENSE_INDEX_PROFILE` | off | Advertise the Valve Index profile for app compatibility | `737fcd4` / `737fcd4` | a |
+| `PSSENSE_INDEX_PROFILE` | off | Advertise the Valve Index profile for app compatibility; set in the service, whose cache snapshot supplies the mappings to clients | `737fcd4` / `737fcd4` | a |
 | `PSSENSE_INPUT_DIAGNOSTICS` | off | Log raw input changes | `f91755f` / `f91755f` | b |
 
 ### Compositor renderer and shared compositor code
@@ -1355,3 +1418,35 @@ then summarizes patterns/blockers after per-compositor startup/end trimming.
 Short startup traces are explicitly unmeasured. Raw captures stay outside Git.
 The UE tracking runner includes this trace and preserves installed GPU priority
 in the hosted client. See [the findings](macos-projection-workload-census.md).
+
+## Sense occlusion diagnostics and fallback (2026-10-25)
+
+Set in the service process, alongside the existing opt-in Sense 6DoF settings:
+
+- `PSSENSE_POSE_DIAG=1` (default off): application pose validity transitions and
+  one-second status, accepted optical/IMU ages and sampled EKF rejection evidence.
+- `PSSENSE_IMU_FALLBACK_MS=600` (default 0): with `PSSENSE_FILTER=1`, extend
+  application position validity during optical occlusion; clamped to 0–1000 ms.
+  Zero retains 300 ms. Tracked status and optical solver prior validity remain
+  at their normal horizons. IMU age above 100 ms expires tracking/velocity.
+- `PSSENSE_HOLD_POSITION=1` (default off; on with `PSVR2_SENSE_6DOF`): once position validity expires,
+  keep reporting the last valid position (valid, untracked, zero linear
+  velocity) while orientation stays valid. Without it OpenXR places the
+  controller at the tracking origin (`m_space.cpp` upgrades orientation-only
+  relations), about 6 m away on the 25 Oct survey. Reset on reconnect.
+- `CONSTELLATION_TRACKER_PRIOR_REACQUIRE=1` (default off; on with `PSVR2_SENSE_6DOF`; joint path): after
+  stereo and oriented bootstrap fail, search within 20 cm of the predicted (or
+  last solved) position at the IMU orientation, accepting 3+ matches at RMS
+  ≤ 1 px. A result within 100 ms and 5 cm of the previous solve continues that
+  track towards the usual three-solve confirmation. `JOINT_STATUS` reports
+  `prior=` and `prior_continued=`.
+- `PSSENSE_COAST_POSITION=1` (default off; on with `PSVR2_SENSE_6DOF`; implies the hold): after position
+  validity expires, advance the held position by the filter's velocity on each
+  IMU sample, but only while the IMU shows motion (|gyro| > 0.3 rad/s or
+  |accel| more than 0.5 m/s² from 1 g). Limits: 3 s, 0.8 m from where the coast
+  began, 4 m/s; past them the position holds. Reported valid, never tracked.
+
+This is unvalidated on hardware. See [limits, native Alyx evidence and the
+capture protocol](macos-pssense-occlusion.md). `JOINT_LOSS_ACTIVE` is automatic
+and preserves evidence of losses that never recover; it is not an additional
+recovered-loss event when counting totals.

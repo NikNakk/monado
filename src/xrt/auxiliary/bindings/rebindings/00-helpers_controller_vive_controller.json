@@ -1,0 +1,21 @@
+{
+	"/helper/controller/vive_to_wmr_controller": {
+		"helper": true,
+		"helpers": [
+			"/helper/controller/menu",
+			"/helper/controller/output",
+			"/helper/controller/poses",
+			"/helper/controller/system",
+			"/helper/controller/trackpad",
+			"/helper/controller/trigger"
+		],
+		"bindings": {
+			"/user/hand/left/input/squeeze": true,
+			"/user/hand/left/input/squeeze/click": true,
+			"/user/hand/left/input/trigger/click": "/user/hand/left/input/trigger/value",
+			"/user/hand/right/input/squeeze": true,
+			"/user/hand/right/input/squeeze/click": true,
+			"/user/hand/right/input/trigger/click": "/user/hand/right/input/trigger/value"
+		}
+	}
+}

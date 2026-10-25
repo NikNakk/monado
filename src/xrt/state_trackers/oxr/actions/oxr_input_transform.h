@@ -312,7 +312,7 @@ oxr_input_transform_init_bool_to_vec1(struct oxr_input_transform *transform,
  * @param[in] input_type The type of input received from the hardware
  * @param[in] result_type The type of input the application requested
  * @param[in] action_name The action name - used for error prints only
- * @param[in] bound_path_string The path name string that has been bound.
+ * @param[in] binding_point The binding point that has been bound.
  * @param[out] out_transforms A pointer that will be populated with the output
  * array's address, or NULL.
  * @param[out] out_transform_count Where to populate the array size
@@ -326,7 +326,7 @@ oxr_input_transform_create_chain(struct oxr_logger *log,
                                  enum xrt_input_type input_type,
                                  XrActionType result_type,
                                  const char *action_name,
-                                 const char *bound_path_string,
+                                 const struct oxr_binding_point *binding_point,
                                  struct oxr_input_transform **out_transforms,
                                  size_t *out_transform_count);
 

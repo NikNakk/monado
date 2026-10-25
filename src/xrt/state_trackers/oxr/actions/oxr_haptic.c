@@ -14,6 +14,7 @@
 #include "oxr_haptic.h"
 #include "oxr_input.h"
 #include "oxr_subaction.h"
+#include "oxr_session_action_context.h"
 
 #include "../oxr_objects.h"
 
@@ -23,10 +24,12 @@ get_action_output_pcm_sample_rate(struct oxr_action_cache *cache, float *sample_
 {
 	for (uint32_t i = 0; i < cache->output_count; i++) {
 		struct oxr_action_output *output = &cache->outputs[i];
-		struct xrt_device *xdev = output->xdev;
 
 		struct xrt_output_limits output_limits;
-		xrt_result_t result = xrt_device_get_output_limits(xdev, &output_limits);
+		xrt_result_t result = xrt_io_cache_get_output_limits( //
+		    output->io_cache->xic,                            //
+		    output->device_id,                                //
+		    &output_limits);                                  //
 		if (result != XRT_SUCCESS) {
 			// default to something sane
 			output_limits = (struct xrt_output_limits){0};

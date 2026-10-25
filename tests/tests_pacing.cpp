@@ -417,7 +417,7 @@ TEST_CASE("Fake pacer refines refresh period without resetting outstanding frame
 	predict(before);
 	u_pc_update_present_offset(upc, before.frame_id, 25000000);
 	u_pc_update_vblank_from_display_control(upc, now_ns);
-	u_pc_fake_set_frame_period(upc, 8341708);
+	REQUIRE(u_pc_update_frame_period(upc, 8341708));
 	predict(after);
 	CHECK(after.frame_id == before.frame_id + 1);
 	CHECK(after.predicted_display_period_ns == 8341708);
@@ -427,4 +427,70 @@ TEST_CASE("Fake pacer refines refresh period without resetting outstanding frame
 	// Feedback for the frame predicted before refinement must still be accepted.
 	u_pc_mark_point(upc, U_TIMING_POINT_WAKE_UP, before.frame_id, before.wake_up_time_ns);
 	u_pc_destroy(&upc);
+}
+
+TEST_CASE("Display-timing pacer changes refresh period without resetting frame IDs")
+{
+	struct u_pc_display_timing_config config = u_pc_display_timing_get_default_config();
+	struct u_pacing_compositor *upc = nullptr;
+	MockClock clock;
+	REQUIRE(u_pc_display_timing_create(11111111, &config, &upc) == XRT_SUCCESS);
+	clock.advance(1ms);
+	CompositorPredictions before, after;
+	auto predict = [&](CompositorPredictions &p) {
+		u_pc_predict(upc, clock.now(), &p.frame_id, &p.wake_up_time_ns, &p.desired_present_time_ns,
+		             &p.present_slop_ns, &p.predicted_display_time_ns, &p.predicted_display_period_ns,
+		             &p.min_display_period_ns);
+	};
+	predict(before);
+	CHECK(before.predicted_display_period_ns == 11111111);
+	REQUIRE(u_pc_update_frame_period(upc, 8333333));
+	predict(after);
+	CHECK(after.frame_id == before.frame_id + 1);
+	CHECK(after.predicted_display_period_ns == 8333333);
+	CHECK_FALSE(u_pc_update_frame_period(upc, 0));
+	u_pc_destroy(&upc);
+}
+
+TEST_CASE("Refresh period updates preserve budget, offset and phase")
+{
+	for (bool display_timing : {false, true}) {
+		struct u_pacing_compositor *pc = nullptr;
+		struct u_pc_display_timing_config config = u_pc_display_timing_get_default_config();
+		config.comp_time_fraction = 22;
+		config.comp_time_max_fraction = 65;
+		config.present_to_display_offset_ns = 12000000;
+		config.margin_ns = 2300000;
+		REQUIRE((display_timing ? u_pc_display_timing_create(11111111, &config, &pc)
+		                        : u_pc_fake_create(11111111, 1000000000, &pc)) == XRT_SUCCESS);
+		int64_t id, wake, desired, slop, display, period, minimum;
+		u_pc_predict(pc, 1000000000, &id, &wake, &desired, &slop, &display, &period, &minimum);
+		CHECK(period == 11111111);
+		int64_t first_id = id;
+		int64_t original_budget = desired - wake;
+		int64_t original_phase = desired - period;
+		if (!display_timing) {
+			u_pc_update_present_offset(pc, first_id, 25000000);
+		}
+		REQUIRE(u_pc_update_frame_period(pc, 8333333));
+		u_pc_info_gpu(pc, first_id, 1000000000, 1000100000, 1001000000);
+		u_pc_predict(pc, 1002000000, &id, &wake, &desired, &slop, &display, &period, &minimum);
+		CHECK(id > first_id);
+		CHECK(period == 8333333);
+		CHECK(desired - wake == original_budget);
+		if (display_timing) {
+			CHECK(display - desired == config.present_to_display_offset_ns);
+		} else {
+			CHECK(desired == original_phase + period);
+			CHECK(display - desired == 25000000);
+		}
+		CHECK_FALSE(u_pc_update_frame_period(pc, 0));
+		CHECK_FALSE(u_pc_update_frame_period(pc, -1));
+		REQUIRE(u_pc_update_frame_period(pc, 11111111));
+		first_id = id;
+		u_pc_predict(pc, 1004000000, &id, &wake, &desired, &slop, &display, &period, &minimum);
+		CHECK(id > first_id);
+		CHECK(period == 11111111);
+		u_pc_destroy(&pc);
+	}
 }

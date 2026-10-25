@@ -289,34 +289,36 @@ struct pssense_feature_report
 };
 static_assert(sizeof(struct pssense_feature_report) == FEATURE_REPORT_LENGTH, "Incorrect feature report struct length");
 
+/*
+ * Playstation Sense controller calibration.
+ */
 struct pssense_calibration_data
 {
-	int16_t accel_plus_x;  // 0x00
-	uint8_t _pad0[4];      // 0x02-0x05
-	int16_t accel_minus_x; // 0x06
-	uint8_t _pad1[6];      // 0x08-0x0D
-	int16_t accel_plus_y;  // 0x0E
-	uint8_t _pad2[4];      // 0x10-0x13
-	int16_t accel_minus_y; // 0x14
-	uint8_t _pad3[6];      // 0x16-0x1B
-	int16_t accel_plus_z;  // 0x1C
-	uint8_t _pad4[4];      // 0x1E-0x21
-	int16_t accel_minus_z; // 0x22
-	uint8_t _pad5[6];      // 0x24-0x29
-	int16_t gyro_plus_y;   // 0x2A
-	uint8_t _pad6[4];      // 0x2C-0x2F
-	int16_t gyro_minus_y;  // 0x30
-	uint8_t _pad7[6];      // 0x32-0x37
-	int16_t gyro_plus_z;   // 0x38
-
+	int16_t accel_plus_x;    // 0x00
+	uint8_t _pad0[4];        // 0x02-0x05
+	int16_t accel_minus_x;   // 0x06
+	uint8_t _pad1[6];        // 0x08-0x0D
+	int16_t accel_plus_y;    // 0x0E
+	uint8_t _pad2[4];        // 0x10-0x13
+	int16_t accel_minus_y;   // 0x14
+	uint8_t _pad3[6];        // 0x16-0x1B
+	int16_t accel_plus_z;    // 0x1C
+	uint8_t _pad4[4];        // 0x1E-0x21
+	int16_t accel_minus_z;   // 0x22
+	int16_t gyro_bias_x;     // 0x24
+	int16_t gyro_bias_y;     // 0x26
+	int16_t gyro_bias_z;     // 0x28
+	int16_t gyro_plus_x;     // 0x2A
+	uint8_t _pad6[4];        // 0x2C-0x2F
+	int16_t gyro_minus_x;    // 0x30
+	uint8_t _pad7[6];        // 0x32-0x37
+	int16_t gyro_plus_y;     // 0x38
 	uint8_t _pad8[4];        // 0x3A-0x3D
-	int16_t gyro_minus_z;    // 0x3E
-	int16_t gyro_bias_x;     // 0x40
-	int16_t gyro_bias_y;     // 0x42
-	int16_t gyro_bias_z;     // 0x44
-	int16_t gyro_plus_x;     // 0x46
-	uint8_t _pad9[4];        // 0x48-0x4B
-	int16_t gyro_minus_x;    // 0x4C
+	int16_t gyro_minus_y;    // 0x3E
+	uint8_t _pad9[6];        // 0x40-0x45 (unused by the official driver)
+	int16_t gyro_plus_z;     // 0x46
+	uint8_t _pad10[4];       // 0x48-0x4B
+	int16_t gyro_minus_z;    // 0x4C
 	int16_t gyro_speed_ref1; // 0x4E
 	int16_t gyro_speed_ref2; // 0x50
 	uint8_t _pad_end[34];    // 0x52-0x73

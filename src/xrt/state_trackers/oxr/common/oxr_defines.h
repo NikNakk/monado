@@ -47,21 +47,6 @@ extern "C" {
 // clang-format on
 
 /*!
- * Sub action paths.
- *
- * @ingroup oxr_main
- */
-enum oxr_subaction_path
-{
-	OXR_SUB_ACTION_PATH_USER,
-	OXR_SUB_ACTION_PATH_HEAD,
-	OXR_SUB_ACTION_PATH_LEFT,
-	OXR_SUB_ACTION_PATH_RIGHT,
-	OXR_SUB_ACTION_PATH_GAMEPAD,
-	OXR_SUB_ACTION_PATH_EYES,
-};
-
-/*!
  * Region of a dpad binding that an input is mapped to
  *
  * @ingroup oxr_main
@@ -102,6 +87,7 @@ enum oxr_space_type
 	OXR_SPACE_TYPE_REFERENCE_COMBINED_EYE_VARJO,
 	OXR_SPACE_TYPE_REFERENCE_LOCALIZATION_MAP_ML,
 	OXR_SPACE_TYPE_REFERENCE_UNBOUNDED_ANDROID,
+	OXR_SPACE_TYPE_REFERENCE_STATIONARY_EXT,
 
 	OXR_SPACE_TYPE_ACTION,
 	OXR_SPACE_TYPE_XDEV_POSE,

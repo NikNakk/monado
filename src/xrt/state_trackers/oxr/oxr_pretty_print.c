@@ -13,6 +13,7 @@
 #include "oxr_pretty_print.h"
 #include "actions/oxr_input_transform.h"
 #include "actions/oxr_input.h"
+#include "actions/oxr_io_cache.h"
 
 /*
  *
@@ -69,7 +70,12 @@ oxr_pp_space_indented(struct oxr_sink_logger *slog, const struct oxr_space *spc,
 			oxr_slog(slog, "action (inactive)");
 			break;
 		}
-		oxr_slog(slog, "action ('%s', ", input->xdev->str);
+		const char *dev_str = "unknown";
+		const struct xrt_io_cache_device *dev = oxr_io_cache_find_device(input->io_cache, input->device_id);
+		if (dev != NULL) {
+			dev_str = dev->str;
+		}
+		oxr_slog(slog, "action ('%s', ", dev_str);
 		u_pp_xrt_input_name(oxr_slog_dg(slog), input->input->name);
 		oxr_slog(slog, ")");
 	} break;
@@ -79,6 +85,7 @@ oxr_pp_space_indented(struct oxr_sink_logger *slog, const struct oxr_space *spc,
 	case OXR_SPACE_TYPE_REFERENCE_UNBOUNDED_MSFT: oxr_slog(slog, "unbounded"); break;
 	case OXR_SPACE_TYPE_REFERENCE_COMBINED_EYE_VARJO: oxr_slog(slog, "combined_eye"); break;
 	case OXR_SPACE_TYPE_REFERENCE_UNBOUNDED_ANDROID: oxr_slog(slog, "unbounded"); break;
+	case OXR_SPACE_TYPE_REFERENCE_STATIONARY_EXT: oxr_slog(slog, "stationary"); break;
 	default: oxr_slog(slog, "unknown_space"); break;
 	}
 

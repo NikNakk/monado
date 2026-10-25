@@ -37,7 +37,6 @@
 #include "util/u_trace_marker.h"
 
 #include "vive/vive_config.h"
-#include "vive/vive_bindings.h"
 #include "vive/vive_poses.h"
 
 #include "vive.h"
@@ -1141,9 +1140,6 @@ vive_controller_create(struct os_hid_device *controller_hid, enum watchman_gen w
 
 		d->base.update_inputs = vive_controller_device_wand_update_inputs;
 
-		d->base.binding_profiles = vive_binding_profiles_wand;
-		d->base.binding_profile_count = vive_binding_profiles_wand_count;
-
 		d->base.device_type = XRT_DEVICE_TYPE_ANY_HAND_CONTROLLER;
 	} else if (d->config.variant == CONTROLLER_INDEX_LEFT || d->config.variant == CONTROLLER_INDEX_RIGHT) {
 		d->base.name = XRT_DEVICE_INDEX_CONTROLLER;
@@ -1175,9 +1171,6 @@ vive_controller_create(struct os_hid_device *controller_hid, enum watchman_gen w
 		d->base.update_inputs = vive_controller_device_index_update_inputs;
 
 		d->base.get_hand_tracking = vive_controller_get_hand_tracking;
-
-		d->base.binding_profiles = vive_binding_profiles_index;
-		d->base.binding_profile_count = vive_binding_profiles_index_count;
 
 		if (d->config.variant == CONTROLLER_INDEX_LEFT) {
 			d->base.device_type = XRT_DEVICE_TYPE_LEFT_HAND_CONTROLLER;

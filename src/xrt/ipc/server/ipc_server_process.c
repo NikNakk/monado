@@ -171,36 +171,13 @@ print_linux_end_user_started_information(enum u_logging_level log_level)
 	U_LOG_IFL_I(log_level, "%s", sink.buffer);
 }
 
-
-/*!
- * Stop and join any remaining per-client threads.
- *
- * On shutdown @ref main_loop returns as soon as `s->running` is cleared, but the
- * per-client threads may still be inside common_shutdown(), which destroys each
- * client's compositor and dereferences `s->xsysd` / `s->xso`. Waiting for them
- * here, before teardown_all() destroys those resources, avoids a race where a
- * client thread locks a mutex the teardown below has already freed (observed as
- * an `om->initialized` assertion in multi_compositor_destroy). Stop their loops
- * before joining: epoll wakes on its timeout, while Windows needs its blocking
- * I/O cancelled.
- */
-static void
-join_all_client_threads(struct ipc_server *s)
-{
-#ifdef XRT_OS_WINDOWS
-	ipc_server_stop_and_join_client_threads(s, ipc_server_cancel_all_client_io);
-#else
-	ipc_server_stop_and_join_client_threads(s, NULL);
-#endif
-}
-
 static void
 teardown_all(struct ipc_server *s)
 {
 	u_var_remove_root(s);
 
 	// Client threads reference the resources destroyed below; wait them out first.
-	join_all_client_threads(s);
+	ipc_server_stop_and_join_client_threads(s);
 	ipc_server_floor_calibration_stop(s);
 #ifdef __APPLE__
 	// Stop the compositor publishing into the share before unmapping it.
@@ -491,6 +468,8 @@ shutdown_clients(struct ipc_server *s)
 	if (connected_client_count != 0) {
 		U_LOG_W("%" PRIx32 " clients still connected after shutdown timeout!", connected_client_count);
 	}
+
+	ipc_server_stop_and_join_client_threads(s);
 }
 
 static int

@@ -214,8 +214,12 @@ Mach service `org.freedesktop.monado.metal-ipc`. Logs go to
 
 Unlike development `bootstrap`, persistent installation does **not** snapshot
 XRT/PSVR2/Vulkan tuning variables from the invoking shell. The proven runtime
-behaviour is supplied by source defaults; the LaunchAgent carries only service
-lifecycle settings such as no-stdin, idle exit, and display-loss shutdown. The
+behaviour is supplied by source defaults; a fresh LaunchAgent carries service
+lifecycle settings such as no-stdin, idle exit, and display-loss shutdown.
+Reinstalling preserves the existing plist's environment preferences, including
+personal floor eye height and the opt-in Sense Options gesture (since
+2026-10-25), while updating executable and log paths. It still does not capture
+the invoking shell's tuning variables. The
 LaunchAgent is available again after the next login following logout or reboot.
 
 The plist stores the absolute path of its sibling `monado-service`. If the
@@ -468,3 +472,68 @@ Build/install/load logs remain in the two normal build directories. The durable
 records source revision, architecture, binary hashes, manifests and backup path.
 Any already-open application must reopen its runtime to use the rebuilt client.
 The following documentation commit does not alter the deployed runtime sources.
+
+## Personal rebuild and install mode (2026-10-25)
+
+Runtime floor calibration, Sense tracking and the Options gesture stay opt-in.
+The deliberately personal, non-upstream profile is in
+`scripts/macos/install-local-preferences.py`; no generic installer or runtime
+default enables it. Use:
+
+```sh
+# Prepare and inspect a plist under build/arm64/local-preferences; no registration.
+python3 scripts/macos/install-local-preferences.py
+# Rebuild both architectures, install native runtime and register the profile.
+scripts/macos/rebuild-both --install-local
+```
+
+The opt-in mode first validates the calibration path, rebuilds the native and
+Wine runtimes with matching tags, completes the native build's install targets,
+and installs to `~/.local/monado-psvr2`. It backs up the old service plist under
+`build/arm64/local-install-backups/*-local-preferences`, overlays the preferences,
+then uses the installed registration helper to reload the on-demand agent.
+It verifies the loaded environment and requests no kickstart. Close VR clients
+before using it; reopening them loads the rebuilt native/Wine libraries. Plain
+`rebuild-both` retains its build-only behaviour and conditional restart.
+
+The profile preserves unrelated saved settings and lifecycle overrides, but
+explicitly replaces the listed preferences. It refuses isolated endpoint
+overrides and driver-provided STAGE, which conflict with the normal endpoint
+and managed floor. A missing calibration refuses preparation before any build
+or agent change. The helper also accepts `--calibration PATH` for preparing or
+applying a different calibration after installation.
+
+### Audit against the October 14–15 agent backups
+
+| Preference | Agent after the floor repair | Personal profile |
+| --- | --- | --- |
+| Sense optical tracking | Missing: `PSVR2_SENSE_6DOF` and calibration path | Enable with `~/Code/psvr2-datasets/calibration/20260926-charuco-mode4-combined-head.json` |
+| Camera streams | Missing | `PSVR2_CAMERA_STREAMS=1` (tracking and passthrough) |
+| Headset LED detections | Missing | `PSVR2_LED_DETECTOR_BLOBS=1` |
+| Quick lock | Missing | `PSSENSE_LED_BOOTSTRAP_QUICK_LOCK=1` |
+| Controller reconnect | Missing | `PSSENSE_RECONNECT=1` |
+| GPU queue priority | Missing from service plist, still inherited from launchd | Explicit `XRT_MACOS_GPU_QUEUE_PRIORITY=0` |
+| Floor calibration and alignment | Restored in the preceding repair | Explicit 1.72 m and alignment on |
+| Right Options gesture | Restored in the preceding repair | Explicit on, 1000 ms hold |
+
+The 6DoF helper already supplies camera streams/mode 4, headset LED detections,
+quick lock, reconnect and the validated tracking/LED defaults unless explicitly
+overridden. Recording these selected settings in the local profile also makes
+the intended configuration visible in the plist. Native presentation, CA
+pacing and the validated graphics defaults are already source defaults; they
+do not need old experiment variables restored.
+
+The companion client-environment LaunchAgent still selects the installed native
+manifest, `XRT_MACOS_CLIENT_COMPOSITOR=1` and GPU priority 0. It needs no repair
+and this mode does not rewrite it. Wine launchers keep selecting the rebuilt
+x86-64 manifest. The old service backups also contain timing trace settings;
+this profile adds no diagnostics. Existing unrelated diagnostic preferences
+are preserved if already present. The unvalidated occlusion/IMU fallback is
+not selected.
+
+Validation: the real profile preview resolves the calibration successfully;
+seven Python tests cover preservation, invalid configuration/calibration,
+on-demand preparation, build/install order and build-failure handling. Shell
+syntax and whitespace checks pass. The install mode itself has not been run
+in this follow-up, so the service still has the preceding floor repair only;
+no headset test or runtime replacement is claimed.

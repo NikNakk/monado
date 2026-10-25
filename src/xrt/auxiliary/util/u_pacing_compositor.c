@@ -734,6 +734,35 @@ pc_update_present_offset(struct u_pacing_compositor *upc, int64_t frame_id, int6
 	pc->present_to_display_offset_ns = present_to_display_offset_ns;
 }
 
+static int64_t
+scale_to_period(int64_t value_ns, int64_t old_period_ns, int64_t new_period_ns)
+{
+	// Periods and budgets are well under a second, so the product fits in 64 bits.
+	return value_ns * new_period_ns / old_period_ns;
+}
+
+static void
+pc_update_frame_period(struct u_pacing_compositor *upc, int64_t frame_period_ns)
+{
+	struct pacing_compositor *pc = pacing_compositor(upc);
+	int64_t old_period_ns = pc->frame_period_ns;
+	if (frame_period_ns <= 0 || old_period_ns <= 0 || frame_period_ns == old_period_ns) {
+		return;
+	}
+
+	// These limits were derived as fractions of the period, keep their proportions.
+	pc->comp_time_max_ns = scale_to_period(pc->comp_time_max_ns, old_period_ns, frame_period_ns);
+	pc->adjust_missed_ns = scale_to_period(pc->adjust_missed_ns, old_period_ns, frame_period_ns);
+	pc->adjust_non_miss_ns = scale_to_period(pc->adjust_non_miss_ns, old_period_ns, frame_period_ns);
+
+	// The adapted compositor time measures real work, only clamp it to the new maximum.
+	if (pc->comp_time_ns > pc->comp_time_max_ns) {
+		pc->comp_time_ns = pc->comp_time_max_ns;
+	}
+
+	pc->frame_period_ns = frame_period_ns;
+}
+
 static void
 pc_destroy(struct u_pacing_compositor *upc)
 {
@@ -778,6 +807,7 @@ u_pc_display_timing_create(int64_t estimated_frame_period_ns,
 	pc->base.info_gpu = pc_info_gpu;
 	pc->base.update_vblank_from_display_control = pc_update_vblank_from_display_control;
 	pc->base.update_present_offset = pc_update_present_offset;
+	pc->base.update_frame_period = pc_update_frame_period;
 	pc->base.destroy = pc_destroy;
 	pc->frame_period_ns = estimated_frame_period_ns;
 

@@ -18,6 +18,7 @@
 #include "b_system.h"
 #include "b_body_tracker.h"
 #include "b_hand_tracker.h"
+#include "b_io_cache.h"
 
 #include "target_builder_helpers.h"
 
@@ -60,6 +61,14 @@ sdl_system_devices_create_hand_tracker(struct xrt_system_devices *xsysd,
                                        struct xrt_hand_tracker **out_xht)
 {
 	return b_hand_tracker_create(xsysd, info, out_xht);
+}
+
+static xrt_result_t
+sdl_system_devices_create_io_cache(struct xrt_system_devices *xsysd,
+                                   struct xrt_space_overseer *xso,
+                                   struct xrt_io_cache **out_xic)
+{
+	return b_io_cache_create(xsysd, xso, out_xic);
 }
 
 static void
@@ -157,6 +166,7 @@ sdl_system_devices_init(struct sdl_program *sp)
 	                                            sdl_system_devices_destroy);
 	sp->xsysd_base.create_body_tracker = sdl_system_devices_create_body_tracker;
 	sp->xsysd_base.create_hand_tracker = sdl_system_devices_create_hand_tracker;
+	sp->xsysd_base.create_io_cache = sdl_system_devices_create_io_cache;
 
 #ifdef USE_SIMULATED
 	const struct xrt_pose center = XRT_POSE_IDENTITY;

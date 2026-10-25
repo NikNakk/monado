@@ -204,11 +204,11 @@ oxr_xrAttachSessionActionSets(XrSession session, const XrSessionActionSetsAttach
 		return ret;
 	}
 
-	ret = oxr_session_attach_action_sets(  //
-	    &log,                              //
-	    &inst_context->suggested_profiles, //
-	    &sess->attached_actions,           //
-	    sess_context,                      //
+	ret = oxr_session_attach_action_sets( //
+	    &log,                             //
+	    inst_context,                     //
+	    &sess->attached_actions,          //
+	    sess_context,                     //
 	    bindInfo);
 	if (ret != XR_SUCCESS) {
 		return ret;

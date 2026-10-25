@@ -103,6 +103,12 @@ oxr_session_populate_vk(struct oxr_logger *log,
 		external_fence_fd_enabled = true;
 		external_semaphore_fd_enabled = true;
 	}
+#elif defined(XRT_GRAPHICS_BUFFER_HANDLE_IS_IOSURFACE)
+	if (sys->inst->extensions.KHR_vulkan_enable) {
+		// We always return VK_EXT_metal_objects as required for version 1, and the client needs it
+		// to import array and depth swapchain images as Metal textures.
+		metal_objects_enabled = true;
+	}
 #endif
 
 	if (!timeline_semaphore_enabled &&

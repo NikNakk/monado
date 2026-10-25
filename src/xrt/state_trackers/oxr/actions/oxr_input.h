@@ -97,7 +97,7 @@ oxr_action_cache_stop_output(struct oxr_logger *log, struct oxr_session *sess, s
  */
 XrResult
 oxr_session_attach_action_sets(struct oxr_logger *log,
-                               const struct oxr_interaction_profile_array *suggested_profiles,
+                               const struct oxr_instance_action_context *inst_context,
                                struct oxr_session_attached_actions *attached_actions,
                                struct oxr_session_action_context *sess_context,
                                const XrSessionActionSetsAttachInfo *bindInfo);

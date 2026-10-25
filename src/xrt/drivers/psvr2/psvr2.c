@@ -31,6 +31,7 @@
 
 #include "tracking/t_dead_reckoning.h"
 #include "psvr2_tracking_share.h"
+#include "psvr2_mode4_passthrough.h"
 
 #include "util/u_misc.h"
 #include "util/u_debug.h"
@@ -1232,6 +1233,14 @@ status_xfer_cb(struct libusb_transfer *xfer)
 }
 
 bool
+psvr2_led_detector_owns_exposure_timing(const struct psvr2_hmd *hmd)
+{
+	// Outside mode 4 the camera frames (e.g. mode-16 passthrough) are not the exposures the headset's LED
+	// detections come from, so they must not drive the Sense LED schedule.
+	return hmd->led_detector_blobs && hmd->camera_mode != PSVR2_CAMERA_MODE_4;
+}
+
+bool
 psvr2_led_detector_blobs_requested(void)
 {
 	return debug_get_bool_option_psvr2_led_detector_blobs();
@@ -1288,6 +1297,51 @@ psvr2_latency_diag_maybe_log_locked(struct psvr2_hmd *hmd, timepoint_ns now_ns)
 	hmd->latency_diag.window_start_ns = now_ns;
 }
 
+void
+psvr2_push_mode4_passthrough(struct psvr2_hmd *hmd,
+                             uint32_t camera_set,
+                             const uint8_t *source,
+                             size_t source_size,
+                             int64_t timestamp_ns,
+                             uint32_t device_us,
+                             uint32_t sequence)
+{
+	if (camera_set != 4 || source == NULL || source_size != 2 * PSVR2_MODE4_PT_SOURCE_SIZE || timestamp_ns <= 0)
+		return;
+	struct xrt_frame_sink *sinks[2] = {0};
+	os_mutex_lock(&hmd->data_lock);
+	if (hmd->camera_mode == PSVR2_CAMERA_MODE_4) {
+		sinks[0] = hmd->passthrough_sinks[0];
+		sinks[1] = hmd->passthrough_sinks[1];
+	}
+	if (sinks[0] == NULL && sinks[1] == NULL) {
+		os_mutex_unlock(&hmd->data_lock);
+		return;
+	}
+	hmd->mode4_passthrough_pushes_in_flight++;
+	os_mutex_unlock(&hmd->data_lock);
+	// Preserve Sense's camera mode and tracking stream. Compression is done
+	// outside data_lock, only when an explicit passthrough consumer is attached.
+	for (uint32_t eye = 0; eye < 2; eye++) {
+		if (sinks[eye] == NULL)
+			continue;
+		struct xrt_frame *frame = NULL;
+		u_frame_create_one_off(XRT_FORMAT_BC4, 1024, 1016, &frame);
+		if (psvr2_mode4_encode_passthrough(source + eye * PSVR2_MODE4_PT_SOURCE_SIZE,
+		                                   PSVR2_MODE4_PT_SOURCE_SIZE, frame->data, frame->size)) {
+			frame->timestamp = timestamp_ns;
+			frame->source_timestamp = (int64_t)device_us * U_TIME_1US_IN_NS;
+			frame->source_sequence = sequence;
+			frame->source_id = eye;
+			xrt_sink_push_frame(sinks[eye], frame);
+		}
+		xrt_frame_reference(&frame, NULL);
+	}
+	os_mutex_lock(&hmd->data_lock);
+	hmd->mode4_passthrough_pushes_in_flight--;
+	os_mutex_unlock(&hmd->data_lock);
+}
+
 static void LIBUSB_CALL
 img_xfer_cb(struct libusb_transfer *xfer)
 {
@@ -1334,7 +1388,8 @@ img_xfer_cb(struct libusb_transfer *xfer)
 					diag->last_vts_monotonic_ns = hmd->last_imu_vts_ns + hmd->hw2mono_vts +
 					                              (int64_t)camera_to_imu_us * U_TIME_1US_IN_NS;
 					camera_timestamp_ns = diag->last_vts_monotonic_ns;
-					if (diag->last_vts_us != hmd->last_camera_event_vts_us) {
+					if (diag->last_vts_us != hmd->last_camera_event_vts_us &&
+					    !psvr2_led_detector_owns_exposure_timing(hmd)) {
 						uint32_t interval_us =
 						    diag->last_vts_us - hmd->last_camera_event_vts_us;
 						uint32_t sequence_delta =
@@ -1441,6 +1496,12 @@ img_xfer_cb(struct libusb_transfer *xfer)
 			os_mutex_lock(&hmd->data_lock);
 			hmd->camera_frame_pushes_in_flight--;
 			os_mutex_unlock(&hmd->data_lock);
+		}
+
+		if (camera_width == 512 && camera_height == 508 && xfer->actual_length >= USB_CAM_HEADER_SIZE) {
+			psvr2_push_mode4_passthrough(hmd, camera_set, xfer->buffer + USB_CAM_HEADER_SIZE,
+			                             (size_t)xfer->actual_length - USB_CAM_HEADER_SIZE,
+			                             camera_timestamp_ns, camera_vts_us, camera_sequence_id);
 		}
 
 		PSVR2_TRACE(hmd, "Camera frame - %d bytes", xfer->actual_length);
@@ -1845,10 +1906,11 @@ psvr2_led_detector_process(struct psvr2_hmd *hmd, const uint8_t *data, uint32_t 
 			psvr2_latency_diag_add_locked(hmd, 2, received_ns, exposure_ns);
 			psvr2_latency_diag_maybe_log_locked(hmd, received_ns);
 		}
-		// Without camera frames nothing else announces exposures, which the Sense LED schedule follows.
+		// The Sense LED schedule follows exposures. Announce them from here when no camera frames arrive, or
+		// when the camera mode's frames are not the detector's exposures.
 		bool cameras_flowing = hmd->last_camera_frame_ns != 0 &&
 		                       received_ns - hmd->last_camera_frame_ns < 200 * (int64_t)U_TIME_1MS_IN_NS;
-		if (hmd->led_detector_blobs && !cameras_flowing) {
+		if (hmd->led_detector_blobs && (!cameras_flowing || psvr2_led_detector_owns_exposure_timing(hmd))) {
 			uint32_t interval_us = device_us - hmd->last_led_detector_event_vts_us;
 			uint32_t frames = counter - hmd->last_led_detector_event_counter;
 			bool have_previous = hmd->last_led_detector_event_vts_us != 0 && frames != 0 && frames < 8;
@@ -2671,7 +2733,7 @@ psvr2_end_feature(struct xrt_device *xdev, enum xrt_device_feature_type type)
 }
 
 static struct xrt_binding_input_pair vive_pro_inputs_psvr2[] = {
-    {XRT_INPUT_VIVEPRO_SYSTEM_CLICK, XRT_INPUT_PSVR2_SYSTEM_CLICK},
+    {XRT_INPUT_VIVE_PRO_SYSTEM_CLICK, XRT_INPUT_PSVR2_SYSTEM_CLICK},
 };
 
 static struct xrt_binding_input_pair blubur_s1_inputs_psvr2[] = {
@@ -3013,6 +3075,13 @@ psvr2_set_passthrough_sinks(struct xrt_device *xdev, struct xrt_frame_sink *left
 	}
 
 	os_mutex_lock(&hmd->data_lock);
+	hmd->passthrough_sinks[0] = NULL;
+	hmd->passthrough_sinks[1] = NULL;
+	while (hmd->mode4_passthrough_pushes_in_flight > 0) {
+		os_mutex_unlock(&hmd->data_lock);
+		os_nanosleep(U_TIME_1MS_IN_NS);
+		os_mutex_lock(&hmd->data_lock);
+	}
 	hmd->passthrough_sinks[0] = left;
 	hmd->passthrough_sinks[1] = right;
 	os_mutex_unlock(&hmd->data_lock);

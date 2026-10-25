@@ -14,6 +14,7 @@
 
 #include "xrt/xrt_body_tracker.h"
 #include "xrt/xrt_hand_tracker.h"
+#include "xrt/xrt_io_cache.h"
 
 #ifdef __APPLE__
 #include "util/u_macos_display_host.h"
@@ -206,6 +207,11 @@ common_shutdown(volatile struct ipc_client_state *ics)
 		xrt_app_instance_destroy((struct xrt_app_instance **)&ics->objects.xainsts[i]);
 	}
 
+	// Destroy input/output caches owned by this client.
+	for (uint32_t i = 0; i < IPC_MAX_CLIENT_IO_CACHES; i++) {
+		xrt_io_cache_destroy((struct xrt_io_cache **)&ics->objects.xics[i]);
+	}
+
 	// Clear the tracking origins array.
 	for (uint32_t i = 0; i < XRT_SYSTEM_MAX_DEVICES; i++) {
 		/*
@@ -291,7 +297,7 @@ client_loop(volatile struct ipc_client_state *ics)
 
 	struct ipc_thread *it = &ics->server->threads[ics->server_thread_index];
 	ipc_server_client_thread_set_running(ics->server, it);
-	while (it->state == IPC_THREAD_RUNNING) {
+	while (ipc_server_client_thread_is_running(ics->server, it)) {
 		const int half_a_second_ms = 500;
 		int ret = 0;
 
@@ -417,7 +423,7 @@ client_loop(volatile struct ipc_client_state *ics)
 
 	struct ipc_thread *it = &ics->server->threads[ics->server_thread_index];
 	ipc_server_client_thread_set_running(ics->server, it);
-	while (it->state == IPC_THREAD_RUNNING) {
+	while (ipc_server_client_thread_is_running(ics->server, it)) {
 		uint8_t buf[IPC_BUF_SIZE] = {0};
 		DWORD len = 0;
 		BOOL bret = false;

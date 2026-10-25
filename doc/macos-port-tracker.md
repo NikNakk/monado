@@ -7,6 +7,54 @@ SPDX-License-Identifier: BSL-1.0
 
 # macOS Port Tracker
 
+The [2026-10-25 application-owned gaze investigation](macos-app-owned-foveation-investigation.md)
+compares the existing EXT gaze path with Valve FB/META and Windows VRS.
+An engine prototype is recommended before changing the validated Metal path;
+no runtime or installed configuration changes were made.
+For native Alyx specifically, the follow-up instead recommends its existing
+application-directed FDM plan: implement OpenVR centres in xrizer and pass-end
+Vulkan density-map offsets in KK, replacing the private gaze handoff.
+
+Presenter selection now uses `XRT_MACOS_PRESENTER=wsi|wsi-adaptive|native`
+(default `native`). `wsi` selects calibrated CV WSI; the old WSI selection
+booleans are retired. See [selector migration](macos-wsi-migration.md#unified-presenter-selector-17-october-2026).
+
+The [WSI passthrough parity change](macos-wsi-migration.md#calibrated-wsi-passthrough-prepared-16-october-2026)
+now reuses native camera calibration and rotational correction on the WSI
+integration worktree. Camera-only and gentle blended-motion
+checks pass, but rapid-motion shimmer is worse than the native control. Earlier
+wake-up improves measured WSI cadence without consistently fixing the image;
+the [Vulkan camera replacement](macos-wsi-vulkan-passthrough.md) now removes
+those blocking waits and reaches about 117–119 presents/s in short functional
+runs, with final camera CPU submission around 0.38–0.42 ms median.
+The subsequent moving-head check still shimmers despite 118.18 presents/s;
+WSI default promotion remains blocked on visual quality. The user independently
+isolates `XRT_COMPOSITOR_COMPUTE=1` as the trigger in WSI testing and reports
+native is fine. Native uses compute by default; focus on WSI compute/output.
+Visual acceptance remains pending; native is still default (16 October 2026).
+A [private-output candidate](macos-wsi-vulkan-passthrough.md#private-compute-output-candidate)
+keeps WSI compute/camera shader writes out of presentation images. Since
+18 October a [fragment output pass](macos-wsi-vulkan-passthrough.md#fragment-output-pass-18-october-2026)
+replaces its copies and the camera compute pass, leaving presentation images
+as render targets only. Its visual quality, direct scanout and performance
+are untested on hardware.
+`SIMULATED_DESKTOP=1` runs a [simulated HMD in a desktop window](macos-desktop-simulation.md)
+on the built-in display, steered with the trackpad, for headset-free checks of
+the WSI compute path (not passthrough).
+
+The opt-in generic Vulkan WSI target and its experiment are committed on
+`claude/macos-wsi-integration` (worktree `build/review/wsi-integration`), with
+display refresh requests now applied between frames by the main compositor for
+every target and pacers changing period in place. Native stays the default.
+The functional headset checks pass on the branch itself (refresh cycles for
+native and all WSI modes, hosted WSI, passthrough pixel checks and native
+shutdown; see [the branch validation](macos-wsi-migration.md#headset-validation-of-the-branch-16-october-2026)).
+Visual acceptance,
+calibration/rotation parity for WSI passthrough and automatic recovery remain
+pending. See [the integration notes](macos-wsi-migration.md#integrated-branch-15-october-2026). An opt-in correction lets the stock adaptive pacer keep display-rate
+cadence on WSI with about one refresh less latency at 90 Hz, at the cost of
+worse tails; see [the adaptive pacing results](macos-wsi-generic-experiment.md#corrected-feedback-for-the-adaptive-pacer-16-october-2026).
+
 The [graphics integration review](macos-graphics-integration-review.md) is now
 integrated locally into `macos-upstream-clean` by the user-approved fast-forward
 to `c2c608a3f`. Both native Vulkan sharing options default to on, with independent
@@ -103,6 +151,17 @@ record are carried with the runtime corrections.
   per-thread scheduling fix, followed by the tracking, pose, image-reuse,
   output-barrier and diagnostics work. Shared tracking stays opt-in.
 - Canonical upstream remains the Monado project on freedesktop.org.
+
+
+The 2026-10-21 [generic-controller comparison and upstream merge](macos-upstream-generic-controller.md)
+is prepared on `codex/upstream-generic-controller`, based on the current WSI
+fragment-output branch. It adopts upstream's generated action/rebinding system
+through `9fd3968ba`, preserving two generic fallback behaviors, Sense LED-space
+tracking and opt-in defaults. The eight I/O-cache commits now carry remaining
+compatibility mappings in a service-selected, pointer-free cache snapshot.
+Automated validation and the user-operated headset gate are recorded in the review.
+This does not move `macos-upstream-clean` or install/push a runtime.
+
 - Latest local sync: `macos-upstream-clean` merged GitLab `main` through
   `ec188bb13` on 2026-10-07 in `753698f92`, without conflicts. The fork's
   passthrough and floor-calibration workers now use upstream's replacement
@@ -630,3 +689,43 @@ fixes are retained. The combined installed DLL at `1eb76cd` passes 97 Wine tests
 succeeds; remaining frame pacing is under investigation. See the
 [startup investigation and cleanup](macos-alyx-xrizer-startup.md) and
 [gameplay/pacing evidence](macos-steamvr-keyed-ownership-followup.md).
+
+## Sense occlusion follow-up (2026-10-25)
+
+The installed LaunchAgent's missing automatic floor/Options settings are also
+restored at 1.72 m eye height and a one-second hold. Persistent reinstall now
+preserves saved environment preferences; see the
+[configuration repair](macos-floor-calibration.md#installed-service-configuration-repair-2026-10-25).
+`rebuild-both --install-local` now offers a personal opt-in runtime install and
+service profile restoring the previously selected Sense and GPU preferences;
+the [audit and usage](macos-service-direct-xpc.md#personal-rebuild-and-install-mode-2026-10-25)
+distinguish the prepared profile from the currently loaded settings.
+
+Native Alyx run logs distinguish right HID failures/reconnects from optical
+visibility/reacquisition gaps. Ongoing-loss and application-pose diagnostics plus
+an opt-in bounded IMU fallback are prepared. See the [evidence, implementation
+and user-operated capture](macos-pssense-occlusion.md). Hardware and Linux CI
+validation remain pending; the isolated Alyx runtime has not been replaced.
+
+## Guided Sense survey (2026-10-25)
+
+The PS VR2 test app has a guided placement/occlusion capture mode with per-phase
+pose data and optional matched service CTD preparation. See [instructions and
+validation](macos-pssense-controller-survey.md). No calibration is automatically
+fitted; the first wearer-operated recording remains pending.
+
+### Guided survey wearer follow-up (2026-10-25)
+
+The first wearer run reached the right-hand ready screen after collecting the
+left trials. Version 2 adds a fixed blue forward cross, stable target previews
+for glancing, hand selection, and optional passthrough in the preparation helper.
+All ten application test cases pass; wearer validation of the new guidance is
+pending. See [survey evidence and options](macos-pssense-controller-survey.md).
+
+### Guided survey mode-4 camera fix and reset (2026-10-25)
+
+The survey's missing passthrough was a missing mode-4 source delivery path;
+that lower stereo pair now feeds the existing BC4 transport without switching
+away from controller tracking. Solid target boxes and the service's one-second
+Options reset are enabled in the prepared survey profile. Focused tests pass;
+wearer validation remains pending. See [version-3 evidence and limits](macos-pssense-controller-survey.md#version-3-mode-4-passthrough-and-options-reset).

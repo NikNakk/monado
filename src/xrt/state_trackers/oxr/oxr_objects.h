@@ -36,6 +36,7 @@
 
 #include "oxr_extension_support.h"
 #include "oxr_defines.h"
+#include "oxr_handle_cast.h"
 #include "oxr_handle_base.h"
 #include "oxr_frame_sync.h"
 #include "oxr_forward_declarations.h"
@@ -47,7 +48,6 @@
 #include "actions/oxr_dpad_state.h"
 #include "actions/oxr_session_action_context.h"
 #include "actions/oxr_session_attached_actions.h"
-#include "actions/oxr_interaction_profile_array.h"
 #include "actions/oxr_instance_path_cache.h"
 #include "actions/oxr_instance_action_context.h"
 
@@ -80,28 +80,6 @@ extern "C" {
  *
  * @ingroup xrt
  */
-
-/*!
- * @brief Cast a pointer to an OpenXR handle in such a way as to avoid warnings.
- *
- * Avoids -Wpointer-to-int-cast by first casting to the same size int, then
- * promoting to the 64-bit int, then casting to the handle type. That's a lot of
- * no-ops on 64-bit, but a widening conversion on 32-bit.
- *
- * @ingroup oxr
- */
-#define XRT_CAST_PTR_TO_OXR_HANDLE(HANDLE_TYPE, PTR) ((HANDLE_TYPE)(uint64_t)(uintptr_t)(PTR))
-
-/*!
- * @brief Cast an OpenXR handle to a pointer in such a way as to avoid warnings.
- *
- * Avoids -Wint-to-pointer-cast by first casting to a 64-bit int, then to a
- * pointer-sized int, then to the desired pointer type. That's a lot of no-ops
- * on 64-bit, but a narrowing (!) conversion on 32-bit.
- *
- * @ingroup oxr
- */
-#define XRT_CAST_OXR_HANDLE_TO_PTR(PTR_TYPE, HANDLE) ((PTR_TYPE)(uintptr_t)(uint64_t)(HANDLE))
 
 /*!
  * @defgroup oxr_main OpenXR main code
@@ -146,21 +124,6 @@ extern "C" {
 		} safe_copy = {FROM};                                                                                  \
 		TO = safe_copy.oxr;                                                                                    \
 	} while (false)
-
-
-static inline const char *
-xr_action_type_to_str(XrActionType type)
-{
-	// clang-format off
-		switch (type) {
-	#define PRINT(name, value) \
-		case name: return #name;
-		XR_LIST_ENUM_XrActionType(PRINT)
-	#undef PRINT
-		default: return "XR_ACTION_TYPE_UNKNOWN";
-		}
-	// clang-format on
-}
 
 
 /*!
@@ -402,6 +365,16 @@ oxr_session_enumerate_formats(struct oxr_logger *log,
                               uint32_t formatCapacityInput,
                               uint32_t *formatCountOutput,
                               int64_t *formats);
+
+#ifdef OXR_HAVE_EXT_enumerate_swapchain_formats2
+XrResult
+oxr_session_enumerate_formats2(struct oxr_logger *log,
+                               struct oxr_session *sess,
+                               XrSwapchainFormatsEnumerateInfoEXT *enumerateInfo,
+                               uint32_t formatCapacityInput,
+                               uint32_t *formatCountOutput,
+                               int64_t *formats);
+#endif
 
 /*!
  * Change the state of the session, queues a event.
@@ -1520,64 +1493,6 @@ oxr_session_request_display_refresh_rate(struct oxr_logger *log, struct oxr_sess
 
 
 /*!
- * dpad emulation settings from oxr_interaction_profile
- */
-struct oxr_dpad_emulation
-{
-	enum oxr_subaction_path subaction_path;
-	XrPath *paths;
-	uint32_t path_count;
-	enum xrt_input_name position;
-	enum xrt_input_name activate; // Can be zero
-};
-
-/*!
- * A single interaction profile.
- */
-struct oxr_interaction_profile
-{
-	XrPath path;
-
-	//! Used to lookup @ref xrt_binding_profile for fallback.
-	enum xrt_device_name xname;
-
-	//! Name presented to the user.
-	const char *localized_name;
-
-	struct oxr_binding *bindings;
-	size_t binding_count;
-
-	struct oxr_dpad_emulation *dpads;
-	size_t dpad_count;
-
-	struct oxr_dpad_state dpad_state;
-};
-
-/*!
- * Interaction profile binding state.
- */
-struct oxr_binding
-{
-	XrPath *paths;
-	uint32_t path_count;
-
-	//! Name presented to the user.
-	const char *localized_name;
-
-	enum oxr_subaction_path subaction_path;
-
-	uint32_t act_key_count;
-	uint32_t *act_keys;
-	//! store which entry in paths was suggested, for each action key
-	uint32_t *preferred_binding_path_index;
-
-	enum xrt_input_name input;
-	enum xrt_input_name dpad_activate;
-
-	enum xrt_output_name output;
-};
-
-/*!
  * @defgroup oxr_input OpenXR input
  * @ingroup oxr_main
  *
@@ -1629,6 +1544,17 @@ struct oxr_action_set_attachment
 	//! Which sub-action paths are requested on the latest sync.
 	struct oxr_subaction_paths requested_subaction_paths;
 
+	/*!
+	 * Effective action-set priority from the latest xrSyncActions.
+	 *
+	 * Reset to @ref oxr_action_set_ref::priority at the start of each
+	 * successful focused sync, then overwritten only for action sets in that
+	 * sync's active list (including XR_EXT_active_action_set_priority
+	 * overrides). Used after sync, for example when enumerating bound
+	 * sources, to apply the same priority suppression as input combining.
+	 */
+	uint32_t last_sync_priority;
+
 	//! An array of action attachments we own.
 	struct oxr_action_attachment *act_attachments;
 
@@ -1665,23 +1591,25 @@ struct oxr_action_state
 };
 
 /*!
- * A input action pair of a @ref xrt_input and a @ref xrt_device, along with the
- * required transform.
+ * A resolved input binding for an action, along with the required transform.
  *
  * @ingroup oxr_input
  *
- * @see xrt_device
+ * @see oxr_io_cache
  * @see xrt_input
  */
 struct oxr_action_input
 {
-	struct xrt_device *xdev;                // Used for poses and transform is null.
-	struct xrt_input *input;                // Ditto
-	enum xrt_input_name dpad_activate_name; // used to activate dpad emulation if present
-	struct xrt_input *dpad_activate;        // used to activate dpad emulation if present
+	//! Cache this input is resolved against (owned by the action context).
+	const struct oxr_io_cache *io_cache;
+	//! Device this input reads from.
+	struct xrt_device_id device_id;
+	//! The resolved input, pointing into @ref oxr_io_cache::inputs.
+	struct xrt_input *input;
+	const struct oxr_binding_point *binding_point;
+	struct oxr_priority_group_state *priority_group_state;
 	struct oxr_input_transform *transforms;
 	size_t transform_count;
-	XrPath bound_path;
 };
 
 /*!
@@ -1694,9 +1622,12 @@ struct oxr_action_input
  */
 struct oxr_action_output
 {
-	struct xrt_device *xdev;
+	//! Cache this output is resolved against (owned by the action context).
+	const struct oxr_io_cache *io_cache;
+	//! Device this output routes to.
+	struct xrt_device_id device_id;
 	enum xrt_output_name name;
-	XrPath bound_path;
+	const struct oxr_binding_point *binding_point;
 };
 
 
@@ -1779,6 +1710,7 @@ oxr_space_type_is_reference(enum oxr_space_type space_type)
 	case OXR_SPACE_TYPE_REFERENCE_COMBINED_EYE_VARJO:
 	case OXR_SPACE_TYPE_REFERENCE_LOCALIZATION_MAP_ML:
 	case OXR_SPACE_TYPE_REFERENCE_UNBOUNDED_ANDROID:
+	case OXR_SPACE_TYPE_REFERENCE_STATIONARY_EXT:
 		// These are reference spaces.
 		return true;
 
@@ -1825,7 +1757,7 @@ struct oxr_space
 	struct
 	{
 		struct xrt_space *xs;
-		struct xrt_device *xdev;
+		struct xrt_device_id device_id;
 		enum xrt_input_name name;
 
 		bool feature_eye_tracking;

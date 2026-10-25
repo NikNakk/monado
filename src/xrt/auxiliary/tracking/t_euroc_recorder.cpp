@@ -447,7 +447,7 @@ euroc_recorder_start(struct xrt_slam_sinks *er_sinks)
 	}
 
 	// Create dataset directories with current datetime suffix
-	time_t seconds = os_realtime_get_ns() / U_1_000_000_000;
+	time_t seconds = os_realtime_get_ns() / U_TIME_1S_IN_NS;
 	constexpr size_t size = sizeof("YYYYMMDDHHmmss");
 	char datetime[size] = {0};
 	(void)strftime(datetime, size, "%Y%m%d%H%M%S", localtime(&seconds));

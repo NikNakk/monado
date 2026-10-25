@@ -92,9 +92,7 @@ private:
 	                        vr::VRInputComponentHandle_t *handle);
 
 	xrt_input *
-	update_component_common_locked(vr::VRInputComponentHandle_t handle,
-	                               double offset,
-	                               std::chrono::steady_clock::time_point now = std::chrono::steady_clock::now());
+	update_component_common_locked(vr::VRInputComponentHandle_t handle, double offset);
 
 	bool
 	setup_hmd(const char *serial, vr::ITrackedDeviceServerDriver *driver);

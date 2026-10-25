@@ -211,8 +211,8 @@ os_nanosleep(int64_t nsec)
 {
 #if defined(XRT_OS_LINUX) || defined(XRT_OS_OSX)
 	struct timespec spec;
-	spec.tv_sec = (nsec / U_1_000_000_000);
-	spec.tv_nsec = (nsec % U_1_000_000_000);
+	spec.tv_sec = (nsec / U_TIME_1S_IN_NS);
+	spec.tv_nsec = (nsec % U_TIME_1S_IN_NS);
 	nanosleep(&spec, NULL);
 #elif defined(XRT_OS_WINDOWS)
 	Sleep((DWORD)(nsec / U_TIME_1MS_IN_NS));
@@ -306,7 +306,7 @@ static inline int64_t
 os_timespec_to_ns(const struct timespec *spec)
 {
 	int64_t ns = 0;
-	ns += (int64_t)spec->tv_sec * U_1_000_000_000;
+	ns += (int64_t)spec->tv_sec * U_TIME_1S_IN_NS;
 	ns += (int64_t)spec->tv_nsec;
 	return ns;
 }
@@ -314,12 +314,10 @@ os_timespec_to_ns(const struct timespec *spec)
 static inline void
 os_ns_to_timespec(int64_t ns, struct timespec *spec)
 {
-	spec->tv_sec = (ns / U_1_000_000_000);
-	spec->tv_nsec = (ns % U_1_000_000_000);
+	spec->tv_sec = (ns / U_TIME_1S_IN_NS);
+	spec->tv_nsec = (ns % U_TIME_1S_IN_NS);
 }
 #endif // XRT_HAVE_TIMESPEC
-
-#define OS_NS_PER_USEC (1000)
 
 #if defined(XRT_HAVE_TIMEVAL) && defined(XRT_OS_LINUX)
 
@@ -327,8 +325,8 @@ static inline int64_t
 os_timeval_to_ns(struct timeval *val)
 {
 	int64_t ns = 0;
-	ns += (int64_t)val->tv_sec * U_1_000_000_000;
-	ns += (int64_t)val->tv_usec * OS_NS_PER_USEC;
+	ns += (int64_t)val->tv_sec * U_TIME_1S_IN_NS;
+	ns += (int64_t)val->tv_usec * U_TIME_1US_IN_NS;
 	return ns;
 }
 #endif // defined(XRT_HAVE_TIMEVAL) && defined(XRT_OS_LINUX)
@@ -342,7 +340,7 @@ os_ns_per_qpc_tick_get(void)
 		// Fixed at startup, so we can cache this.
 		LARGE_INTEGER freq;
 		QueryPerformanceFrequency(&freq);
-		ns_per_qpc_tick = U_1_000_000_000 / freq.QuadPart;
+		ns_per_qpc_tick = U_TIME_1S_IN_NS / freq.QuadPart;
 	}
 	return ns_per_qpc_tick;
 }

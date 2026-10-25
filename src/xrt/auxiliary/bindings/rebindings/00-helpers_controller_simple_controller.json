@@ -1,0 +1,36 @@
+{
+	"/helper/controller/simple_select_to_trigger": {
+		"helper": true,
+		"bindings": {
+			"/user/hand/left/input/select": "/user/hand/left/input/trigger/value",
+			"/user/hand/left/input/select/click": "/user/hand/left/input/trigger/value",
+			"/user/hand/right/input/select": "/user/hand/right/input/trigger/value",
+			"/user/hand/right/input/select/click": "/user/hand/right/input/trigger/value"
+		}
+	},
+	"/helper/controller/simple_to_controller": {
+		"helper": true,
+		"helpers": [
+			"/helper/controller/output",
+			"/helper/controller/poses",
+			"/helper/controller/simple_select_to_trigger"
+		]
+	},
+	"/helper/controller/simple_to_menu_controller": {
+		"helper": true,
+		"helpers": [
+			"/helper/controller/menu",
+			"/helper/controller/simple_to_controller"
+		]
+	},
+	"/helper/controller/simple_to_left_menu_controller": {
+		"helper": true,
+		"helpers": ["/helper/controller/simple_to_controller"],
+		"bindings": {
+			"/user/hand/left/input/menu": true,
+			"/user/hand/left/input/menu/click": true,
+			"/user/hand/right/input/menu": false,
+			"/user/hand/right/input/menu/click": false
+		}
+	}
+}

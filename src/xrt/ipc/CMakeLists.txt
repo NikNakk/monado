@@ -166,6 +166,8 @@ add_library(
 	client/ipc_client_body_tracker.h
 	client/ipc_client_hand_tracker.c
 	client/ipc_client_hand_tracker.h
+	client/ipc_client_io_cache.c
+	client/ipc_client_io_cache.h
 	client/ipc_client_hmd.c
 	client/ipc_client_instance.c
 	client/ipc_client_session.c
@@ -230,6 +232,7 @@ add_library(
 	server/ipc_server_handler_app_policy.c
 	server/ipc_server_handler_body_tracker.c
 	server/ipc_server_handler_hand_tracker.c
+	server/ipc_server_handler_io_cache.c
 	server/ipc_server_handler_swapchain.c
 	server/ipc_server_per_client_thread.c
 	server/ipc_server_floor_calibration.c
@@ -293,6 +296,8 @@ elseif(APPLE)
 			PRIVATE server/ipc_server_mainloop_apple_xpc.m
 				server/ipc_metal_client_cleanup.c server/ipc_metal_client_cleanup.h
 			)
+		# The window-close path broadcasts session events through b_system.
+		target_link_libraries(ipc_server PRIVATE base)
 	endif()
 	set_source_files_properties(
 		${CMAKE_CURRENT_SOURCE_DIR}/server/ipc_server_mainloop_apple.c PROPERTIES LANGUAGE

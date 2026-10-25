@@ -18,6 +18,8 @@
 #include "xrt/xrt_compiler.h"
 #include "xrt/xrt_results.h"
 
+#include <stdbool.h>
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -68,6 +70,14 @@ u_macos_display_host_set_visibility(uint32_t client_id, enum u_macos_display_hos
 //! Remove the client's host layer, restoring the service's own layer if needed.
 void
 u_macos_display_host_detach(uint32_t client_id);
+
+//! Called by the presenter when the user closes its window: stop the service.
+void
+u_macos_display_host_request_close(void);
+
+//! True once after u_macos_display_host_request_close; polled by the IPC server.
+bool
+u_macos_display_host_take_close_request(void);
 
 
 #ifdef __cplusplus

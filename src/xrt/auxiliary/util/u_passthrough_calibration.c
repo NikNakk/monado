@@ -108,6 +108,32 @@ u_passthrough_calibration_project(const struct u_passthrough_camera *camera,
 	return true;
 }
 
+bool
+u_passthrough_calibration_depth_ray(const struct u_passthrough_camera *camera,
+                                    const struct xrt_vec3 *eye_position,
+                                    const struct xrt_vec3 *head_ray,
+                                    double depth_m,
+                                    struct xrt_vec3 *out_ray)
+{
+	double len = sqrt((double)head_ray->x * head_ray->x + (double)head_ray->y * head_ray->y +
+	                  (double)head_ray->z * head_ray->z);
+	if (!isfinite(len) || len <= 0 || !isfinite(depth_m)) {
+		return false;
+	}
+	if (depth_m <= 0) {
+		*out_ray = *head_ray;
+		return true;
+	}
+	const struct xrt_vec3 *t = &camera->head_from_camera.position;
+	double x = eye_position->x + depth_m * head_ray->x / len - t->x;
+	double y = eye_position->y + depth_m * head_ray->y / len - t->y;
+	double z = eye_position->z + depth_m * head_ray->z / len - t->z;
+	if (!isfinite(x) || !isfinite(y) || !isfinite(z) || z > -1e-6) {
+		return false;
+	}
+	*out_ray = (struct xrt_vec3){(float)(x / -z), (float)(y / -z), -1.0f};
+	return true;
+}
 
 bool
 u_passthrough_calibration_rotation(const struct u_passthrough_camera *camera,

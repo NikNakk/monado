@@ -13,6 +13,8 @@
 
 #include "xrt/xrt_defines.h"
 #include "xrt/xrt_space.h"
+#include "xrt/xrt_system.h"
+#include "xrt/xrt_compositor.h"
 #include "xrt/xrt_vulkan_includes.h"
 #include "xrt/xrt_openxr_includes.h"
 
@@ -73,6 +75,7 @@ oxr_ref_space_to_xr(enum oxr_space_type space_type)
 	case OXR_SPACE_TYPE_REFERENCE_COMBINED_EYE_VARJO: return XR_REFERENCE_SPACE_TYPE_COMBINED_EYE_VARJO;
 	case OXR_SPACE_TYPE_REFERENCE_LOCALIZATION_MAP_ML: return XR_REFERENCE_SPACE_TYPE_LOCALIZATION_MAP_ML;
 	case OXR_SPACE_TYPE_REFERENCE_UNBOUNDED_ANDROID: return XR_REFERENCE_SPACE_TYPE_UNBOUNDED_ANDROID;
+	case OXR_SPACE_TYPE_REFERENCE_STATIONARY_EXT: return XR_REFERENCE_SPACE_TYPE_STATIONARY_EXT;
 
 	case OXR_SPACE_TYPE_ACTION: return XR_REFERENCE_SPACE_TYPE_MAX_ENUM;
 	case OXR_SPACE_TYPE_XDEV_POSE: return XR_REFERENCE_SPACE_TYPE_MAX_ENUM;
@@ -93,6 +96,7 @@ xr_ref_space_to_oxr(XrReferenceSpaceType space_type)
 	case XR_REFERENCE_SPACE_TYPE_COMBINED_EYE_VARJO: return OXR_SPACE_TYPE_REFERENCE_COMBINED_EYE_VARJO;
 	case XR_REFERENCE_SPACE_TYPE_LOCALIZATION_MAP_ML: return OXR_SPACE_TYPE_REFERENCE_LOCALIZATION_MAP_ML;
 	case XR_REFERENCE_SPACE_TYPE_UNBOUNDED_ANDROID: return OXR_SPACE_TYPE_REFERENCE_UNBOUNDED_ANDROID;
+	case XR_REFERENCE_SPACE_TYPE_STATIONARY_EXT: return OXR_SPACE_TYPE_REFERENCE_STATIONARY_EXT;
 
 	case XR_REFERENCE_SPACE_TYPE_MAX_ENUM: return (enum oxr_space_type) - 1;
 	}
@@ -112,6 +116,7 @@ xr_ref_space_to_string(XrReferenceSpaceType space_type)
 	case XR_REFERENCE_SPACE_TYPE_UNBOUNDED_MSFT: return "XR_REFERENCE_SPACE_TYPE_UNBOUNDED_MSFT";
 	case XR_REFERENCE_SPACE_TYPE_COMBINED_EYE_VARJO: return "XR_REFERENCE_SPACE_TYPE_COMBINED_EYE_VARJO";
 	case XR_REFERENCE_SPACE_TYPE_UNBOUNDED_ANDROID: return "XR_REFERENCE_SPACE_TYPE_UNBOUNDED_ANDROID";
+	case XR_REFERENCE_SPACE_TYPE_STATIONARY_EXT: return "XR_REFERENCE_SPACE_TYPE_STATIONARY_EXT";
 	case XR_REFERENCE_SPACE_TYPE_MAX_ENUM: return "XR_REFERENCE_SPACE_TYPE_MAX_ENUM";
 	default: return "UNKNOWN REFERENCE SPACE";
 	}
@@ -131,6 +136,7 @@ oxr_ref_space_to_xrt(enum oxr_space_type space_type)
 	case OXR_SPACE_TYPE_REFERENCE_COMBINED_EYE_VARJO: return XRT_SPACE_REFERENCE_TYPE_INVALID;
 	case OXR_SPACE_TYPE_REFERENCE_LOCALIZATION_MAP_ML: return XRT_SPACE_REFERENCE_TYPE_INVALID;
 	case OXR_SPACE_TYPE_REFERENCE_UNBOUNDED_ANDROID: return XRT_SPACE_REFERENCE_TYPE_INVALID;
+	case OXR_SPACE_TYPE_REFERENCE_STATIONARY_EXT: return XRT_SPACE_REFERENCE_TYPE_INVALID;
 	case OXR_SPACE_TYPE_ACTION: return XRT_SPACE_REFERENCE_TYPE_INVALID;
 	case OXR_SPACE_TYPE_XDEV_POSE: return XRT_SPACE_REFERENCE_TYPE_INVALID;
 	}
@@ -155,6 +161,7 @@ xr_ref_space_to_xrt(XrReferenceSpaceType space_type)
 	case XR_REFERENCE_SPACE_TYPE_STAGE: return XRT_SPACE_REFERENCE_TYPE_STAGE;
 	case XR_REFERENCE_SPACE_TYPE_UNBOUNDED_MSFT: return XRT_SPACE_REFERENCE_TYPE_UNBOUNDED;
 
+	case XR_REFERENCE_SPACE_TYPE_STATIONARY_EXT: return XRT_SPACE_REFERENCE_TYPE_INVALID;
 	case XR_REFERENCE_SPACE_TYPE_COMBINED_EYE_VARJO: return XRT_SPACE_REFERENCE_TYPE_INVALID;
 	case XR_REFERENCE_SPACE_TYPE_LOCALIZATION_MAP_ML: return XRT_SPACE_REFERENCE_TYPE_INVALID;
 	case XR_REFERENCE_SPACE_TYPE_UNBOUNDED_ANDROID: return XRT_SPACE_REFERENCE_TYPE_INVALID;
@@ -202,6 +209,33 @@ xrt_form_factor_to_xr(enum xrt_form_factor form_factor)
  * IO things.
  *
  */
+
+static inline const char *
+xr_action_type_to_str(XrActionType type)
+{
+	// clang-format off
+	switch (type) {
+#define PRINT(name, value) \
+	case name: return #name;
+	XR_LIST_ENUM_XrActionType(PRINT)
+#undef PRINT
+	default: return "XR_ACTION_TYPE_UNKNOWN";
+	}
+	// clang-format on
+}
+
+static inline const char *
+xr_action_type_to_short_str(XrActionType type)
+{
+	switch (type) {
+	case XR_ACTION_TYPE_BOOLEAN_INPUT: return "BOOLEAN";
+	case XR_ACTION_TYPE_FLOAT_INPUT: return "FLOAT";
+	case XR_ACTION_TYPE_VECTOR2F_INPUT: return "VECTOR2";
+	case XR_ACTION_TYPE_POSE_INPUT: return "POSE";
+	case XR_ACTION_TYPE_VIBRATION_OUTPUT: return "VIBRATION";
+	default: return "UNKNOWN";
+	}
+}
 
 static inline const char *
 xrt_input_type_to_str(enum xrt_input_type type)
@@ -295,6 +329,80 @@ xrt_hand_tracking_data_source_to_xr(enum xrt_input_name ht_input_name)
 	case XRT_INPUT_HT_CONFORMING_RIGHT: return XR_HAND_TRACKING_DATA_SOURCE_CONTROLLER_EXT;
 	default: assert(false); return XR_HAND_TRACKING_DATA_SOURCE_MAX_ENUM_EXT;
 	}
+}
+
+
+/*
+ *
+ * Swapchain
+ *
+ */
+
+static inline enum xrt_swapchain_usage_bits
+xr_swapchain_usage_to_xrt(XrSwapchainUsageFlags xr_usage)
+{
+	enum xrt_swapchain_usage_bits usage = 0;
+
+	if ((xr_usage & XR_SWAPCHAIN_USAGE_COLOR_ATTACHMENT_BIT) != 0) {
+		usage |= XRT_SWAPCHAIN_USAGE_COLOR;
+	}
+	if ((xr_usage & XR_SWAPCHAIN_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT) != 0) {
+		usage |= XRT_SWAPCHAIN_USAGE_DEPTH_STENCIL;
+	}
+	if ((xr_usage & XR_SWAPCHAIN_USAGE_UNORDERED_ACCESS_BIT) != 0) {
+		usage |= XRT_SWAPCHAIN_USAGE_UNORDERED_ACCESS;
+	}
+	if ((xr_usage & XR_SWAPCHAIN_USAGE_TRANSFER_SRC_BIT) != 0) {
+		usage |= XRT_SWAPCHAIN_USAGE_TRANSFER_SRC;
+	}
+	if ((xr_usage & XR_SWAPCHAIN_USAGE_TRANSFER_DST_BIT) != 0) {
+		usage |= XRT_SWAPCHAIN_USAGE_TRANSFER_DST;
+	}
+	if ((xr_usage & XR_SWAPCHAIN_USAGE_SAMPLED_BIT) != 0) {
+		usage |= XRT_SWAPCHAIN_USAGE_SAMPLED;
+	}
+	if ((xr_usage & XR_SWAPCHAIN_USAGE_MUTABLE_FORMAT_BIT) != 0) {
+		usage |= XRT_SWAPCHAIN_USAGE_MUTABLE_FORMAT;
+	}
+	// aliased to XR_SWAPCHAIN_USAGE_INPUT_ATTACHMENT_BIT_MND
+	if ((xr_usage & XR_SWAPCHAIN_USAGE_INPUT_ATTACHMENT_BIT_KHR) != 0) {
+		usage |= XRT_SWAPCHAIN_USAGE_INPUT_ATTACHMENT;
+	}
+
+	return usage;
+}
+
+static inline XrSwapchainUsageFlags
+xrt_swapchain_usage_to_xr(enum xrt_swapchain_usage_bits bits)
+{
+	XrSwapchainUsageFlags xr = 0;
+
+	if ((bits & XRT_SWAPCHAIN_USAGE_COLOR) != 0) {
+		xr |= XR_SWAPCHAIN_USAGE_COLOR_ATTACHMENT_BIT;
+	}
+	if ((bits & XRT_SWAPCHAIN_USAGE_DEPTH_STENCIL) != 0) {
+		xr |= XR_SWAPCHAIN_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT;
+	}
+	if ((bits & XRT_SWAPCHAIN_USAGE_UNORDERED_ACCESS) != 0) {
+		xr |= XR_SWAPCHAIN_USAGE_UNORDERED_ACCESS_BIT;
+	}
+	if ((bits & XRT_SWAPCHAIN_USAGE_TRANSFER_SRC) != 0) {
+		xr |= XR_SWAPCHAIN_USAGE_TRANSFER_SRC_BIT;
+	}
+	if ((bits & XRT_SWAPCHAIN_USAGE_TRANSFER_DST) != 0) {
+		xr |= XR_SWAPCHAIN_USAGE_TRANSFER_DST_BIT;
+	}
+	if ((bits & XRT_SWAPCHAIN_USAGE_SAMPLED) != 0) {
+		xr |= XR_SWAPCHAIN_USAGE_SAMPLED_BIT;
+	}
+	if ((bits & XRT_SWAPCHAIN_USAGE_MUTABLE_FORMAT) != 0) {
+		xr |= XR_SWAPCHAIN_USAGE_MUTABLE_FORMAT_BIT;
+	}
+	if ((bits & XRT_SWAPCHAIN_USAGE_INPUT_ATTACHMENT) != 0) {
+		xr |= XR_SWAPCHAIN_USAGE_INPUT_ATTACHMENT_BIT_KHR;
+	}
+
+	return xr;
 }
 
 

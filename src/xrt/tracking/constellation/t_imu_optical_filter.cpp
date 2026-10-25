@@ -371,13 +371,38 @@ t_imu_optical_filter_get_relation(t_imu_optical_filter *f, int64_t timestamp_ns,
 	int flags = XRT_SPACE_RELATION_ORIENTATION_VALID_BIT | XRT_SPACE_RELATION_ORIENTATION_TRACKED_BIT |
 	            XRT_SPACE_RELATION_ANGULAR_VELOCITY_VALID_BIT;
 	const int64_t since_optical = timestamp_ns - f->last_accepted_ns;
-	if (since_optical <= f->params.position_valid_ns) {
+	const bool fresh_imu = !f->imu.empty() && timestamp_ns - f->imu.back().t <= f->params.max_prediction_ns;
+	if (!fresh_imu) {
+		flags = XRT_SPACE_RELATION_ORIENTATION_VALID_BIT;
+	}
+	if (fresh_imu && since_optical >= 0 && since_optical <= f->params.position_valid_ns) {
 		flags |= XRT_SPACE_RELATION_POSITION_VALID_BIT | XRT_SPACE_RELATION_LINEAR_VELOCITY_VALID_BIT;
 	}
-	if (since_optical <= f->params.position_tracked_ns) {
+	if (fresh_imu && since_optical >= 0 && since_optical <= f->params.position_tracked_ns &&
+	    since_optical <= f->params.position_valid_ns) {
 		flags |= XRT_SPACE_RELATION_POSITION_TRACKED_BIT;
 	}
 	out->relation_flags = (xrt_space_relation_flags)flags;
+	return true;
+}
+
+extern "C" bool
+t_imu_optical_filter_get_relation_with_fallback(t_imu_optical_filter *f,
+                                                int64_t timestamp_ns,
+                                                int64_t position_valid_ns,
+                                                xrt_space_relation *out)
+{
+	if (!t_imu_optical_filter_get_relation(f, timestamp_ns, out)) {
+		return false;
+	}
+	const int64_t age = timestamp_ns - f->last_accepted_ns;
+	const int64_t limit = std::min(position_valid_ns, int64_t{1'000'000'000});
+	if (!f->imu.empty() && timestamp_ns - f->imu.back().t <= f->params.max_prediction_ns && age >= 0 &&
+	    age <= limit) {
+		out->relation_flags =
+		    (xrt_space_relation_flags)(out->relation_flags | XRT_SPACE_RELATION_POSITION_VALID_BIT |
+		                               XRT_SPACE_RELATION_LINEAR_VELOCITY_VALID_BIT);
+	}
 	return true;
 }
 
@@ -385,6 +410,8 @@ extern "C" void
 t_imu_optical_filter_get_stats(const t_imu_optical_filter *f, t_imu_optical_filter_stats *out)
 {
 	*out = f->stats;
+	out->last_imu_ns = f->imu.empty() ? 0 : f->imu.back().t;
+	out->last_accepted_pose_ns = f->last_accepted_ns;
 	out->gyro_bias_rad_s = {(float)f->state.bg.x(), (float)f->state.bg.y(), (float)f->state.bg.z()};
 	out->accel_bias_m_s2 = {(float)f->state.ba.x(), (float)f->state.ba.y(), (float)f->state.ba.z()};
 }

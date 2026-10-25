@@ -553,7 +553,6 @@
 			"type": "tracked_hmd",
 			"steamvr_controllertype": "vive_pro",
 			"monado_device": "XRT_DEVICE_VIVE_PRO",
-			"extended_by": ["ext/palm_pose", "grip_surface", "ext/hand_interaction_poses"],
 			"subaction_paths": [
 				"/user/head"
 			],
@@ -563,7 +562,7 @@
 					"localized_name": "System",
 					"components": ["click"],
 					"monado_bindings": {
-						"click": "XRT_INPUT_VIVEPRO_SYSTEM_CLICK"
+						"click": "XRT_INPUT_VIVE_PRO_SYSTEM_CLICK"
 					}
 				},
 				"/input/volume_up": {
@@ -571,7 +570,7 @@
 					"localized_name": "Volume Up",
 					"components": ["click"],
 					"monado_bindings": {
-						"click": "XRT_INPUT_VIVEPRO_VOLUP_CLICK"
+						"click": "XRT_INPUT_VIVE_PRO_VOLUP_CLICK"
 					}
 				},
 				"/input/volume_down": {
@@ -579,7 +578,7 @@
 					"localized_name": "Volume Down",
 					"components": ["click"],
 					"monado_bindings": {
-						"click": "XRT_INPUT_VIVEPRO_VOLDN_CLICK"
+						"click": "XRT_INPUT_VIVE_PRO_VOLDN_CLICK"
 					}
 				},
 				"/input/mute_mic": {
@@ -587,7 +586,7 @@
 					"localized_name": "Mute Microphone",
 					"components": ["click"],
 					"monado_bindings": {
-						"click": "XRT_INPUT_VIVEPRO_MUTE_MIC_CLICK"
+						"click": "XRT_INPUT_VIVE_PRO_MUTE_MIC_CLICK"
 					}
 				}
 			}
@@ -2336,10 +2335,9 @@
 						"value": "XRT_INPUT_FLIPVR_TRIGGER_VALUE"
 					}
 				},
-				"/input/grip": {
+				"/input/squeeze": {
 					"type": "trigger",
-					"localized_name": "Grip",
-					"steamvr_path": "/input/grip",
+					"localized_name": "Squeeze",
 					"components": ["value","click"],
 					"monado_bindings": {
 						"value": "XRT_INPUT_FLIPVR_SQUEEZE_VALUE",

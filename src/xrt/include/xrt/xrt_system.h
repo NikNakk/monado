@@ -16,6 +16,7 @@
 #include "xrt/xrt_device.h"
 #include "xrt/xrt_body_tracker.h"
 #include "xrt/xrt_hand_tracker.h"
+#include "xrt/xrt_io_cache.h"
 #include "xrt/xrt_limits.h"
 
 #ifdef __cplusplus
@@ -24,6 +25,7 @@ extern "C" {
 
 struct xrt_instance;
 struct xrt_system_devices;
+struct xrt_space_overseer;
 struct xrt_session;
 struct xrt_compositor_native;
 struct xrt_session_info;
@@ -346,6 +348,17 @@ struct xrt_system_devices
 	                                    struct xrt_hand_tracker **out_xht);
 
 	/*!
+	 * Create a @ref xrt_io_cache from this system devices object.
+	 *
+	 * @param xsysd   Pointer to self.
+	 * @param xso     Space overseer used when creating input spaces.
+	 * @param out_xic Created input/output cache.
+	 */
+	xrt_result_t (*create_io_cache)(struct xrt_system_devices *xsysd,
+	                                struct xrt_space_overseer *xso,
+	                                struct xrt_io_cache **out_xic);
+
+	/*!
 	 * Increment the usage count of a feature.
 	 * When the feature is used for the first time, then the feature will be begun.
 	 *
@@ -410,6 +423,19 @@ xrt_system_devices_create_hand_tracker(struct xrt_system_devices *xsysd,
                                        struct xrt_hand_tracker **out_xht)
 {
 	return xsysd->create_hand_tracker(xsysd, info, out_xht);
+}
+
+/*!
+ * @copydoc xrt_system_devices::create_io_cache
+ *
+ * @public @memberof xrt_system_devices
+ */
+XRT_NONNULL_ALL static inline xrt_result_t
+xrt_system_devices_create_io_cache(struct xrt_system_devices *xsysd,
+                                   struct xrt_space_overseer *xso,
+                                   struct xrt_io_cache **out_xic)
+{
+	return xsysd->create_io_cache(xsysd, xso, out_xic);
 }
 
 /*!

@@ -15,6 +15,13 @@ add_library(
 	actions/oxr_api_action.h
 	actions/oxr_binding.c
 	actions/oxr_binding.h
+	actions/oxr_binding_profile.c
+	actions/oxr_binding_profile.h
+	actions/oxr_binding_point_store.c
+	actions/oxr_binding_point_store.h
+	actions/oxr_binding_point.h
+	actions/oxr_binding_registry.c
+	actions/oxr_binding_registry.h
 	actions/oxr_dpad_state.c
 	actions/oxr_dpad_state.h
 	actions/oxr_get_state.c
@@ -29,24 +36,39 @@ add_library(
 	actions/oxr_instance_action_context.h
 	actions/oxr_pair_hashset.c
 	actions/oxr_pair_hashset.h
+	actions/oxr_priority_group_cache.c
+	actions/oxr_priority_group_cache.h
+	actions/oxr_resolver_for_bindings.c
+	actions/oxr_resolver_for_bindings.h
+	actions/oxr_resolver_for_profiles.c
+	actions/oxr_resolver_for_profiles.h
+	actions/oxr_rebinding_profile.c
+	actions/oxr_rebinding_profile.h
 	actions/oxr_instance_path_cache.c
 	actions/oxr_instance_path_cache.h
-	actions/oxr_interaction_profile_array.c
-	actions/oxr_interaction_profile_array.h
+	actions/oxr_io_cache.c
+	actions/oxr_io_cache.h
 	actions/oxr_session_action_context.c
 	actions/oxr_session_action_context.h
 	actions/oxr_session_attached_actions.c
 	actions/oxr_session_attached_actions.h
 	actions/oxr_set_haptic.c
 	actions/oxr_set_haptic.h
+	actions/oxr_subaction_store.c
+	actions/oxr_subaction_store.h
 	actions/oxr_subaction.c
 	actions/oxr_subaction.h
+	actions/oxr_suggested_profile.c
+	actions/oxr_suggested_profile.h
+	actions/oxr_suggested_profile_array.c
+	actions/oxr_suggested_profile_array.h
 	common/oxr_defines.h
 	common/oxr_forward_declarations.h
 	common/oxr_handle_array.c
 	common/oxr_handle_array.h
 	common/oxr_handle_base.c
 	common/oxr_handle_base.h
+	common/oxr_handle_cast.h
 	common/oxr_refcounted.h
 	path/oxr_path_store.c
 	path/oxr_path_store.h

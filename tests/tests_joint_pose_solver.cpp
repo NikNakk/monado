@@ -673,3 +673,104 @@ TEST_CASE("Joint solver reproduces frozen Linux regression inputs")
 		CHECK_FALSE(stereo_bootstrap(cams, ring.model, StereoBootstrapParams{}, result));
 	}
 }
+
+namespace {
+
+//! Camera @p keep alone, with only @p k of the ring's blobs plus @p distractors stray blobs.
+std::vector<std::vector<t_blob>>
+sparse_camera(std::vector<std::vector<t_blob>> blobs, size_t keep, size_t k, int distractors, std::mt19937 &rng)
+{
+	blobs = only_camera(std::move(blobs), keep);
+	std::shuffle(blobs[keep].begin(), blobs[keep].end(), rng);
+	if (blobs[keep].size() > k) {
+		blobs[keep].resize(k);
+	}
+	std::uniform_real_distribution<double> anywhere(0.0, 500.0);
+	for (int i = 0; i < distractors; i++) {
+		t_blob b{};
+		b.center = xrt_vec2{(float)anywhere(rng), (float)anywhere(rng)};
+		blobs[keep].push_back(b);
+	}
+	return blobs;
+}
+
+xrt_vec3
+offset_position(const xrt_pose &truth, double metres, std::mt19937 &rng)
+{
+	std::normal_distribution<double> n(0.0, 1.0);
+	Eigen::Vector3d d = Eigen::Vector3d(n(rng), n(rng), n(rng)).normalized() * metres;
+	Eigen::Vector3d p = pos_of(truth) + d;
+	return xrt_vec3{(float)p.x(), (float)p.y(), (float)p.z()};
+}
+
+} // namespace
+
+TEST_CASE("Prior re-acquisition finds a sparsely seen ring near its prior")
+{
+	Ring ring;
+	Rig rig;
+	std::mt19937 rng(53);
+
+	int trials = 0, found = 0, oriented_found = 0, over_2cm = 0;
+	for (int i = 0; i < 80; i++) {
+		CAPTURE(i);
+		xrt_pose truth = random_pose(rng, 0.0);
+		size_t camera = (size_t)i % rig.cam_poses.size();
+		size_t k = 3 + (size_t)i % 2; // three or four of the ring's LEDs
+		auto full = render(rig, ring, truth, 0.2, 0, rng);
+		if (full[camera].size() < k) {
+			continue;
+		}
+		auto blobs = sparse_camera(full, camera, k, 2, rng);
+		auto all = cameras_for(rig, blobs);
+		std::vector<JointSolveCamera> cams{all[camera]};
+		trials++;
+
+		xrt_quat orientation = perturbed_orientation(truth, 0.5, rng);
+		OrientedBootstrapResult oriented;
+		oriented_found += oriented_bootstrap(cams, ring.model, orientation, OrientedBootstrapParams{}, oriented);
+
+		OrientedBootstrapResult result;
+		if (!prior_reacquire(cams, ring.model, orientation, offset_position(truth, 0.04, rng),
+		                     PriorReacquireParams{}, result)) {
+			continue;
+		}
+		found++;
+		CAPTURE(result.inliers, result.hypotheses, result.refined.matches, result.refined.rms_px);
+		// One camera and three or four LEDs constrain depth weakly.
+		double error = (pos_of(result.refined.Tcv_world_device) - pos_of(truth)).norm();
+		CHECK(error < 0.04);
+		over_2cm += error > 0.02 ? 1 : 0;
+	}
+	INFO("found " << found << " of " << trials << ", oriented bootstrap " << oriented_found << ", over 2 cm "
+	              << over_2cm);
+	CHECK(over_2cm * 10 <= found);
+	REQUIRE(trials >= 40);
+	CHECK(oriented_found == 0);
+	CHECK(found >= trials * 6 / 10);
+}
+
+TEST_CASE("Prior re-acquisition stays within its search radius")
+{
+	Ring ring;
+	Rig rig;
+	std::mt19937 rng(59);
+
+	int accepted = 0, trials = 0;
+	for (int i = 0; i < 40; i++) {
+		xrt_pose truth = random_pose(rng, 0.0);
+		auto cams = cameras_for(rig, render(rig, ring, truth, 0.2, 3, rng));
+		trials++;
+		OrientedBootstrapResult result;
+		// A prior half a metre away: the ring is well seen, but not where the device was.
+		if (prior_reacquire(cams, ring.model, perturbed_orientation(truth, 0.5, rng),
+		                    offset_position(truth, 0.5, rng), PriorReacquireParams{}, result)) {
+			accepted++;
+		}
+	}
+	// A wrong pose near the prior can fit two or three blobs: rare, and the tracker trusts a prior re-acquisition
+	// only once consecutive exposures agree.
+	INFO("accepted " << accepted << " of " << trials);
+	CHECK(trials == 40);
+	CHECK(accepted <= 2);
+}

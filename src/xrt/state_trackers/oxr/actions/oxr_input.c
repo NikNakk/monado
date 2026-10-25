@@ -20,13 +20,19 @@
 #include "math/m_vec2.h"
 
 #include "oxr_input.h"
+#include "oxr_resolver_for_bindings.h"
 #include "oxr_binding.h"
+#include "oxr_binding_registry.h"
 #include "oxr_pair_hashset.h"
+#include "oxr_priority_group_cache.h"
 #include "oxr_subaction.h"
 #include "oxr_dpad_state.h"
 #include "oxr_input_transform.h"
+#include "oxr_instance_action_context.h"
 #include "oxr_generated_bindings.h"
 #include "oxr_handle_base.h"
+#include "oxr_suggested_profile_array.h"
+#include "oxr_session_action_context.h"
 
 #include "../oxr_objects.h"
 #include "../oxr_logger.h"
@@ -50,9 +56,9 @@
 
 struct oxr_profiles_per_subaction
 {
-#define PROFILE_MEMBER(X) struct oxr_interaction_profile *X;
-	OXR_FOR_EACH_VALID_SUBACTION_PATH(PROFILE_MEMBER)
-#undef PROFILE_MEMBER
+#define INFO_MEMBER(X) struct oxr_profile_resolver_info X;
+	OXR_FOR_EACH_VALID_SUBACTION_PATH(INFO_MEMBER)
+#undef INFO_MEMBER
 };
 
 
@@ -61,40 +67,6 @@ struct oxr_profiles_per_subaction
  * Helpers
  *
  */
-
-static void
-print_profile_to_slog(struct oxr_sink_logger *slog,
-                      const struct oxr_path_store *store,
-                      const struct oxr_interaction_profile *profile,
-                      const char *point)
-{
-	if (!profile) {
-		oxr_slog(slog, "\n\t%s: (null)", point);
-		return;
-	}
-
-	const char *str = NULL;
-	size_t length = 0;
-
-	oxr_path_store_get_string(store, profile->path, &str, &length);
-	oxr_slog(slog, "\n\t%s: %s '%s'", point, str, profile->localized_name);
-}
-
-static void
-print_profiles(struct oxr_logger *log,
-               const struct oxr_path_store *store,
-               const struct oxr_profiles_per_subaction *profiles)
-{
-	struct oxr_sink_logger slog = {0};
-
-	oxr_slog(&slog, "Profiles:");
-
-#define PRINT_PROFILE(X) print_profile_to_slog(&slog, store, profiles->X, #X);
-	OXR_FOR_EACH_VALID_SUBACTION_PATH(PRINT_PROFILE)
-#undef PRINT_PROFILE
-
-	oxr_log_slog(log, &slog);
-}
 
 /*!
  * Given an Action Set handle, return the @ref oxr_action_set and the
@@ -132,8 +104,7 @@ oxr_action_cache_update(struct oxr_logger *log,
                         struct oxr_action_cache *cache,
                         int64_t time,
                         struct oxr_subaction_paths *subaction_path,
-                        bool select,
-                        const XrActiveActionSetPrioritiesEXT *active_priorities);
+                        bool select);
 
 static void
 oxr_action_attachment_update(struct oxr_logger *log,
@@ -142,19 +113,17 @@ oxr_action_attachment_update(struct oxr_logger *log,
                              const XrActiveActionSet *actionSets,
                              struct oxr_action_attachment *act_attached,
                              int64_t time,
-                             struct oxr_subaction_paths subaction_paths,
-                             const XrActiveActionSetPrioritiesEXT *active_priorities);
+                             struct oxr_subaction_paths subaction_paths);
 
 static void
 oxr_action_bind_io(struct oxr_logger *log,
                    struct oxr_sink_logger *slog,
-                   const struct oxr_path_store *store,
-                   const struct oxr_roles *roles,
-                   const struct oxr_action_ref *act_ref,
-                   const uint32_t act_set_key,
+                   const struct oxr_session_action_context *sess_context,
+                   const struct oxr_profile_resolver_info *info,
+                   const struct xrt_io_cache_device *dev,
+                   XrPath subaction_path,
                    struct oxr_action_cache *cache,
-                   struct oxr_interaction_profile *profile,
-                   enum oxr_subaction_path subaction_path);
+                   struct oxr_action_attachment *act_attached);
 
 /*!
  * Helper function to combine @ref oxr_subaction_paths structs, but skipping
@@ -188,6 +157,27 @@ oxr_subaction_paths_accumulate(struct oxr_subaction_paths *subaction_paths,
 	subaction_paths->any |= new_subaction_paths->any;
 	oxr_subaction_paths_accumulate_except_any(subaction_paths, new_subaction_paths);
 }
+
+static void
+reset_last_sync_priorities(struct oxr_session_action_context *action_context)
+{
+	for (size_t i = 0; i < action_context->action_set_attachment_count; i++) {
+		struct oxr_action_set_attachment *act_set_attached = &action_context->act_set_attachments[i];
+		act_set_attached->last_sync_priority = act_set_attached->act_set_ref->priority;
+	}
+}
+
+static void
+reset_inactive_sync_priority_state(struct oxr_session_action_context *action_context)
+{
+	oxr_priority_group_cache_zero_priorities(&action_context->priority_group_cache);
+	reset_last_sync_priorities(action_context);
+
+	for (size_t i = 0; i < action_context->action_set_attachment_count; i++) {
+		U_ZERO(&action_context->act_set_attachments[i].requested_subaction_paths);
+	}
+}
+
 
 /*
  *
@@ -296,6 +286,7 @@ oxr_action_set_attachment_init(struct oxr_logger *log,
 	act_set_attached->sess_context = action_context;
 	act_set_attached->act_set_key = act_set_ref->act_set_key; // Copy this for efficiency.
 	act_set_attached->act_set_ref = act_set_ref;
+	act_set_attached->last_sync_priority = act_set_ref->priority;
 
 	int h_ret = u_hashmap_int_insert(                //
 	    action_context->act_sets_attachments_by_key, //
@@ -555,603 +546,104 @@ oxr_action_get_pose_input(struct oxr_session *sess,
 	return XR_SUCCESS;
 }
 
-
-/*
+/*!
+ * Look up the cache device entry for a role slot, where @p index is one of the
+ * @ref xrt_io_cache_info role indices (left, right, gamepad, head, eyes).
  *
- * Not so hack functions.
- *
+ * Every top-level role is resolved purely through the @ref xrt_io_cache; returns
+ * NULL when the role has no assigned device.
  */
-
-static bool
-find_xdev_name_from_pairs(const struct xrt_device *xdev,
-                          const struct xrt_binding_profile *xbp,
-                          enum xrt_input_name from_name,
-                          enum xrt_input_name *out_name)
+static const struct xrt_io_cache_device *
+binding_device_from_cache(const struct oxr_io_cache *io_cache, int32_t index)
 {
-	if (from_name == 0) {
-		*out_name = 0;
-		return true; // Not asking for anything, just keep going.
+	if (index < 0 || index >= (int32_t)io_cache->info.device_count) {
+		return NULL;
 	}
 
-	/*
-	 * For asymmetrical devices like PS Sense being re-bound to a symmetrical
-	 * "device" like simple controller can be problemantic as depending on
-	 * which hand it is menu is bound to different inputs. Instead of making
-	 * the driver have two completely unique binding mappings per hand, we
-	 * instead loop over all pairs finding the first match. In other words
-	 * this means there can be multiple of the same 'from' value in the
-	 * array of input pairs.
-	 */
-	for (size_t i = 0; i < xbp->input_count; i++) {
-		if (from_name != xbp->inputs[i].from) {
-			continue;
-		}
-
-		// What is the name on the xdev?
-		enum xrt_input_name xdev_name = xbp->inputs[i].device;
-
-		// See if we can't find it.
-		for (uint32_t k = 0; k < xdev->input_count; k++) {
-			if (xdev->inputs[k].name == xdev_name) {
-				*out_name = xdev_name;
-				return true;
-			}
-		}
-	}
-
-	return false;
-}
-
-static bool
-do_inputs(struct oxr_binding *binding_point,
-          struct xrt_device *xdev,
-          struct xrt_binding_profile *xbp,
-          XrPath matched_path,
-          struct oxr_action_input inputs[OXR_MAX_BINDINGS_PER_ACTION],
-          uint32_t *input_count)
-{
-	enum xrt_input_name name = 0;
-	enum xrt_input_name dpad_activate_name = 0;
-
-	if (xbp != NULL) {
-		bool t1 = find_xdev_name_from_pairs(xdev, xbp, binding_point->input, &name);
-		bool t2 = find_xdev_name_from_pairs(xdev, xbp, binding_point->dpad_activate, &dpad_activate_name);
-
-		// We couldn't find the needed inputs on the device.
-		if (!t1 || !t2) {
-			return false;
-		}
-	} else {
-		name = binding_point->input;
-		dpad_activate_name = binding_point->dpad_activate;
-	}
-
-	struct xrt_input *input = NULL;
-	struct xrt_input *dpad_activate_input = NULL;
-
-	// Early out if there is no such input.
-	if (!oxr_xdev_find_input(xdev, name, &input)) {
-		return false;
-	}
-
-	// Check this before allocating an input.
-	if (dpad_activate_name != 0) {
-		if (!oxr_xdev_find_input(xdev, dpad_activate_name, &dpad_activate_input)) {
-			return false;
-		}
-	}
-
-	uint32_t index = (*input_count)++;
-	inputs[index].input = input;
-	inputs[index].xdev = xdev;
-	inputs[index].bound_path = matched_path;
-	if (dpad_activate_input != NULL) {
-		inputs[index].dpad_activate_name = dpad_activate_name;
-		inputs[index].dpad_activate = dpad_activate_input;
-	}
-
-	return true;
-}
-
-static bool
-do_outputs(struct oxr_binding *binding_point,
-           struct xrt_device *xdev,
-           struct xrt_binding_profile *xbp,
-           XrPath matched_path,
-           struct oxr_action_output outputs[OXR_MAX_BINDINGS_PER_ACTION],
-           uint32_t *output_count)
-{
-	enum xrt_output_name name = 0;
-	if (xbp == NULL) {
-		name = binding_point->output;
-	} else {
-		for (size_t i = 0; i < xbp->output_count; i++) {
-			if (binding_point->output != xbp->outputs[i].from) {
-				continue;
-			}
-
-			// We have found a device mapping.
-			name = xbp->outputs[i].device;
-			break;
-		}
-
-		// Didn't find a mapping.
-		if (name == 0) {
-			return false;
-		}
-	}
-
-	struct xrt_output *output = NULL;
-	if (oxr_xdev_find_output(xdev, name, &output)) {
-		uint32_t index = (*output_count)++;
-		outputs[index].name = name;
-		outputs[index].xdev = xdev;
-		outputs[index].bound_path = matched_path;
-		return true;
-	}
-
-	return false;
+	return &io_cache->info.devices[index];
 }
 
 /*!
- * Delegate to @ref do_outputs or @ref do_inputs depending on whether the action
- * is output or input.
+ * Every top-level role (left, right, gamepad, head, eyes) is looked up in the
+ * io cache via the matching @ref xrt_io_cache_info role index.
  */
-static bool
-do_io_bindings(struct oxr_binding *binding_point,
-               const struct oxr_action_ref *act_ref,
-               struct xrt_device *xdev,
-               struct xrt_binding_profile *xbp,
-               XrPath matched_path,
-               struct oxr_action_input inputs[OXR_MAX_BINDINGS_PER_ACTION],
-               uint32_t *input_count,
-               struct oxr_action_output outputs[OXR_MAX_BINDINGS_PER_ACTION],
-               uint32_t *output_count)
-{
-	if (act_ref->action_type == XR_ACTION_TYPE_VIBRATION_OUTPUT) {
-		return do_outputs( //
-		    binding_point, //
-		    xdev,          //
-		    xbp,           //
-		    matched_path,  //
-		    outputs,       //
-		    output_count); //
-	}
-	return do_inputs(  //
-	    binding_point, //
-	    xdev,          //
-	    xbp,           //
-	    matched_path,  //
-	    inputs,        //
-	    input_count);  //
-}
-
-
-/*
- * XR_KHR_generic_controller defines natural equivalences for the legacy
- * Oculus Touch and Valve Index profiles. Keep those mappings in common code
- * so every driver that exposes the canonical XRT device names gets the
- * standards fallback without duplicating a generic profile table.
- *
- * grip_surface prefers XRT_INPUT_GENERIC_PALM_POSE when the driver exposes a
- * calibrated palm-surface pose. A grip-pose fallback follows it so older
- * drivers remain usable; find_xdev_name_from_pairs() selects the first target
- * that the concrete device actually exposes.
- */
-static struct xrt_binding_input_pair khr_generic_index_inputs[] = {
-    {XRT_INPUT_GENERIC_PRIMARY_CLICK, XRT_INPUT_INDEX_A_CLICK},
-    {XRT_INPUT_GENERIC_SECONDARY_CLICK, XRT_INPUT_INDEX_B_CLICK},
-    {XRT_INPUT_GENERIC_THUMBSTICK_CLICK, XRT_INPUT_INDEX_THUMBSTICK_CLICK},
-    {XRT_INPUT_GENERIC_THUMBSTICK, XRT_INPUT_INDEX_THUMBSTICK},
-    {XRT_INPUT_GENERIC_SQUEEZE_VALUE, XRT_INPUT_INDEX_SQUEEZE_VALUE},
-    {XRT_INPUT_GENERIC_TRIGGER_VALUE, XRT_INPUT_INDEX_TRIGGER_VALUE},
-    {XRT_INPUT_GENERIC_GRIP_POSE, XRT_INPUT_INDEX_GRIP_POSE},
-    {XRT_INPUT_GENERIC_GRIP_SURFACE_POSE, XRT_INPUT_GENERIC_PALM_POSE},
-    {XRT_INPUT_GENERIC_GRIP_SURFACE_POSE, XRT_INPUT_INDEX_GRIP_POSE},
-    {XRT_INPUT_GENERIC_AIM_POSE, XRT_INPUT_INDEX_AIM_POSE},
-};
-
-static struct xrt_binding_output_pair khr_generic_index_outputs[] = {
-    {XRT_OUTPUT_NAME_GENERIC_VIBRATION, XRT_OUTPUT_NAME_INDEX_HAPTIC},
-};
-
-static struct xrt_binding_profile khr_generic_index_profile = {
-    .name = XRT_DEVICE_GENERIC_CONTROLLER,
-    .inputs = khr_generic_index_inputs,
-    .input_count = ARRAY_SIZE(khr_generic_index_inputs),
-    .outputs = khr_generic_index_outputs,
-    .output_count = ARRAY_SIZE(khr_generic_index_outputs),
-};
-
-static struct xrt_binding_input_pair khr_generic_touch_left_inputs[] = {
-    {XRT_INPUT_GENERIC_PRIMARY_CLICK, XRT_INPUT_TOUCH_X_CLICK},
-    {XRT_INPUT_GENERIC_SECONDARY_CLICK, XRT_INPUT_TOUCH_Y_CLICK},
-    {XRT_INPUT_GENERIC_THUMBSTICK_CLICK, XRT_INPUT_TOUCH_THUMBSTICK_CLICK},
-    {XRT_INPUT_GENERIC_THUMBSTICK, XRT_INPUT_TOUCH_THUMBSTICK},
-    {XRT_INPUT_GENERIC_SQUEEZE_VALUE, XRT_INPUT_TOUCH_SQUEEZE_VALUE},
-    {XRT_INPUT_GENERIC_TRIGGER_VALUE, XRT_INPUT_TOUCH_TRIGGER_VALUE},
-    {XRT_INPUT_GENERIC_GRIP_POSE, XRT_INPUT_TOUCH_GRIP_POSE},
-    {XRT_INPUT_GENERIC_GRIP_SURFACE_POSE, XRT_INPUT_GENERIC_PALM_POSE},
-    {XRT_INPUT_GENERIC_GRIP_SURFACE_POSE, XRT_INPUT_TOUCH_GRIP_POSE},
-    {XRT_INPUT_GENERIC_AIM_POSE, XRT_INPUT_TOUCH_AIM_POSE},
-};
-
-static struct xrt_binding_input_pair khr_generic_touch_right_inputs[] = {
-    {XRT_INPUT_GENERIC_PRIMARY_CLICK, XRT_INPUT_TOUCH_A_CLICK},
-    {XRT_INPUT_GENERIC_SECONDARY_CLICK, XRT_INPUT_TOUCH_B_CLICK},
-    {XRT_INPUT_GENERIC_THUMBSTICK_CLICK, XRT_INPUT_TOUCH_THUMBSTICK_CLICK},
-    {XRT_INPUT_GENERIC_THUMBSTICK, XRT_INPUT_TOUCH_THUMBSTICK},
-    {XRT_INPUT_GENERIC_SQUEEZE_VALUE, XRT_INPUT_TOUCH_SQUEEZE_VALUE},
-    {XRT_INPUT_GENERIC_TRIGGER_VALUE, XRT_INPUT_TOUCH_TRIGGER_VALUE},
-    {XRT_INPUT_GENERIC_GRIP_POSE, XRT_INPUT_TOUCH_GRIP_POSE},
-    {XRT_INPUT_GENERIC_GRIP_SURFACE_POSE, XRT_INPUT_GENERIC_PALM_POSE},
-    {XRT_INPUT_GENERIC_GRIP_SURFACE_POSE, XRT_INPUT_TOUCH_GRIP_POSE},
-    {XRT_INPUT_GENERIC_AIM_POSE, XRT_INPUT_TOUCH_AIM_POSE},
-};
-
-static struct xrt_binding_output_pair khr_generic_touch_outputs[] = {
-    {XRT_OUTPUT_NAME_GENERIC_VIBRATION, XRT_OUTPUT_NAME_TOUCH_HAPTIC},
-};
-
-static struct xrt_binding_profile khr_generic_touch_left_profile = {
-    .name = XRT_DEVICE_GENERIC_CONTROLLER,
-    .inputs = khr_generic_touch_left_inputs,
-    .input_count = ARRAY_SIZE(khr_generic_touch_left_inputs),
-    .outputs = khr_generic_touch_outputs,
-    .output_count = ARRAY_SIZE(khr_generic_touch_outputs),
-};
-
-static struct xrt_binding_profile khr_generic_touch_right_profile = {
-    .name = XRT_DEVICE_GENERIC_CONTROLLER,
-    .inputs = khr_generic_touch_right_inputs,
-    .input_count = ARRAY_SIZE(khr_generic_touch_right_inputs),
-    .outputs = khr_generic_touch_outputs,
-    .output_count = ARRAY_SIZE(khr_generic_touch_outputs),
-};
-
-
-static struct xrt_binding_input_pair khr_generic_touch_pro_left_inputs[] = {
-    {XRT_INPUT_GENERIC_PRIMARY_CLICK, XRT_INPUT_TOUCH_PRO_X_CLICK},
-    {XRT_INPUT_GENERIC_SECONDARY_CLICK, XRT_INPUT_TOUCH_PRO_Y_CLICK},
-    {XRT_INPUT_GENERIC_THUMBSTICK_CLICK, XRT_INPUT_TOUCH_PRO_THUMBSTICK_CLICK},
-    {XRT_INPUT_GENERIC_THUMBSTICK, XRT_INPUT_TOUCH_PRO_THUMBSTICK},
-    {XRT_INPUT_GENERIC_SQUEEZE_VALUE, XRT_INPUT_TOUCH_PRO_SQUEEZE_VALUE},
-    {XRT_INPUT_GENERIC_TRIGGER_VALUE, XRT_INPUT_TOUCH_PRO_TRIGGER_VALUE},
-    {XRT_INPUT_GENERIC_GRIP_POSE, XRT_INPUT_TOUCH_PRO_GRIP_POSE},
-    {XRT_INPUT_GENERIC_GRIP_SURFACE_POSE, XRT_INPUT_GENERIC_PALM_POSE},
-    {XRT_INPUT_GENERIC_GRIP_SURFACE_POSE, XRT_INPUT_TOUCH_PRO_GRIP_POSE},
-    {XRT_INPUT_GENERIC_AIM_POSE, XRT_INPUT_TOUCH_PRO_AIM_POSE},
-};
-
-static struct xrt_binding_input_pair khr_generic_touch_pro_right_inputs[] = {
-    {XRT_INPUT_GENERIC_PRIMARY_CLICK, XRT_INPUT_TOUCH_PRO_A_CLICK},
-    {XRT_INPUT_GENERIC_SECONDARY_CLICK, XRT_INPUT_TOUCH_PRO_B_CLICK},
-    {XRT_INPUT_GENERIC_THUMBSTICK_CLICK, XRT_INPUT_TOUCH_PRO_THUMBSTICK_CLICK},
-    {XRT_INPUT_GENERIC_THUMBSTICK, XRT_INPUT_TOUCH_PRO_THUMBSTICK},
-    {XRT_INPUT_GENERIC_SQUEEZE_VALUE, XRT_INPUT_TOUCH_PRO_SQUEEZE_VALUE},
-    {XRT_INPUT_GENERIC_TRIGGER_VALUE, XRT_INPUT_TOUCH_PRO_TRIGGER_VALUE},
-    {XRT_INPUT_GENERIC_GRIP_POSE, XRT_INPUT_TOUCH_PRO_GRIP_POSE},
-    {XRT_INPUT_GENERIC_GRIP_SURFACE_POSE, XRT_INPUT_GENERIC_PALM_POSE},
-    {XRT_INPUT_GENERIC_GRIP_SURFACE_POSE, XRT_INPUT_TOUCH_PRO_GRIP_POSE},
-    {XRT_INPUT_GENERIC_AIM_POSE, XRT_INPUT_TOUCH_PRO_AIM_POSE},
-};
-
-static struct xrt_binding_output_pair khr_generic_touch_pro_outputs[] = {
-    {XRT_OUTPUT_NAME_GENERIC_VIBRATION, XRT_OUTPUT_NAME_TOUCH_PRO_HAPTIC},
-};
-
-static struct xrt_binding_profile khr_generic_touch_pro_left_profile = {
-    .name = XRT_DEVICE_GENERIC_CONTROLLER,
-    .inputs = khr_generic_touch_pro_left_inputs,
-    .input_count = ARRAY_SIZE(khr_generic_touch_pro_left_inputs),
-    .outputs = khr_generic_touch_pro_outputs,
-    .output_count = ARRAY_SIZE(khr_generic_touch_pro_outputs),
-};
-
-static struct xrt_binding_profile khr_generic_touch_pro_right_profile = {
-    .name = XRT_DEVICE_GENERIC_CONTROLLER,
-    .inputs = khr_generic_touch_pro_right_inputs,
-    .input_count = ARRAY_SIZE(khr_generic_touch_pro_right_inputs),
-    .outputs = khr_generic_touch_pro_outputs,
-    .output_count = ARRAY_SIZE(khr_generic_touch_pro_outputs),
-};
-
-static struct xrt_binding_input_pair khr_generic_touch_plus_left_inputs[] = {
-    {XRT_INPUT_GENERIC_PRIMARY_CLICK, XRT_INPUT_TOUCH_PLUS_X_CLICK},
-    {XRT_INPUT_GENERIC_SECONDARY_CLICK, XRT_INPUT_TOUCH_PLUS_Y_CLICK},
-    {XRT_INPUT_GENERIC_THUMBSTICK_CLICK, XRT_INPUT_TOUCH_PLUS_THUMBSTICK_CLICK},
-    {XRT_INPUT_GENERIC_THUMBSTICK, XRT_INPUT_TOUCH_PLUS_THUMBSTICK},
-    {XRT_INPUT_GENERIC_SQUEEZE_VALUE, XRT_INPUT_TOUCH_PLUS_SQUEEZE_VALUE},
-    {XRT_INPUT_GENERIC_TRIGGER_VALUE, XRT_INPUT_TOUCH_PLUS_TRIGGER_VALUE},
-    {XRT_INPUT_GENERIC_GRIP_POSE, XRT_INPUT_TOUCH_PLUS_GRIP_POSE},
-    {XRT_INPUT_GENERIC_GRIP_SURFACE_POSE, XRT_INPUT_GENERIC_PALM_POSE},
-    {XRT_INPUT_GENERIC_GRIP_SURFACE_POSE, XRT_INPUT_TOUCH_PLUS_GRIP_POSE},
-    {XRT_INPUT_GENERIC_AIM_POSE, XRT_INPUT_TOUCH_PLUS_AIM_POSE},
-};
-
-static struct xrt_binding_input_pair khr_generic_touch_plus_right_inputs[] = {
-    {XRT_INPUT_GENERIC_PRIMARY_CLICK, XRT_INPUT_TOUCH_PLUS_A_CLICK},
-    {XRT_INPUT_GENERIC_SECONDARY_CLICK, XRT_INPUT_TOUCH_PLUS_B_CLICK},
-    {XRT_INPUT_GENERIC_THUMBSTICK_CLICK, XRT_INPUT_TOUCH_PLUS_THUMBSTICK_CLICK},
-    {XRT_INPUT_GENERIC_THUMBSTICK, XRT_INPUT_TOUCH_PLUS_THUMBSTICK},
-    {XRT_INPUT_GENERIC_SQUEEZE_VALUE, XRT_INPUT_TOUCH_PLUS_SQUEEZE_VALUE},
-    {XRT_INPUT_GENERIC_TRIGGER_VALUE, XRT_INPUT_TOUCH_PLUS_TRIGGER_VALUE},
-    {XRT_INPUT_GENERIC_GRIP_POSE, XRT_INPUT_TOUCH_PLUS_GRIP_POSE},
-    {XRT_INPUT_GENERIC_GRIP_SURFACE_POSE, XRT_INPUT_GENERIC_PALM_POSE},
-    {XRT_INPUT_GENERIC_GRIP_SURFACE_POSE, XRT_INPUT_TOUCH_PLUS_GRIP_POSE},
-    {XRT_INPUT_GENERIC_AIM_POSE, XRT_INPUT_TOUCH_PLUS_AIM_POSE},
-};
-
-static struct xrt_binding_output_pair khr_generic_touch_plus_outputs[] = {
-    {XRT_OUTPUT_NAME_GENERIC_VIBRATION, XRT_OUTPUT_NAME_TOUCH_PLUS_HAPTIC},
-};
-
-static struct xrt_binding_profile khr_generic_touch_plus_left_profile = {
-    .name = XRT_DEVICE_GENERIC_CONTROLLER,
-    .inputs = khr_generic_touch_plus_left_inputs,
-    .input_count = ARRAY_SIZE(khr_generic_touch_plus_left_inputs),
-    .outputs = khr_generic_touch_plus_outputs,
-    .output_count = ARRAY_SIZE(khr_generic_touch_plus_outputs),
-};
-
-static struct xrt_binding_profile khr_generic_touch_plus_right_profile = {
-    .name = XRT_DEVICE_GENERIC_CONTROLLER,
-    .inputs = khr_generic_touch_plus_right_inputs,
-    .input_count = ARRAY_SIZE(khr_generic_touch_plus_right_inputs),
-    .outputs = khr_generic_touch_plus_outputs,
-    .output_count = ARRAY_SIZE(khr_generic_touch_plus_outputs),
-};
-
-static struct xrt_binding_profile *
-get_builtin_khr_generic_binding_profile(struct xrt_device *xdev)
-{
-	switch (xdev->name) {
-	case XRT_DEVICE_INDEX_CONTROLLER: return &khr_generic_index_profile;
-	case XRT_DEVICE_TOUCH_CONTROLLER:
-	case XRT_DEVICE_TOUCH_CONTROLLER_RIFT_CV1:
-	case XRT_DEVICE_TOUCH_CONTROLLER_QUEST_1_RIFT_S:
-	case XRT_DEVICE_TOUCH_CONTROLLER_QUEST_2:
-		switch (xdev->device_type) {
-		case XRT_DEVICE_TYPE_LEFT_HAND_CONTROLLER: return &khr_generic_touch_left_profile;
-		case XRT_DEVICE_TYPE_RIGHT_HAND_CONTROLLER: return &khr_generic_touch_right_profile;
-		default: return NULL;
-		}
-	case XRT_DEVICE_TOUCH_PRO_CONTROLLER:
-		switch (xdev->device_type) {
-		case XRT_DEVICE_TYPE_LEFT_HAND_CONTROLLER: return &khr_generic_touch_pro_left_profile;
-		case XRT_DEVICE_TYPE_RIGHT_HAND_CONTROLLER: return &khr_generic_touch_pro_right_profile;
-		default: return NULL;
-		}
-	case XRT_DEVICE_TOUCH_PLUS_CONTROLLER:
-		switch (xdev->device_type) {
-		case XRT_DEVICE_TYPE_LEFT_HAND_CONTROLLER: return &khr_generic_touch_plus_left_profile;
-		case XRT_DEVICE_TYPE_RIGHT_HAND_CONTROLLER: return &khr_generic_touch_plus_right_profile;
-		default: return NULL;
-		}
-	default: return NULL;
-	}
-}
-
-static struct xrt_binding_profile *
-get_matching_binding_profile(struct oxr_interaction_profile *profile, struct xrt_device *xdev)
-{
-	for (size_t i = 0; i < xdev->binding_profile_count; i++) {
-		if (xdev->binding_profiles[i].name == profile->xname) {
-			return &xdev->binding_profiles[i];
-		}
-	}
-
-	if (profile->xname == XRT_DEVICE_GENERIC_CONTROLLER) {
-		return get_builtin_khr_generic_binding_profile(xdev);
-	}
-
-	return NULL;
-}
-
-static XrPath
-get_matched_xrpath(struct oxr_binding *b, const struct oxr_action_ref *act)
-{
-	XrPath preferred_path = XR_NULL_PATH;
-	for (uint32_t i = 0; i < b->act_key_count; i++) {
-		if (b->act_keys[i] == act->act_key) {
-			uint32_t preferred_path_index = XR_NULL_PATH;
-			preferred_path_index = b->preferred_binding_path_index[i];
-			preferred_path = b->paths[preferred_path_index];
-			break;
-		}
-	}
-	return preferred_path;
-}
+#define GET_BINDING_DEVICE(NAME, IOC) binding_device_from_cache((IOC), (IOC)->info.NAME)
 
 static void
-get_binding(struct oxr_logger *log,
-            struct oxr_sink_logger *slog,
-            const struct oxr_path_store *store,
-            const struct oxr_roles *roles,
-            const struct oxr_action_ref *act_ref,
-            struct oxr_interaction_profile *profile,
-            enum oxr_subaction_path subaction_path,
-            struct oxr_action_input inputs[OXR_MAX_BINDINGS_PER_ACTION],
-            uint32_t *input_count,
-            struct oxr_action_output outputs[OXR_MAX_BINDINGS_PER_ACTION],
-            uint32_t *output_count)
+resolve_binding_infos_from_roles(struct oxr_logger *log,
+                                 const struct oxr_session_action_context *action_context,
+                                 const struct oxr_suggested_profile_array *suggested_profiles,
+                                 const struct oxr_roles *roles,
+                                 bool debug_bindings,
+                                 struct oxr_profiles_per_subaction *out_infos)
 {
-	struct xrt_device *xdev = NULL;
-	struct oxr_binding *binding_points[OXR_MAX_BINDINGS_PER_ACTION];
-	const char *profile_str;
-	const char *user_path_str;
-	size_t length;
+	struct oxr_sink_logger slog = {0};
+	const struct oxr_io_cache *io_cache = &action_context->io_cache;
 
-	//! @todo This probably falls on its head if the application doesn't use
-	//! sub action paths.
-	switch (subaction_path) {
-#define PATH_CASE(NAME, NAMECAPS, PATH, LOCALIZED_NAME)                                                                \
-	case OXR_SUB_ACTION_PATH_##NAMECAPS:                                                                           \
-		user_path_str = PATH;                                                                                  \
-		xdev = GET_XDEV_BY_ROLE(roles, NAME);                                                                  \
-		break;
-
-		OXR_FOR_EACH_VALID_SUBACTION_PATH_DETAILED(PATH_CASE)
-#undef PATH_CASE
-
-		// Manually-coded fallback for not-really-valid /user
-	case OXR_SUB_ACTION_PATH_USER:
-		user_path_str = "/user";
-		xdev = NULL;
-		break;
-	default: break;
-	}
-
-	oxr_slog(slog, "\tFor: %s\n", user_path_str);
-
-	if (xdev == NULL) {
-		oxr_slog(slog, "\t\tNo xdev!\n");
-		return;
-	}
-
-	if (profile == NULL) {
-		oxr_slog(slog, "\t\tNo profile!\n");
-		return;
-	}
-
-	oxr_path_store_get_string(store, profile->path, &profile_str, &length);
-
-	oxr_slog(slog, "\t\tProfile: %s\n", profile_str);
-
-	/*!
-	 * Lookup device binding that matches the interactive profile, this
-	 * is used as a fallback should the device not match the interactive
-	 * profile. This allows the device to provide a mapping from one device
-	 * to itself.
-	 */
-	struct xrt_binding_profile *xbp = get_matching_binding_profile(profile, xdev);
-
-	// No point in proceeding here without either.
-	if (profile->xname != xdev->name && xbp == NULL) {
-		oxr_slog(slog, "\t\t\tProfile not for device and no xbp fallback!\n");
-		return;
-	}
-
-	size_t binding_count = 0;
-	oxr_binding_find_bindings_from_act_key( //
-	    log,                                // log
-	    profile,                            // p
-	    act_ref->act_key,                   // key
-	    ARRAY_SIZE(binding_points),         // max_binding_count
-	    binding_points,                     // out_bindings
-	    &binding_count);                    // out_binding_count
-	if (binding_count == 0) {
-		oxr_slog(slog, "\t\t\tNo bindings!\n");
-		return;
-	}
-
-	for (size_t i = 0; i < binding_count; i++) {
-		const char *str = NULL;
-		struct oxr_binding *binding_point = binding_points[i];
-
-		XrPath matched_path = get_matched_xrpath(binding_point, act_ref);
-
-		oxr_path_store_get_string(store, matched_path, &str, &length);
-		oxr_slog(slog, "\t\t\tBinding: %s\n", str);
-
-		if (binding_point->subaction_path != subaction_path) {
-			oxr_slog(slog, "\t\t\t\tRejected! (SUB PATH)\n");
-			continue;
-		}
-
-		bool found = do_io_bindings( //
-		    binding_point,           //
-		    act_ref,                 //
-		    xdev,                    //
-		    xbp,                     //
-		    matched_path,            //
-		    inputs,                  //
-		    input_count,             //
-		    outputs,                 //
-		    output_count);           //
-
-		if (found) {
-			if (xbp == NULL) {
-				oxr_slog(slog, "\t\t\t\tBound (xdev '%s'): %s!\n", xdev->str,
-				         u_str_xrt_input_name(binding_points[i]->input));
-			} else {
-				oxr_slog(slog, "\t\t\t\tBound (xbp)!\n");
-			}
-			continue;
-		}
-
-		if (xbp == NULL) {
-			oxr_slog(slog, "\t\t\t\tRejected! (NO XDEV NAME)\n");
-		} else {
-			oxr_slog(slog, "\t\t\t\tRejected! (NO XBINDING)\n");
-		}
-	}
-}
-
-static bool
-get_by_name(const struct oxr_interaction_profile_array *array,
-            const struct oxr_instance_path_cache *cache,
-            enum xrt_device_name name,
-            struct oxr_interaction_profile **out_p)
-{
-	return oxr_interaction_profile_array_find_by_device_name(array, cache, name, out_p);
-}
-
-static bool
-get_by_device(const struct oxr_interaction_profile_array *array,
-              const struct oxr_instance_path_cache *cache,
-              struct xrt_device *xdev,
-              struct oxr_interaction_profile **out_p)
-{
-	return oxr_interaction_profile_array_find_by_device(array, cache, xdev, out_p);
-}
-
-static void
-find_profiles_from_roles(const struct oxr_instance_path_cache *cache,
-                         const struct oxr_interaction_profile_array *array,
-                         const struct oxr_roles *roles,
-                         struct oxr_profiles_per_subaction *out_profiles)
-{
-#define FIND_PROFILE(X)                                                                                                \
-	if (!get_by_name(array, cache, GET_PROFILE_NAME_BY_ROLE(roles, X), &out_profiles->X)) {                        \
-		struct xrt_device *xdev = GET_XDEV_BY_ROLE(roles, X);                                                  \
-		if (xdev != NULL) {                                                                                    \
-			get_by_device(array, cache, xdev, &out_profiles->X);                                           \
+#define RESOLVE_INFO(NAME, NAME_CAPS, PATH, LOCALIZED_NAME)                                                            \
+	do {                                                                                                           \
+		const struct xrt_io_cache_device *dev = GET_BINDING_DEVICE(NAME, io_cache);                            \
+		if (dev == NULL) {                                                                                     \
+			oxr_slog(&slog, "\n\t" #NAME ": No device");                                                   \
+			break;                                                                                         \
 		}                                                                                                      \
-	}
+		oxr_slog(&slog, "\n\t" #NAME ": (%s)", u_str_xrt_device_name(dev->name));                              \
+		oxr_resolver_populate_profile(log, &slog, action_context->binding_registry, suggested_profiles,        \
+		                              io_cache, dev, GET_PROFILE_NAME_BY_ROLE(roles, NAME), &out_infos->NAME); \
+	} while (false);
+	OXR_FOR_EACH_VALID_SUBACTION_PATH_DETAILED(RESOLVE_INFO)
+#undef RESOLVE_INFO
 
-	OXR_FOR_EACH_VALID_SUBACTION_PATH(FIND_PROFILE)
-#undef FIND_PROFILE
+	if (debug_bindings) {
+		oxr_log_slog(log, &slog);
+	} else {
+		oxr_slog_cancel(&slog);
+	}
 }
 
 /*!
  * @public @memberof oxr_action_attachment
  */
-static XrResult
+static void
 oxr_action_attachment_bind(struct oxr_logger *log,
                            struct oxr_instance *inst,
                            struct oxr_action_attachment *act_attached,
-                           const struct oxr_roles *roles,
-                           const struct oxr_profiles_per_subaction *profiles)
+                           const struct oxr_profiles_per_subaction *resolver_infos)
 {
 	struct oxr_sink_logger slog = {0};
 	const struct oxr_action_ref *act_ref = act_attached->act_ref;
-	const uint32_t act_set_key = act_attached->act_set_attached->act_set_key;
 
 	// Start logging into a single buffer.
-	oxr_slog(&slog, ": Binding %s/%s\n", act_attached->act_set_attached->act_set_ref->name, act_ref->name);
+	oxr_slog(&slog, "Binding '%s/%s' %s\n",                      //
+	         act_attached->act_set_attached->act_set_ref->name,  //
+	         act_ref->name,                                      //
+	         xr_action_type_to_short_str(act_ref->action_type)); //
 
-	if (act_ref->subaction_paths.user || act_ref->subaction_paths.any) {
-#if 0
-		oxr_action_bind_io(log, &slog, sess, roles, act_ref, &act_attached->user,
-		                   user, OXR_SUB_ACTION_PATH_USER);
-#endif
+	if (act_ref->subaction_paths.user) {
+		assert(!"Unreachable");
+		oxr_slog(&slog, "\tFor: user (HOW WAS THIS ENABLED?)\n");
 	}
+
+	/*
+	 * The bare `/user` top-level path is never bound. No interaction
+	 * profile targets it and it has no binding points of its own; it is a
+	 * left over in both the spec and our code, so there is nothing to
+	 * resolve for it.
+	 *
+	 * The "any" path is not a top-level path either: it means the action
+	 * was created without specifying any subaction paths. Such an action is
+	 * bound across every concrete top-level path (left, right, head,
+	 * gamepad, eyes), which is why the BIND_SUBACTION loop below also binds
+	 * a subaction path when `any` is set.
+	 */
 
 #define BIND_SUBACTION(NAME, NAME_CAPS, PATH, LOCALIZED_NAME)                                                          \
 	if (act_ref->subaction_paths.NAME || act_ref->subaction_paths.any) {                                           \
-		oxr_action_bind_io(log, &slog, &inst->path_store, roles, act_ref, act_set_key, &act_attached->NAME,    \
-		                   profiles->NAME, OXR_SUB_ACTION_PATH_##NAME_CAPS);                                   \
+		oxr_slog(&slog, "\tFor: %s\n", #NAME);                                                                 \
+		struct oxr_session_action_context *sess_context = act_attached->act_set_attached->sess_context;        \
+		const struct xrt_io_cache_device *dev = GET_BINDING_DEVICE(NAME, &sess_context->io_cache);             \
+		oxr_action_bind_io(log, &slog, sess_context, &resolver_infos->NAME, dev, inst->path_cache.NAME,        \
+		                   &act_attached->NAME, act_attached);                                                 \
 	}
 	OXR_FOR_EACH_VALID_SUBACTION_PATH_DETAILED(BIND_SUBACTION)
 #undef BIND_SUBACTION
@@ -1190,8 +682,6 @@ oxr_action_attachment_bind(struct oxr_logger *log,
 	} else {
 		oxr_slog_cancel(&slog);
 	}
-
-	return XR_SUCCESS;
 }
 
 void
@@ -1204,9 +694,9 @@ oxr_action_cache_stop_output(struct oxr_logger *log, struct oxr_session *sess, s
 
 	for (uint32_t i = 0; i < cache->output_count; i++) {
 		struct oxr_action_output *output = &cache->outputs[i];
-		struct xrt_device *xdev = output->xdev;
 
-		xrt_result_t xret = xrt_device_set_output(xdev, output->name, &value);
+		xrt_result_t xret =
+		    xrt_io_cache_set_output(output->io_cache->xic, output->device_id, output->name, &value);
 		if (xret != XRT_SUCCESS) {
 			struct oxr_sink_logger slog = {0};
 			oxr_slog(&slog, "Failed to stop output ");
@@ -1216,40 +706,13 @@ oxr_action_cache_stop_output(struct oxr_logger *log, struct oxr_session *sess, s
 	}
 }
 
-static bool
-oxr_input_is_input_for_cache(struct oxr_action_input *action_input, struct oxr_action_cache *cache)
-{
-	for (size_t i = 0; i < cache->input_count; i++) {
-		if (action_input->bound_path == cache->inputs[i].bound_path) {
-			return true;
-		}
-	}
-	return false;
-}
-
-static bool
-oxr_input_is_bound_in_act_set(struct oxr_action_input *action_input, struct oxr_action_set_attachment *act_set_attached)
-{
-	for (size_t i = 0; i < act_set_attached->action_attachment_count; i++) {
-		struct oxr_action_attachment *act_attached = &act_set_attached->act_attachments[i];
-
-#define ACCUMULATE_PATHS(X)                                                                                            \
-	if (oxr_input_is_input_for_cache(action_input, &act_attached->X)) {                                            \
-		return true;                                                                                           \
-	}
-		OXR_FOR_EACH_SUBACTION_PATH(ACCUMULATE_PATHS)
-#undef ACCUMULATE_PATHS
-	}
-	return false;
-}
-
 static uint32_t
 oxr_get_action_set_priority(const struct oxr_action_set_ref *act_set_ref,
-                            const XrActiveActionSetPrioritiesEXT *active_priorities)
+                            const XrActiveActionSetPrioritiesEXT *activePriorities)
 {
-	if (active_priorities) {
-		for (uint32_t i = 0; i < active_priorities->actionSetPriorityCount; i++) {
-			XrActiveActionSetPriorityEXT act_set_priority = active_priorities->actionSetPriorities[i];
+	if (activePriorities) {
+		for (uint32_t i = 0; i < activePriorities->actionSetPriorityCount; i++) {
+			XrActiveActionSetPriorityEXT act_set_priority = activePriorities->actionSetPriorities[i];
 
 			struct oxr_action_set *action_set =
 			    XRT_CAST_OXR_HANDLE_TO_PTR(struct oxr_action_set *, act_set_priority.actionSet);
@@ -1263,64 +726,73 @@ oxr_get_action_set_priority(const struct oxr_action_set_ref *act_set_ref,
 	return act_set_ref->priority;
 }
 
-static bool
-oxr_input_supressed(struct oxr_session *sess,
-                    uint32_t countActionSets,
-                    const XrActiveActionSet *actionSets,
-                    struct oxr_subaction_paths *subaction_path,
-                    struct oxr_action_attachment *act_attached,
-                    struct oxr_action_input *action_input,
-                    const XrActiveActionSetPrioritiesEXT *active_priorities)
+static void
+accumulate_priority_group_cache(struct oxr_action_cache *cache, uint32_t priority)
 {
-	struct oxr_action_set_ref *act_set_ref = act_attached->act_set_attached->act_set_ref;
-	uint32_t priority = oxr_get_action_set_priority(act_set_ref, active_priorities);
-
-	// find sources that are bound to an action in a set with higher prio
-	for (uint32_t i = 0; i < countActionSets; i++) {
-		XrActionSet set = actionSets[i].actionSet;
-
-		struct oxr_action_set *other_act_set = NULL;
-		struct oxr_action_set_attachment *other_act_set_attached = NULL;
-		get_action_set_attachment(&sess->action_context, set, &other_act_set_attached, &other_act_set);
-
-		if (other_act_set_attached == NULL) {
+	for (size_t i = 0; i < cache->input_count; i++) {
+		struct oxr_action_input *input = &cache->inputs[i];
+		if (input->priority_group_state == NULL) {
 			continue;
 		}
 
-		/* skip the action set that the current action is in */
-		if (other_act_set_attached->act_set_ref == act_set_ref) {
-			continue;
-		}
-
-		/* input may be suppressed by action set with higher prio */
-		if (oxr_get_action_set_priority(other_act_set_attached->act_set_ref, active_priorities) <= priority) {
-			continue;
-		}
-
-		/* Currently updated input source with subactionpath X can be
-		 * suppressed, if input source also occurs in action set with
-		 * higher priority if
-		 * - high prio set syncs w/ ANY subactionpath or
-		 * - high prio set syncs w/ subactionpath matching this input
-		 *   subactionpath
-		 */
-		bool relevant_subactionpath = other_act_set_attached->requested_subaction_paths.any;
-
-#define ACCUMULATE_PATHS(X)                                                                                            \
-	relevant_subactionpath |= (other_act_set_attached->requested_subaction_paths.X && subaction_path->X);
-		OXR_FOR_EACH_SUBACTION_PATH(ACCUMULATE_PATHS)
-#undef ACCUMULATE_PATHS
-
-		if (!relevant_subactionpath) {
-			continue;
-		}
-
-		if (oxr_input_is_bound_in_act_set(action_input, other_act_set_attached)) {
-			return true;
+		if (priority > input->priority_group_state->highest_priority) {
+			input->priority_group_state->highest_priority = priority;
 		}
 	}
+}
 
-	return false;
+static void
+oxr_session_rebuild_priority_group_states(struct oxr_session_action_context *action_context,
+                                          uint32_t countActionSets,
+                                          const XrActiveActionSet *actionSets,
+                                          const XrActiveActionSetPrioritiesEXT *activePriorities)
+{
+	oxr_priority_group_cache_zero_priorities(&action_context->priority_group_cache);
+
+	/*
+	 * Revert every attachment to its create-info priority before applying
+	 * this sync's active sets. XR_EXT_active_action_set_priority overrides
+	 * only last until the next xrSyncActions; sets omitted from the active
+	 * list must not keep a stale override for bound-source enumeration.
+	 */
+	reset_last_sync_priorities(action_context);
+
+	for (uint32_t i = 0; i < countActionSets; i++) {
+		struct oxr_action_set *act_set = NULL;
+		struct oxr_action_set_attachment *act_set_attached = NULL;
+		get_action_set_attachment(action_context, actionSets[i].actionSet, &act_set_attached, &act_set);
+		if (act_set_attached == NULL) {
+			continue;
+		}
+
+		uint32_t priority = oxr_get_action_set_priority(act_set_attached->act_set_ref, activePriorities);
+		act_set_attached->last_sync_priority = priority;
+
+		for (size_t k = 0; k < act_set_attached->action_attachment_count; k++) {
+			struct oxr_action_attachment *act_attached = &act_set_attached->act_attachments[k];
+
+#define ACCUMULATE_CACHE(NAME, NAME_CAPS, PATH, LOCALIZED_NAME)                                                        \
+	if (act_set_attached->requested_subaction_paths.any || act_set_attached->requested_subaction_paths.NAME) {     \
+		accumulate_priority_group_cache(&act_attached->NAME, priority);                                        \
+	}
+			OXR_FOR_EACH_VALID_SUBACTION_PATH_DETAILED(ACCUMULATE_CACHE)
+#undef ACCUMULATE_CACHE
+		}
+	}
+}
+
+static bool
+input_suppressed(const struct oxr_action_attachment *act_attached, const struct oxr_action_input *action_input)
+{
+	assert(action_input->priority_group_state != NULL);
+
+	if (action_input->priority_group_state == NULL) {
+		return false;
+	}
+
+	uint32_t priority = act_attached->act_set_attached->last_sync_priority;
+
+	return action_input->priority_group_state->highest_priority > priority;
 }
 
 static bool
@@ -1332,8 +804,7 @@ oxr_input_combine_input(struct oxr_session *sess,
                         struct oxr_action_cache *cache,
                         struct oxr_input_value_tagged *out_input,
                         int64_t *out_timestamp,
-                        bool *out_is_active,
-                        const XrActiveActionSetPrioritiesEXT *active_priorities)
+                        bool *out_is_active)
 {
 	struct oxr_action_input *inputs = cache->inputs;
 	size_t input_count = cache->input_count;
@@ -1353,8 +824,7 @@ oxr_input_combine_input(struct oxr_session *sess,
 
 		// suppress input if it is also bound to action in set with
 		// higher priority
-		if (oxr_input_supressed(sess, countActionSets, actionSets, subaction_path, act_attached, action_input,
-		                        active_priorities)) {
+		if (input_suppressed(act_attached, action_input)) {
 			continue;
 		}
 
@@ -1451,8 +921,7 @@ oxr_action_cache_update(struct oxr_logger *log,
                         struct oxr_action_cache *cache,
                         int64_t time,
                         struct oxr_subaction_paths *subaction_path,
-                        bool selected,
-                        const XrActiveActionSetPrioritiesEXT *active_priorities)
+                        bool selected)
 {
 	struct oxr_action_state last = cache->current;
 
@@ -1485,8 +954,7 @@ oxr_action_cache_update(struct oxr_logger *log,
 		    cache,                           // cache
 		    &combined,                       // out_input
 		    &timestamp,                      // out_timestamp
-		    &is_active,                      // out_is_active
-		    active_priorities);              // active_priorities
+		    &is_active);                     // out_is_active
 		if (!bret) {
 			oxr_log(log, "Failed to get/combine input values '%s'", act_attached->act_ref->name);
 			return;
@@ -1633,8 +1101,7 @@ oxr_action_attachment_update(struct oxr_logger *log,
                              const XrActiveActionSet *actionSets,
                              struct oxr_action_attachment *act_attached,
                              int64_t time,
-                             struct oxr_subaction_paths subaction_paths,
-                             const XrActiveActionSetPrioritiesEXT *active_priorities)
+                             struct oxr_subaction_paths subaction_paths)
 {
 	// This really shouldn't be happening.
 	if (act_attached == NULL) {
@@ -1646,7 +1113,7 @@ oxr_action_attachment_update(struct oxr_logger *log,
 	subaction_paths_##X.X = true;                                                                                  \
 	bool select_##X = subaction_paths.X || subaction_paths.any;                                                    \
 	oxr_action_cache_update(log, sess, countActionSets, actionSets, act_attached, &act_attached->X, time,          \
-	                        &subaction_paths_##X, select_##X, active_priorities);
+	                        &subaction_paths_##X, select_##X);
 
 	OXR_FOR_EACH_VALID_SUBACTION_PATH(UPDATE_SELECT)
 #undef UPDATE_SELECT
@@ -1711,294 +1178,46 @@ oxr_action_attachment_update(struct oxr_logger *log,
 	}
 }
 
-/*!
- * Try to produce a transform chain to convert the available input into
- * the desired input type.
- *
- * Populates @p action_input->transforms and @p action_input->transform_count on
- * success.
- *
- * @returns false if it could not, true if it could
- */
-static bool
-oxr_action_populate_input_transform(struct oxr_logger *log,
-                                    struct oxr_sink_logger *slog,
-                                    const struct oxr_path_store *store,
-                                    const struct oxr_action_ref *act_ref,
-                                    struct oxr_action_input *action_input)
-{
-	assert(action_input->transforms == NULL);
-	assert(action_input->transform_count == 0);
-	const char *str;
-	size_t length;
-	oxr_path_store_get_string(store, action_input->bound_path, &str, &length);
-
-	enum xrt_input_type t = XRT_GET_INPUT_TYPE(action_input->input->name);
-
-	return oxr_input_transform_create_chain( //
-	    log,                                 //
-	    slog,                                //
-	    t,                                   //
-	    act_ref->action_type,                //
-	    act_ref->name,                       //
-	    str,                                 //
-	    &action_input->transforms,           //
-	    &action_input->transform_count);     //
-}
-
-/*!
- * Find dpad settings in @p dpad_entry whose binding path
- * is a prefix of @p bound_path_string.
- *
- * @returns true if settings were found and written to @p out_dpad_settings
- */
-static bool
-find_matching_dpad(const struct oxr_path_store *store,
-                   const struct oxr_dpad_entry *dpad_entry,
-                   const char *bound_path_string,
-                   const struct oxr_dpad_binding_modification **out_dpad_binding)
-{
-	if (dpad_entry != NULL) {
-		for (uint32_t i = 0; i < dpad_entry->dpad_count; i++) {
-			const char *dpad_path_string;
-			size_t dpad_path_length;
-			oxr_path_store_get_string(store, dpad_entry->dpads[i].binding, &dpad_path_string,
-			                          &dpad_path_length);
-			if (strncmp(bound_path_string, dpad_path_string, dpad_path_length) == 0) {
-				*out_dpad_binding = &dpad_entry->dpads[i];
-				return true;
-			}
-		}
-	}
-	return false;
-}
-
-/*!
- * Try to produce a transform chain to create a dpad button from the selected
- * input (potentially using other inputs like `/force` in the process).
- *
- * Populates @p action_input->transforms and @p action_input->transform_count on
- * success.
- *
- * @returns false if it could not, true if it could
- */
-static bool
-oxr_action_populate_input_transform_dpad(struct oxr_logger *log,
-                                         struct oxr_sink_logger *slog,
-                                         const struct oxr_path_store *store,
-                                         const struct oxr_action_ref *act_ref,
-                                         const struct oxr_dpad_entry *dpad_entry,
-                                         enum oxr_dpad_region dpad_region,
-                                         struct oxr_interaction_profile *profile,
-                                         struct oxr_action_input *action_inputs,
-                                         uint32_t action_input_count,
-                                         uint32_t selected_input)
-{
-	struct oxr_action_input *action_input = &(action_inputs[selected_input]);
-	assert(action_input->transforms == NULL);
-	assert(action_input->transform_count == 0);
-
-	const char *bound_path_string;
-	size_t bound_path_length;
-	oxr_path_store_get_string(store, action_input->bound_path, &bound_path_string, &bound_path_length);
-
-	// find correct dpad entry
-	const struct oxr_dpad_binding_modification *dpad_binding_modification = NULL;
-	find_matching_dpad(store, dpad_entry, bound_path_string, &dpad_binding_modification);
-
-	enum xrt_input_type t = XRT_GET_INPUT_TYPE(action_input->input->name);
-	enum xrt_input_type activate_t = XRT_GET_INPUT_TYPE(action_input->dpad_activate_name);
-
-	return oxr_input_transform_create_chain_dpad( //
-	    log,                                      //
-	    slog,                                     //
-	    t,                                        //
-	    act_ref->action_type,                     //
-	    bound_path_string,                        //
-	    dpad_binding_modification,                //
-	    dpad_region,                              //
-	    activate_t,                               //
-	    action_input->dpad_activate,              //
-	    &action_input->transforms,                //
-	    &action_input->transform_count);          //
-}
-
-static bool
-is_dpad_region_for_emulation(const char *start, const char *end)
-{
-	// go before the first slash
-	end--;
-
-	while (end > start) {
-		char curr = *end;
-
-		// once we find a slash,
-		if (curr == '/') {
-			const char *to_check[] = {"/thumbstick_", "/thumbstick/", "/trackpad_", "/trackpad/"};
-
-			// check if the passed path is a sub-path of "thumbstick[_|/]" or "trackpad[_|/]"
-			for (size_t i = 0; i < ARRAY_SIZE(to_check); i++) {
-				if (strncmp(end, to_check[i], strlen(to_check[i])) == 0) {
-					// this is for emulation
-					return true;
-				}
-			}
-
-			// it's not for emulation and is an actual dpad region
-			return false;
-		}
-
-		end--;
-	}
-
-	return false;
-}
-
-// based on get_subaction_path_from_path
-static bool
-get_dpad_region_from_path(const struct oxr_path_store *store, XrPath path, enum oxr_dpad_region *out_dpad_region)
-{
-	const char *str = NULL;
-	size_t length = 0;
-	XrResult ret;
-
-	ret = oxr_path_store_get_string(store, path, &str, &length);
-	if (ret != XR_SUCCESS) {
-		return false;
-	}
-
-	// TODO: surely there's a better way to do this?
-	if (length >= 10 && strncmp("/dpad_left", str + (length - 10), 10) == 0 &&
-	    is_dpad_region_for_emulation(str, str + (length - 10))) {
-		*out_dpad_region = OXR_DPAD_REGION_LEFT;
-		return true;
-	}
-	if (length >= 11 && strncmp("/dpad_right", str + (length - 11), 11) == 0 &&
-	    is_dpad_region_for_emulation(str, str + (length - 11))) {
-		*out_dpad_region = OXR_DPAD_REGION_RIGHT;
-		return true;
-	}
-	if (length >= 8 && strncmp("/dpad_up", str + (length - 8), 8) == 0 &&
-	    is_dpad_region_for_emulation(str, str + (length - 8))) {
-		*out_dpad_region = OXR_DPAD_REGION_UP;
-		return true;
-	}
-	if (length >= 10 && strncmp("/dpad_down", str + (length - 10), 10) == 0 &&
-	    is_dpad_region_for_emulation(str, str + (length - 10))) {
-		*out_dpad_region = OXR_DPAD_REGION_DOWN;
-		return true;
-	}
-	if (length >= 12 && strncmp("/dpad_center", str + (length - 12), 12) == 0 &&
-	    is_dpad_region_for_emulation(str, str + (length - 12))) {
-		*out_dpad_region = OXR_DPAD_REGION_CENTER;
-		return true;
-	}
-
-	return false;
-}
-
 static void
 oxr_action_bind_io(struct oxr_logger *log,
                    struct oxr_sink_logger *slog,
-                   const struct oxr_path_store *store,
-                   const struct oxr_roles *roles,
-                   const struct oxr_action_ref *act_ref,
-                   const uint32_t act_set_key,
+                   const struct oxr_session_action_context *sess_context,
+                   const struct oxr_profile_resolver_info *info,
+                   const struct xrt_io_cache_device *dev,
+                   XrPath subaction_path,
                    struct oxr_action_cache *cache,
-                   struct oxr_interaction_profile *profile,
-                   enum oxr_subaction_path subaction_path)
+                   struct oxr_action_attachment *act_attached)
 {
-	struct oxr_action_input inputs[OXR_MAX_BINDINGS_PER_ACTION] = {0};
-	uint32_t input_count = 0;
-	struct oxr_action_output outputs[OXR_MAX_BINDINGS_PER_ACTION] = {0};
-	uint32_t output_count = 0;
-
-	// If we are binding again, reset the cache fully.
+	// The resolver functions assumes that the cache is empty.
 	oxr_action_cache_teardown(cache);
 
-	// Fill out the arrays with the bindings we can find.
-	get_binding(        //
-	    log,            // log
-	    slog,           // slog
-	    store,          // store
-	    roles,          // roles
-	    act_ref,        // act_ref
-	    profile,        // profile
-	    subaction_path, // subaction_path
-	    inputs,         // inputs
-	    &input_count,   // input_count
-	    outputs,        // outputs
-	    &output_count); // output_count
-
-	// Mutually exclusive to outputs.
-	if (input_count > 0) {
-		uint32_t count = 0;
-		cache->current.active = true;
-		cache->inputs = U_TYPED_ARRAY_CALLOC(struct oxr_action_input, input_count);
-		for (uint32_t i = 0; i < input_count; i++) {
-			// Only add the input if we can find a transform.
-
-			oxr_slog(slog, "\t\tFinding transforms for '%s' to action '%s' of type '%s'\n",
-			         u_str_xrt_input_name(inputs[i].input->name), act_ref->name,
-			         xr_action_type_to_str(act_ref->action_type));
-
-			enum oxr_dpad_region dpad_region;
-			if (get_dpad_region_from_path(store, inputs[i].bound_path, &dpad_region)) {
-				const struct oxr_dpad_entry *entry =
-				    oxr_dpad_state_get(&profile->dpad_state, act_set_key);
-
-				bool bret = oxr_action_populate_input_transform_dpad( //
-				    log,                                              //
-				    slog,                                             //
-				    store,                                            //
-				    act_ref,                                          //
-				    entry,                                            //
-				    dpad_region,                                      //
-				    profile,                                          //
-				    inputs,                                           //
-				    input_count,                                      //
-				    i);                                               //
-				if (bret) {
-					cache->inputs[count++] = inputs[i];
-					continue;
-				}
-			} else if (oxr_action_populate_input_transform(log, slog, store, act_ref, &(inputs[i]))) {
-				cache->inputs[count++] = inputs[i];
-				continue;
-			}
-
-			oxr_slog(slog, "\t\t\t\tRejected! (NO TRANSFORM)\n");
-		}
-
-
-		// No inputs found, prented we never bound it.
-		if (count == 0) {
-			free(cache->inputs);
-			cache->inputs = NULL;
-		} else {
-			oxr_slog(slog, "\t\tBound to:\n");
-			for (uint32_t i = 0; i < count; i++) {
-				struct xrt_input *input = cache->inputs[i].input;
-				enum xrt_input_type t = XRT_GET_INPUT_TYPE(input->name);
-				bool active = input->active;
-				oxr_slog(slog, "\t\t\t'%s' ('%s') on '%s' (%s)\n", u_str_xrt_input_name(input->name),
-				         xrt_input_type_to_str(t), cache->inputs[i].xdev->str,
-				         active ? "active" : "inactive");
-			}
-		}
-
-		cache->input_count = count;
+	if (dev == NULL) {
+		oxr_slog(slog, "\t\tNo device!\n");
+		return;
 	}
 
-	// Mutually exclusive to inputs.
-	if (output_count > 0) {
-		cache->current.active = true;
-		cache->outputs = U_TYPED_ARRAY_CALLOC(struct oxr_action_output, output_count);
-		for (uint32_t i = 0; i < output_count; i++) {
-			cache->outputs[i] = outputs[i];
-		}
-		cache->output_count = output_count;
+	if (act_attached->act_ref->action_type == XR_ACTION_TYPE_VIBRATION_OUTPUT) {
+		oxr_resolver_populate_output( //
+		    log,                      //
+		    slog,                     //
+		    &sess_context->io_cache,  //
+		    info,                     //
+		    dev,                      //
+		    subaction_path,           //
+		    act_attached,             //
+		    cache);                   //
+		return;
 	}
+
+	oxr_resolver_populate_input( //
+	    log,                     //
+	    slog,                    //
+	    &sess_context->io_cache, //
+	    info,                    //
+	    dev,                     //
+	    subaction_path,          //
+	    act_attached,            //
+	    cache);                  //
 }
 
 
@@ -2010,7 +1229,7 @@ oxr_action_bind_io(struct oxr_logger *log,
 
 XrResult
 oxr_session_attach_action_sets(struct oxr_logger *log,
-                               const struct oxr_interaction_profile_array *suggested_profiles,
+                               const struct oxr_instance_action_context *inst_context,
                                struct oxr_session_attached_actions *attached_actions,
                                struct oxr_session_action_context *sess_context,
                                const XrSessionActionSetsAttachInfo *bindInfo)
@@ -2082,7 +1301,15 @@ oxr_session_attach_action_sets(struct oxr_logger *log,
 		}
 	}
 
-	oxr_interaction_profile_array_clone(suggested_profiles, &sess_context->profiles_on_attachment);
+	ret = oxr_suggested_profile_array_clone(    //
+	    &inst_context->suggested_profiles,      // src
+	    &sess_context->profiles_on_attachment); // dst
+	if (ret != XR_SUCCESS) {
+		return oxr_error(log, ret, "Failed to clone suggested profiles");
+	}
+
+	sess_context->binding_registry = inst_context->binding_registry;
+	oxr_binding_registry_ref(sess_context->binding_registry);
 
 	/*
 	 * We used to send XrEventDataInteractionProfileChanged here, but that's
@@ -2093,6 +1320,26 @@ oxr_session_attach_action_sets(struct oxr_logger *log,
 	return XR_SUCCESS;
 }
 
+/*!
+ * Tear down the resolved input/output bindings of every attached action.
+ *
+ * Used before recreating the io cache: the bindings hold pointers into the
+ * cache's snapshot arrays, so they must be dropped before those arrays go away.
+ */
+static void
+session_clear_action_bindings(struct oxr_session_action_context *action_context)
+{
+	for (size_t i = 0; i < action_context->action_set_attachment_count; i++) {
+		struct oxr_action_set_attachment *act_set_attached = &action_context->act_set_attachments[i];
+		for (size_t k = 0; k < act_set_attached->action_attachment_count; k++) {
+			struct oxr_action_attachment *act_attached = &act_set_attached->act_attachments[k];
+#define CACHE_TEARDOWN(X) oxr_action_cache_teardown(&(act_attached->X));
+			OXR_FOR_EACH_SUBACTION_PATH(CACHE_TEARDOWN)
+#undef CACHE_TEARDOWN
+		}
+	}
+}
+
 static XrResult
 session_update_action_bindings(struct oxr_logger *log,
                                struct oxr_instance *inst,
@@ -2101,23 +1348,24 @@ session_update_action_bindings(struct oxr_logger *log,
                                bool *out_interaction_profile_changed)
 {
 	// Convenience.
-	const struct oxr_path_store *store = &inst->path_store;
-	const struct oxr_instance_path_cache *cache = &inst->path_cache;
-	const struct oxr_interaction_profile_array *array = &action_context->profiles_on_attachment;
+	const struct oxr_suggested_profile_array *array = &action_context->profiles_on_attachment;
 
 	struct oxr_profiles_per_subaction profiles = {0};
-	find_profiles_from_roles(cache, array, roles, &profiles);
+	resolve_binding_infos_from_roles( //
+	    log,                          //
+	    action_context,               //
+	    array,                        //
+	    roles,                        //
+	    inst->debug_bindings,         //
+	    &profiles);                   //
 
-	// Dump selected profiles if debugging.
-	if (inst->debug_bindings) {
-		print_profiles(log, store, &profiles);
-	}
+	oxr_priority_group_cache_clear(&action_context->priority_group_cache);
 
 	for (size_t i = 0; i < action_context->action_set_attachment_count; i++) {
 		struct oxr_action_set_attachment *act_set_attached = &action_context->act_set_attachments[i];
 		for (size_t k = 0; k < act_set_attached->action_attachment_count; k++) {
 			struct oxr_action_attachment *act_attached = &act_set_attached->act_attachments[k];
-			oxr_action_attachment_bind(log, inst, act_attached, roles, &profiles);
+			oxr_action_attachment_bind(log, inst, act_attached, &profiles);
 		}
 	}
 
@@ -2131,7 +1379,7 @@ session_update_action_bindings(struct oxr_logger *log,
 	 */
 #define POPULATE_PROFILE(X)                                                                                            \
 	do {                                                                                                           \
-		XrPath path = profiles.X != NULL ? profiles.X->path : XR_NULL_PATH;                                    \
+		XrPath path = profiles.X.profile != NULL ? profiles.X.profile->path : XR_NULL_PATH;                    \
 		if (path == XR_NULL_PATH) {                                                                            \
 			break; /* Only update on "active" interaction profiles per sub-action path. */                 \
 		}                                                                                                      \
@@ -2146,6 +1394,46 @@ session_update_action_bindings(struct oxr_logger *log,
 	*out_interaction_profile_changed = interaction_profile_changed;
 
 	return XR_SUCCESS;
+}
+
+static XrResult
+session_sync_io_cache_locked(struct oxr_logger *log,
+                             struct oxr_instance *inst,
+                             struct oxr_session_action_context *sess_context,
+                             const struct oxr_roles *roles,
+                             bool *out_interaction_profile_changed)
+{
+	bool io_cache_stale = false;
+	XrResult sync_ret = oxr_io_cache_sync(log, &sess_context->io_cache, &io_cache_stale);
+	if (sync_ret != XR_SUCCESS || !io_cache_stale) {
+		return sync_ret;
+	}
+
+	/*
+	 * The set of devices changed (hotplug): the cache layout is out
+	 * of date and the action bindings still point into the old
+	 * snapshot arrays. Clear the bindings, recreate the cache for
+	 * the new layout, rebind so inputs point into the new arrays,
+	 * then read again.
+	 */
+	session_clear_action_bindings(sess_context);
+	sync_ret = oxr_io_cache_recreate(log, &sess_context->io_cache);
+	if (sync_ret != XR_SUCCESS) {
+		return sync_ret;
+	}
+
+	sync_ret = session_update_action_bindings( //
+	    log,                                   //
+	    inst,                                  //
+	    sess_context,                          //
+	    roles,                                 //
+	    out_interaction_profile_changed);      //
+	if (sync_ret != XR_SUCCESS) {
+		return sync_ret;
+	}
+
+	// If the layout changed yet again, the next xrSyncActions recreates it.
+	return oxr_io_cache_sync(log, &sess_context->io_cache, &io_cache_stale);
 }
 
 XrResult
@@ -2233,30 +1521,38 @@ oxr_action_sync_data_with_context(struct oxr_logger *log,
 		os_mutex_lock(&sess_context->sync_actions_mutex);
 		if (sess_context->dynamic_roles_generation_id < roles.roles.generation_id) {
 			sess_context->dynamic_roles_generation_id = roles.roles.generation_id;
-			session_update_action_bindings(       //
-			    log,                              //
-			    inst,                             //
-			    sess_context,                     //
-			    &roles,                           //
-			    out_interaction_profile_changed); //
+			XrResult update_ret = session_update_action_bindings( //
+			    log,                                              //
+			    inst,                                             //
+			    sess_context,                                     //
+			    &roles,                                           //
+			    out_interaction_profile_changed);                 //
+			if (update_ret != XR_SUCCESS) {
+				os_mutex_unlock(&sess_context->sync_actions_mutex);
+				return update_ret;
+			}
 		}
 		os_mutex_unlock(&sess_context->sync_actions_mutex);
 	}
 
 	if (countActionSets == 0) {
-		// Nothing to do.
+		reset_inactive_sync_priority_state(sess_context);
 		return XR_SUCCESS;
 	}
 
 	// Synchronize outputs to this time.
 	int64_t now = time_state_get_now(sess->sys->inst->timekeeping);
 
-	// Loop over all xdev devices.
-	for (size_t i = 0; i < sess->sys->xsysd->static_xdev_count; i++) {
-		if (sess->sys->xsysd->static_xdevs[i]) {
-			xrt_result_t xret = xrt_device_update_inputs(sess->sys->xsysd->static_xdevs[i]);
-			OXR_CHECK_XRET(log, sess, xret, xrt_device_update_inputs);
-		}
+	/*
+	 * Refresh this action context's input/output cache under the same lock
+	 * used for binding updates, so stale layout handling cannot race them.
+	 */
+	XrResult sync_ret;
+	os_mutex_lock(&sess_context->sync_actions_mutex);
+	sync_ret = session_sync_io_cache_locked(log, inst, sess_context, &roles, out_interaction_profile_changed);
+	os_mutex_unlock(&sess_context->sync_actions_mutex);
+	if (sync_ret != XR_SUCCESS) {
+		return sync_ret;
 	}
 
 	// Reset all action set attachments.
@@ -2304,6 +1600,8 @@ oxr_action_sync_data_with_context(struct oxr_logger *log,
 		}
 	}
 
+	oxr_session_rebuild_priority_group_states(sess_context, countActionSets, actionSets, activePriorities);
+
 	// Now, update all action attachments
 	for (size_t i = 0; i < sess_context->action_set_attachment_count; ++i) {
 		act_set_attached = &sess_context->act_set_attachments[i];
@@ -2317,7 +1615,7 @@ oxr_action_sync_data_with_context(struct oxr_logger *log,
 			}
 
 			oxr_action_attachment_update(log, sess, countActionSets, actionSets, act_attached, now,
-			                             subaction_paths, activePriorities);
+			                             subaction_paths);
 		}
 	}
 
@@ -2343,6 +1641,25 @@ add_path_to_set(XrPath path_set[OXR_MAX_BINDINGS_PER_ACTION], XrPath new_path, u
 	(*inout_path_count)++;
 }
 
+static void
+add_cache_bound_sources(const struct oxr_action_attachment *act_attached,
+                        const struct oxr_action_cache *cache,
+                        XrPath path_set[OXR_MAX_BINDINGS_PER_ACTION],
+                        uint32_t *inout_path_count)
+{
+	for (uint32_t i = 0; i < cache->input_count; i++) {
+		const struct oxr_action_input *action_input = &cache->inputs[i];
+		if (input_suppressed(act_attached, action_input)) {
+			continue;
+		}
+		add_path_to_set(path_set, action_input->binding_point->source_path, inout_path_count);
+	}
+
+	for (uint32_t i = 0; i < cache->output_count; i++) {
+		add_path_to_set(path_set, cache->outputs[i].binding_point->source_path, inout_path_count);
+	}
+}
+
 XrResult
 oxr_action_enumerate_bound_sources(struct oxr_logger *log,
                                    struct oxr_session *sess,
@@ -2360,17 +1677,20 @@ oxr_action_enumerate_bound_sources(struct oxr_logger *log,
 		return oxr_error(log, XR_ERROR_RUNTIME_FAILURE, "act_key did not find any action");
 	}
 
+	/*
+	 * Only enumerate sources for subaction paths that were active in the
+	 * last sync. Priority-suppressed inputs are omitted; inactive paths
+	 * contribute nothing.
+	 */
 #define ACCUMULATE_PATHS(X)                                                                                            \
-	if (act_attached->X.input_count > 0) {                                                                         \
-		for (uint32_t i = 0; i < act_attached->X.input_count; i++) {                                           \
-			add_path_to_set(temp, act_attached->X.inputs[i].bound_path, &path_count);                      \
+	do {                                                                                                           \
+		const struct oxr_action_set_attachment *act_set_attached = act_attached->act_set_attached;             \
+		const bool subaction_path_active =                                                                     \
+		    act_set_attached->requested_subaction_paths.any || act_set_attached->requested_subaction_paths.X;  \
+		if (subaction_path_active) {                                                                           \
+			add_cache_bound_sources(act_attached, &act_attached->X, temp, &path_count);                    \
 		}                                                                                                      \
-	}                                                                                                              \
-	if (act_attached->X.output_count > 0) {                                                                        \
-		for (uint32_t i = 0; i < act_attached->X.output_count; i++) {                                          \
-			add_path_to_set(temp, act_attached->X.outputs[i].bound_path, &path_count);                     \
-		}                                                                                                      \
-	}
+	} while (false);
 
 	OXR_FOR_EACH_SUBACTION_PATH(ACCUMULATE_PATHS)
 #undef ACCUMULATE_PATHS

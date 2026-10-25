@@ -50,6 +50,16 @@ struct xrt_device_id
 };
 
 /*!
+ * Value of an @ref xrt_device_id that has not been assigned.
+ *
+ * @ingroup xrt_iface
+ * @relates xrt_device_id
+ */
+// clang-format off
+#define XRT_DEVICE_ID_INVALID XRT_C11_COMPOUND(struct xrt_device_id){0}
+// clang-format on
+
+/*!
  * A per-lens/display view information.
  *
  * @ingroup xrt_iface

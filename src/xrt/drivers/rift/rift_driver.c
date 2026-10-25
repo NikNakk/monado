@@ -169,38 +169,33 @@ rift_sensor_thread_tick(struct rift_hmd *hmd)
 			break;
 		}
 
-		// wrap-around intentional and A-OK, given these are unsigned
-		uint32_t remote_sample_delta_us = report.sample_timestamp - hmd->last_remote_sample_time_us;
-		hmd->last_remote_sample_time_us = report.sample_timestamp;
-		hmd->last_remote_sample_time_ns += (timepoint_ns)remote_sample_delta_us * OS_NS_PER_USEC;
+		m_clock_bit_extender_update(&hmd->clock_extender, report.sample_timestamp, U_TIME_1US_IN_NS);
 
-		m_clock_windowed_skew_tracker_push(   //
-		    hmd->clock_tracker,               //
-		    recv_time_ns,                     //
-		    hmd->last_remote_sample_time_ns); //
+		m_clock_windowed_skew_tracker_push( //
+		    hmd->clock_tracker,             //
+		    recv_time_ns,                   //
+		    hmd->clock_extender.clock);     //
 
 		int64_t local_timestamp_ns;
 		// if we haven't synchronized our clocks, just do nothing
-		if (!m_clock_windowed_skew_tracker_to_local(hmd->clock_tracker, hmd->last_remote_sample_time_ns,
+		if (!m_clock_windowed_skew_tracker_to_local(hmd->clock_tracker, hmd->clock_extender.clock,
 		                                            &local_timestamp_ns)) {
 			break;
 		}
 
-		timepoint_ns last_remote_exposure_time_ns = hmd->last_remote_exposure_time_ns;
+		timepoint_ns remote_exposure_time_ns =
+		    m_clock_bit_extender_peek(&hmd->clock_extender, report.tracking_timestamp, U_TIME_1US_IN_NS);
 
 		// Update the exposure time
-		uint32_t remote_exposure_delta_us = report.tracking_timestamp - hmd->last_remote_exposure_time_us;
-		hmd->last_remote_exposure_time_us = report.tracking_timestamp;
-		hmd->last_remote_exposure_time_ns += (timepoint_ns)remote_exposure_delta_us * OS_NS_PER_USEC;
-
 		uint16_t tracking_count_delta = report.tracking_count - hmd->last_tracking_count;
 		hmd->last_tracking_count = report.tracking_count;
 		hmd->exposure_counter += tracking_count_delta;
 
-		if (remote_exposure_delta_us > 0) {
+		if (tracking_count_delta != 0) {
 			os_thread_helper_lock(&hmd->sensor_thread);
+			timepoint_ns local_exposure_time_ns;
 			bool have_local_exposure_time = m_clock_windowed_skew_tracker_to_local(
-			    hmd->clock_tracker, hmd->last_remote_exposure_time_ns, &hmd->last_local_exposure_time_ns);
+			    hmd->clock_tracker, remote_exposure_time_ns, &local_exposure_time_ns);
 
 			// Record the exposure so that frames which arrive after the next exposure has already been
 			// reported can still find the exposure they were taken during. Skipped until the clocks are
@@ -209,7 +204,7 @@ rift_sensor_thread_tick(struct rift_hmd *hmd)
 				hmd->exposure_history[hmd->exposure_history_pushed % RIFT_EXPOSURE_HISTORY_SIZE] =
 				    (struct rift_exposure_event){
 				        .sequence_id = hmd->exposure_counter,
-				        .timestamp_ns = hmd->last_local_exposure_time_ns,
+				        .timestamp_ns = local_exposure_time_ns,
 				        .recv_timestamp_ns = recv_time_ns,
 				    };
 				hmd->exposure_history_pushed++;
@@ -222,11 +217,10 @@ rift_sensor_thread_tick(struct rift_hmd *hmd)
 				    .camera_exposure_start =
 				        {
 				            .sequence_id = hmd->exposure_counter,
-				            .timestamp_ns = hmd->last_local_exposure_time_ns,
-				            .frame_period_ns = (time_duration_ns)(hmd->last_remote_exposure_time_ns -
-				                                                  last_remote_exposure_time_ns),
+				            .timestamp_ns = local_exposure_time_ns,
+				            .frame_period_ns = hmd->tracking.frame_interval * U_TIME_1US_IN_NS,
 				            .exposure_time_ns =
-				                (time_duration_ns)(hmd->tracking.exposure_length * OS_NS_PER_USEC),
+				                (time_duration_ns)(hmd->tracking.exposure_length * U_TIME_1US_IN_NS),
 				        },
 				};
 
@@ -776,8 +770,13 @@ rift_fill_in_distortion_inputs(struct rift_hmd *hmd)
 	    .eye_relief_m = distortion->eye_relief,
 	    .k = data->k,
 	    .k_count = CATMULL_COEFFICIENTS,
-	    .chromatic_abberation = {data->chromatic_abberation[0], data->chromatic_abberation[1],
-	                             data->chromatic_abberation[2], data->chromatic_abberation[3]},
+	    .chromatic_abberation =
+	        {
+	            data->chromatic_abberation[0],
+	            data->chromatic_abberation[1],
+	            data->chromatic_abberation[2],
+	            data->chromatic_abberation[3],
+	        },
 	    .max_r = data->max_r,
 	    .meters_per_tan_angle = data->meters_per_tan_angle_at_center,
 	};
@@ -1072,9 +1071,11 @@ rift_devices_create(struct os_hid_device *hmd_dev,
 
 	if (variant == RIFT_VARIANT_CV1) {
 		// On CV1, we need to send a command to enable headset features
-		rift_enable_components(hmd, &(struct rift_enable_components_report){.flags = RIFT_COMPONENT_DISPLAY |
-		                                                                             RIFT_COMPONENT_AUDIO |
-		                                                                             RIFT_COMPONENT_LEDS});
+		rift_enable_components( //
+		    hmd,                //
+		    &(struct rift_enable_components_report){
+		        .flags = RIFT_COMPONENT_DISPLAY | RIFT_COMPONENT_AUDIO | RIFT_COMPONENT_LEDS,
+		    });
 
 		// Read the radio address, this also enables the radio
 		result = rift_get_radio_address(hmd, hmd->radio_address);
@@ -1423,9 +1424,7 @@ rift_devices_create(struct os_hid_device *hmd_dev,
 	u_var_add_log_level(hmd, &hmd->log_level, "log_level");
 	u_var_add_ro_i32(hmd, (int32_t *)&hmd->variant, "variant");
 	u_var_add_f32(hmd, &hmd->default_icd, "default_icd");
-	u_var_add_ro_i64_ns(hmd, &hmd->last_remote_sample_time_ns, "last_remote_sample_time_ns");
 	u_var_add_ro_i64_ns(hmd, &hmd->last_sample_local_timestamp_ns, "last_sample_local_timestamp_ns");
-	u_var_add_ro_i64_ns(hmd, &hmd->last_remote_exposure_time_ns, "last_remote_exposure_time_ns");
 	u_var_add_f32(hmd, &hmd->icd_override_m, "icd_override_m");
 	u_var_add_bool(hmd, &hmd->presence, "presence");
 
@@ -1497,7 +1496,7 @@ rift_hmd_frame_timestamp_callback(void *user_data,             //
 	 *
 	 * Frames with nothing in the window are left alone rather than guessed at.
 	 */
-	const time_duration_ns interval_ns = (time_duration_ns)hmd->tracking.frame_interval * OS_NS_PER_USEC;
+	const time_duration_ns interval_ns = (time_duration_ns)hmd->tracking.frame_interval * U_TIME_1US_IN_NS;
 	const time_duration_ns window_ns = interval_ns / 2;
 
 	struct rift_exposure_event match = {0};

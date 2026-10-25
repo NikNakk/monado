@@ -80,6 +80,8 @@ enum t_imu_optical_filter_update_result
 
 struct t_imu_optical_filter_stats
 {
+	int64_t last_imu_ns;
+	int64_t last_accepted_pose_ns;
 	uint64_t imu_samples;
 	uint64_t updates;
 	uint64_t rejections;
@@ -119,12 +121,23 @@ t_imu_optical_filter_push_pose(struct t_imu_optical_filter *filter,
 
 /*!
  * The filtered pose at @p timestamp_ns: from the state history if it lies within it, otherwise predicted forward from
- * the latest state (at most max_prediction_ns). Returns false before the first optical pose.
+ * the latest state (at most max_prediction_ns). With older IMU input, only orientation validity remains: a held pose
+ * must not claim live tracking. Returns false before the first optical pose.
  */
 bool
 t_imu_optical_filter_get_relation(struct t_imu_optical_filter *filter,
                                   int64_t timestamp_ns,
                                   struct xrt_space_relation *out_relation);
+
+/*!
+ * Application-only inertial fallback. Extends position validity (never tracked status) to at most 1 s after optical
+ * acceptance. Does not change the normal relation used as the optical solver's prior. Requires fresh IMU input.
+ */
+bool
+t_imu_optical_filter_get_relation_with_fallback(struct t_imu_optical_filter *filter,
+                                                int64_t timestamp_ns,
+                                                int64_t position_valid_ns,
+                                                struct xrt_space_relation *out_relation);
 
 void
 t_imu_optical_filter_get_stats(const struct t_imu_optical_filter *filter, struct t_imu_optical_filter_stats *out_stats);

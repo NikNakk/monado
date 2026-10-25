@@ -6,6 +6,46 @@ SPDX-License-Identifier: BSL-1.0
 
 # macOS / PS VR2 Port Status
 
+Presenter selection now uses `XRT_MACOS_PRESENTER=wsi|wsi-adaptive|native`
+(default `native`). `wsi` selects calibrated CV WSI; the old WSI selection
+booleans are retired. See [selector migration](macos-wsi-migration.md#unified-presenter-selector-17-october-2026).
+
+The [WSI passthrough parity change](macos-wsi-migration.md#calibrated-wsi-passthrough-prepared-16-october-2026)
+now reuses native camera calibration and rotational correction on the WSI
+integration worktree. Camera-only and gentle blended-motion
+checks pass, but rapid-motion shimmer is worse than the native control. Earlier
+wake-up improves measured WSI cadence without consistently fixing the image;
+the [Vulkan camera replacement](macos-wsi-vulkan-passthrough.md) now removes
+those blocking waits and reaches about 117–119 presents/s in short functional
+runs, with final camera CPU submission around 0.38–0.42 ms median.
+The subsequent moving-head check still shimmers despite 118.18 presents/s;
+WSI default promotion remains blocked on visual quality. The user independently
+isolates `XRT_COMPOSITOR_COMPUTE=1` as the trigger in WSI testing and reports
+native is fine. Native uses compute by default; focus on WSI compute/output.
+Visual acceptance remains pending; native is still default (16 October 2026).
+A [private-output candidate](macos-wsi-vulkan-passthrough.md#private-compute-output-candidate)
+keeps WSI compute/camera shader writes out of presentation images. Since
+18 October a [fragment output pass](macos-wsi-vulkan-passthrough.md#fragment-output-pass-18-october-2026)
+replaces its copies and the camera compute pass, leaving presentation images
+as render targets only. Its visual quality, direct scanout and performance
+are untested on hardware.
+`SIMULATED_DESKTOP=1` runs a [simulated HMD in a desktop window](macos-desktop-simulation.md)
+on the built-in display, steered with the trackpad, for headset-free checks of
+the WSI compute path (not passthrough).
+
+The opt-in generic Vulkan WSI target and its experiment are committed on
+`claude/macos-wsi-integration` (worktree `build/review/wsi-integration`), with
+display refresh requests now applied between frames by the main compositor for
+every target and pacers changing period in place. Native stays the default.
+The functional headset checks pass on the branch itself (refresh cycles for
+native and all WSI modes, hosted WSI, passthrough pixel checks and native
+shutdown; see [the branch validation](macos-wsi-migration.md#headset-validation-of-the-branch-16-october-2026)).
+Visual acceptance,
+calibration/rotation parity for WSI passthrough and automatic recovery remain
+pending. See [the integration notes](macos-wsi-migration.md#integrated-branch-15-october-2026). An opt-in correction lets the stock adaptive pacer keep display-rate
+cadence on WSI with about one refresh less latency at 90 Hz, at the cost of
+worse tails; see [the adaptive pacing results](macos-wsi-generic-experiment.md#corrected-feedback-for-the-adaptive-pacer-16-october-2026).
+
 The [graphics integration review](macos-graphics-integration-review.md) is now
 integrated locally into `macos-upstream-clean` by the user-approved fast-forward
 to `c2c608a3f`. Both native Vulkan sharing options default to on, with independent
@@ -112,6 +152,11 @@ and offscreen runtime tracing pass; physical Instruments profiling remains
 outstanding. See the [tracing workflow](macos-gpu-sync-perfetto.md#native-instruments-signposts-2026-10-12).
 
 **Current integration branch:** `macos-upstream-clean`
+
+**2026-10-25 Sense occlusion follow-up:** native Alyx logs show both right HID
+transport failures and separate optical losses. Live loss diagnostics and an
+opt-in application-only inertial position horizon are prepared; hardware
+validation remains pending. See [evidence and capture settings](macos-pssense-occlusion.md).
 
 **PS Sense 6DoF integration, updated 2026-10-08:** the joint multi-camera
 solver, EKF, LED bootstrap and calibration/session tools are integrated.
@@ -573,6 +618,15 @@ What is still missing before this should be considered calibrated MR support:
 
 ## Eye tracking and foveation
 
+The [2026-10-25 application-owned gaze investigation](macos-app-owned-foveation-investigation.md)
+finds standard gaze-to-game input already available through EXT eye gaze.
+Engine-owned Metal foveation is feasible with application reconstruction;
+performance and Wine forwarding remain unvalidated. Existing FB/META defaults
+and build gates are unchanged.
+Its native Alyx follow-up identifies an existing FDM renderer and a concrete
+OpenVR-centre / Vulkan-offset migration from the private xrizer-to-KK handoff;
+this is separate from Monado's compact Metal swapchain path.
+
 The macOS PS VR2 driver now has a usable eye-gaze path and an experimental
 standards-facing foveation stack. The two are independent: foveation does not
 need eye tracking, and eye tracking does not depend on foveation.
@@ -756,16 +810,25 @@ and the Windows install outside this checkout:
 | `~/Code/monado-2-archive` | Evidence logs cited by the bridge's SteamVR notes, uncommitted patches from retired checkouts, and the pre-reorganisation LaunchAgent plists. |
 
 `scripts/macos/rebuild-both` rebuilds both Monado builds and restarts the
-service. The LaunchAgent is installed with
+service only if it was running. Add **`--install-local`** to install the native
+runtime to `~/.local/monado-psvr2` and register the rebuilt service with this
+machine's preferred opt-in settings. Preview with
+`python3 scripts/macos/install-local-preferences.py`. See the
+[local profile and audit](macos-service-direct-xpc.md#personal-rebuild-and-install-mode-2026-10-25).
+The LaunchAgent is installed with
 `build/arm64/src/xrt/targets/service/monado-service-xpc-control install`
-(logs in `~/Library/Logs/Monado/`). That writes only lifecycle settings. The
-installed agent then had these added back:
+(logs in `~/Library/Logs/Monado/`). A fresh install writes lifecycle settings;
+since 2026-10-25, reinstalls preserve existing environment preferences. The
+earlier installed agent had these added back:
 
 - `PSVR2_SENSE_6DOF=1`, with the mode-4 calibration and camera streams;
 - `XRT_FLOOR_EYE_HEIGHT_M=1.75`;
 - the PS VR2 and PS Sense timing traces, written to `~/psvr2-trace`.
 
-Rerun `install` after moving the build, then add those settings again.
+Rerun `install` after moving the build. The current local calibration settings
+are `XRT_FLOOR_EYE_HEIGHT_M=1.72`, `XRT_FLOOR_ALIGN=1`,
+`XRT_PSSENSE_STAGE_RECENTER=1` and a 1000 ms hold. See the
+[configuration repair](macos-floor-calibration.md#installed-service-configuration-repair-2026-10-25).
 
 xrizer registration and SteamVR share the prefix's `openvrpaths.vrpath`.
 Valve's loader uses the first runtime entry. `install-xrizer-game.zsh install`
@@ -816,6 +879,17 @@ The tracker in [macos-port-tracker.md](macos-port-tracker.md) is the shorter
 branch-oriented companion to this document.
 
 ## Upstream sync
+
+
+The 2026-10-21 [generic-controller comparison and upstream merge](macos-upstream-generic-controller.md)
+is prepared on `codex/upstream-generic-controller`, based on the current WSI
+fragment-output branch. It adopts upstream's generated action/rebinding system
+through `9fd3968ba`, preserving two generic fallback behaviors, Sense LED-space
+tracking and opt-in defaults. The eight I/O-cache commits now carry remaining
+compatibility mappings in a service-selected, pointer-free cache snapshot.
+Automated validation and the user-operated headset gate are recorded in the review.
+This does not move `macos-upstream-clean` or install/push a runtime.
+
 
 On 2026-10-07, `macos-upstream-clean` merged GitLab upstream `main` through
 `ec188bb13` in merge commit `753698f92`, with no merge conflicts. The eight
@@ -1160,3 +1234,27 @@ rendering and admits replacement without a restart. Normal-path costs are
 quantified in the [completion report](macos-gpu-sync-completion.md), with every
 M1/M2 criterion and hardware/thermal limitations. Chromium and Wine development
 remain deferred pending separate authorization.
+
+## Guided controller survey (2026-10-25)
+
+`psvr2-openxr-test --controller-survey NEW-DIRECTORY` now guides both hands
+through 28 placement/occlusion trials, recording invalid poses and recovery as
+well as successful tracking. The preparation helper pairs the labels with a
+service CTD recording for calibration/solver replay. Native tests pass; headset
+validation remains pending. See [the protocol and commands](macos-pssense-controller-survey.md).
+
+### Guided survey wearer follow-up (2026-10-25)
+
+The first wearer run reached the right-hand ready screen after collecting the
+left trials. Version 2 adds a fixed blue forward cross, stable target previews
+for glancing, hand selection, and optional passthrough in the preparation helper.
+All ten application test cases pass; wearer validation of the new guidance is
+pending. See [survey evidence and options](macos-pssense-controller-survey.md).
+
+### Guided survey mode-4 camera fix and reset (2026-10-25)
+
+The survey's missing passthrough was a missing mode-4 source delivery path;
+that lower stereo pair now feeds the existing BC4 transport without switching
+away from controller tracking. Solid target boxes and the service's one-second
+Options reset are enabled in the prepared survey profile. Focused tests pass;
+wearer validation remains pending. See [version-3 evidence and limits](macos-pssense-controller-survey.md#version-3-mode-4-passthrough-and-options-reset).

@@ -1336,7 +1336,8 @@ replay_filter(const DatasetReader &dataset, const char *tracker_csv, double imu_
 	if (out) {
 		std::fprintf(out,
 		             "timestamp_ns,device,hidden,raw_px,raw_py,raw_pz,raw_qx,raw_qy,raw_qz,raw_qw,"
-		             "filt_px,filt_py,filt_pz,filt_qx,filt_qy,filt_qz,filt_qw\n");
+		             "filt_px,filt_py,filt_pz,filt_qx,filt_qy,filt_qz,filt_qw,gap_age_ms,hold_px,hold_py,hold_pz,"
+		             "damp_px,damp_py,damp_pz\n");
 	}
 
 	for (auto &[device, list] : poses) {
@@ -1368,6 +1369,17 @@ replay_filter(const DatasetReader &dataset, const char *tracker_csv, double imu_
 		float pose_sigma_scale = 1.0f;
 		env("FILTER_POSE_SIGMA_SCALE", pose_sigma_scale);
 		t_imu_optical_filter *filter = t_imu_optical_filter_create(&params);
+		// Gap pattern and damped-coast time constant (tool only): FILTER_GAP_MS, FILTER_GAP_PERIOD_MS,
+		// FILTER_DAMP_MS. The damped estimate integrates the filter's velocity scaled by exp(-age / damp).
+		float gap_ms = (float)(kGapLengthNs / 1'000'000), period_ms = (float)(kGapPeriodNs / 1'000'000);
+		float damp_ms = 200.0f;
+		env("FILTER_GAP_MS", gap_ms);
+		env("FILTER_GAP_PERIOD_MS", period_ms);
+		env("FILTER_DAMP_MS", damp_ms);
+		const int64_t gap_ns = (int64_t)(gap_ms * 1e6), period_ns = (int64_t)(period_ms * 1e6);
+		xrt_vec3 damp_pos{};
+		bool damp_active = false;
+		int64_t last_imu_t = 0;
 
 		Stats hidden_filter_mm, hidden_filter_deg, hidden_hold_mm, hidden_hold_deg, visible_diff_mm;
 		Stats gravity_x, gravity_y, gravity_z;
@@ -1377,7 +1389,8 @@ replay_filter(const DatasetReader &dataset, const char *tracker_csv, double imu_
 		xrt_pose last_delivered = list.front().pose;
 		int64_t last_delivered_t = 0;
 		bool have_delivered = false;
-		auto hidden = [&](int64_t t) { return ((t - t0) % kGapPeriodNs) >= kGapPeriodNs - kGapLengthNs; };
+		auto hidden = [&](int64_t t) { return ((t - t0) % period_ns) >= period_ns - gap_ns; };
+		auto gap_age_ns = [&](int64_t t) { return ((t - t0) % period_ns) - (period_ns - gap_ns); };
 
 		for (const xrt_imu_sample *s : imu) {
 			xrt_vec3 a{(float)s->accel_m_s2.x, (float)s->accel_m_s2.y, (float)s->accel_m_s2.z};
@@ -1386,6 +1399,33 @@ replay_filter(const DatasetReader &dataset, const char *tracker_csv, double imu_
 			math_quat_rotate_vec3(&imu_to_led, &a, &a_led);
 			math_quat_rotate_vec3(&imu_to_led, &g, &g_led);
 			t_imu_optical_filter_push_imu(filter, s->timestamp_ns, &a_led, &g_led);
+
+			// Damped coast: from the filter's position at the gap start, integrate its velocity with decay.
+			if (hidden(s->timestamp_ns) && have_delivered) {
+				xrt_space_relation now;
+				if (t_imu_optical_filter_get_relation(filter, s->timestamp_ns, &now)) {
+					if (!damp_active) {
+						damp_pos = now.pose.position;
+						damp_active = true;
+					} else {
+						double dt = (double)(s->timestamp_ns - last_imu_t) * 1e-9;
+						double w = std::exp(-(double)gap_age_ns(s->timestamp_ns) * 1e-6 / damp_ms);
+						// FILTER_STILL_GATE=1: integrate the filter velocity only while the IMU shows
+						// motion (|gyro| above 0.3 rad/s or |accel| more than 0.5 m/s^2 from 1 g).
+						if (std::getenv("FILTER_STILL_GATE") != nullptr) {
+							double gl = std::sqrt(g.x * g.x + g.y * g.y + g.z * g.z);
+							double al = std::sqrt(a.x * a.x + a.y * a.y + a.z * a.z);
+							w = (gl > 0.3 || std::fabs(al - 9.80665) > 0.5) ? 1.0 : 0.0;
+						}
+						damp_pos.x += (float)(now.linear_velocity.x * dt * w);
+						damp_pos.y += (float)(now.linear_velocity.y * dt * w);
+						damp_pos.z += (float)(now.linear_velocity.z * dt * w);
+					}
+				}
+			} else {
+				damp_active = false;
+			}
+			last_imu_t = s->timestamp_ns;
 
 			// Gravity check while nearly still: the accelerometer rotated into the world by the optical
 			// orientation.
@@ -1442,12 +1482,16 @@ replay_filter(const DatasetReader &dataset, const char *tracker_csv, double imu_
 					    out,
 					    "%" PRIi64
 					    ",%d,%d,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,"
-					    "%.6f,%.6f\n",
+					    "%.6f,%.6f,%.1f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f\n",
 					    tp.t, device, is_hidden ? 1 : 0, tp.pose.position.x, tp.pose.position.y,
 					    tp.pose.position.z, tp.pose.orientation.x, tp.pose.orientation.y,
 					    tp.pose.orientation.z, tp.pose.orientation.w, rel.pose.position.x,
 					    rel.pose.position.y, rel.pose.position.z, rel.pose.orientation.x,
-					    rel.pose.orientation.y, rel.pose.orientation.z, rel.pose.orientation.w);
+					    rel.pose.orientation.y, rel.pose.orientation.z, rel.pose.orientation.w,
+					    is_hidden ? (double)gap_age_ns(tp.t) * 1e-6 : -1.0, last_delivered.position.x,
+					    last_delivered.position.y, last_delivered.position.z,
+					    damp_active ? damp_pos.x : NAN, damp_active ? damp_pos.y : NAN,
+					    damp_active ? damp_pos.z : NAN);
 				}
 			}
 		}
@@ -1458,7 +1502,7 @@ replay_filter(const DatasetReader &dataset, const char *tracker_csv, double imu_
 		            " reinitialisations %" PRIu64 "\n",
 		            device, imu.size(), list.size(), st.updates, st.rejections, st.reinitialisations);
 		std::printf(
-		    "  hidden %zu exposures (300 ms every 2 s): filter mm p50 %.1f p95 %.1f, deg p50 %.2f p95 %.2f;"
+		    "  hidden %zu exposures (gaps as configured): filter mm p50 %.1f p95 %.1f, deg p50 %.2f p95 %.2f;"
 		    " hold-last mm p50 %.1f p95 %.1f, deg p50 %.2f p95 %.2f\n",
 		    hidden_filter_mm.values.size(), hidden_filter_mm.pct(0.5), hidden_filter_mm.pct(0.95),
 		    hidden_filter_deg.pct(0.5), hidden_filter_deg.pct(0.95), hidden_hold_mm.pct(0.5),

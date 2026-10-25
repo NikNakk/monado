@@ -9,11 +9,13 @@
 #include "util/u_macos_display_host.h"
 
 #include <pthread.h>
+#include <stdatomic.h>
 #include <stddef.h>
 
 static pthread_mutex_t g_host_mutex = PTHREAD_MUTEX_INITIALIZER;
 static const struct u_macos_display_host_ops *g_host_ops = NULL;
 static void *g_host_ctx = NULL;
+static atomic_bool g_close_requested = false;
 
 void
 u_macos_display_host_register(const struct u_macos_display_host_ops *ops, void *ctx)
@@ -72,4 +74,16 @@ u_macos_display_host_detach(uint32_t client_id)
 		g_host_ops->detach(g_host_ctx, client_id);
 	}
 	pthread_mutex_unlock(&g_host_mutex);
+}
+
+void
+u_macos_display_host_request_close(void)
+{
+	atomic_store(&g_close_requested, true);
+}
+
+bool
+u_macos_display_host_take_close_request(void)
+{
+	return atomic_exchange(&g_close_requested, false);
 }

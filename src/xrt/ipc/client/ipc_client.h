@@ -195,6 +195,16 @@ ipc_client_compositor_import_iosurface_token(struct xrt_compositor_native *xcn,
 uint32_t
 ipc_client_space_get_id(struct xrt_space *space);
 
+/*!
+ * Wrap a service-side space id in a client @ref xrt_space handle.
+ *
+ * @param ipc_c     Connection the space id belongs to.
+ * @param id        Service-side space id.
+ * @param out_space Pointer to receive the created client space.
+ */
+void
+ipc_client_space_create(struct ipc_connection *ipc_c, uint32_t id, struct xrt_space **out_space);
+
 xrt_result_t
 ipc_client_system_devices_create(struct ipc_connection *ipc_c, struct ipc_client_system_devices **out_icsd);
 

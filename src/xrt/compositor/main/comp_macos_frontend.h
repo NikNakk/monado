@@ -36,7 +36,17 @@ comp_macos_frontend_name(struct comp_macos_frontend *frontend);
 //! Capture the handoff now; promotion runs off the presented-handler thread.
 void
 comp_macos_frontend_note_present(struct comp_macos_frontend *frontend, id<MTLDrawable> drawable);
+//! A PS VR2 display, or SIMULATED_DESKTOP=1 (a window on the built-in display).
 bool
 comp_macos_frontend_detect(void);
+//! The simulated-HMD desktop window rather than a headset display.
+bool
+comp_macos_frontend_is_desktop(struct comp_macos_frontend *frontend);
 CGDirectDisplayID
 comp_macos_frontend_display_id(NSScreen *screen);
+
+//! Capture at submission; acknowledge only when that submission was presented.
+uint64_t
+comp_macos_frontend_present_ticket(struct comp_macos_frontend *frontend);
+void
+comp_macos_frontend_note_presented(struct comp_macos_frontend *frontend, uint64_t ticket);

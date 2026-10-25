@@ -10,9 +10,9 @@
 #pragma once
 
 #include "oxr_forward_declarations.h"
-#include "oxr_interaction_profile_array.h"
 #include "oxr_pair_hashset.h"
 #include "oxr_refcounted.h"
+#include "oxr_suggested_profile_array.h"
 
 
 #ifdef __cplusplus
@@ -32,10 +32,9 @@ extern "C" {
  * - @ref action_sets: Registry of action set name and localized name pairs.
  *   Used to enforce uniqueness in xrCreateActionSet and to remove entries when
  *   an action set is destroyed.
- * - @ref suggested_profiles: Interaction profile bindings suggested by the app
- *   via xrSuggestInteractionProfileBindings. When the app calls
- *   xrAttachSessionActionSets, this array is cloned into the session’s action
- *   context so the runtime can apply those suggestions for that session.
+ * - @ref suggested_profiles: Interaction profile binding suggestions from the
+ *   app. When the app calls xrAttachSessionActionSets, this array is cloned
+ *   into the session’s action context.
  *
  * In a future extension, this context is intended to support namespaced action
  * sets and to allow plugins (e.g. in a game) to suggest their own bindings
@@ -55,7 +54,15 @@ struct oxr_instance_action_context
 	/*!
 	 * Interaction profile bindings that have been suggested by the client.
 	 */
-	struct oxr_interaction_profile_array suggested_profiles;
+	struct oxr_suggested_profile_array suggested_profiles;
+
+	/*!
+	 * Runtime binding registry used by this action context.
+	 *
+	 * Multiple action contexts may share the same registry, and future action
+	 * contexts may install a modified registry.
+	 */
+	struct oxr_binding_registry *binding_registry;
 };
 
 
@@ -66,16 +73,24 @@ struct oxr_instance_action_context
  */
 
 /*!
- * Create a new instance action context (reference count 1).
+ * Create a new instance action context (reference count 1) and install the
+ * generated binding registry.
  *
  * @param log Logger
+ * @param store Path store used to create the binding registry
  * @param out_context On success, the new context (refcount 1). Caller must
  *        call @ref oxr_refcounted_unref on context->base when done.
  * @public @memberof oxr_instance_action_context
  * @ingroup oxr_main
  */
 XRT_CHECK_RESULT XrResult
-oxr_instance_action_context_create(struct oxr_logger *log, struct oxr_instance_action_context **out_context);
+oxr_instance_action_context_create_with_registry(struct oxr_logger *log,
+                                                 struct oxr_path_store *store,
+                                                 struct oxr_instance_action_context **out_context);
+
+void
+oxr_instance_action_context_set_binding_registry(struct oxr_instance_action_context *context,
+                                                 struct oxr_binding_registry *registry);
 
 
 #ifdef __cplusplus

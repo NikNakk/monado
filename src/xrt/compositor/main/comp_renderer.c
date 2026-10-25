@@ -820,6 +820,7 @@ calc_pose_data(struct comp_renderer *r,
 #ifdef XRT_OS_OSX
 	struct comp_target_image *target_image = &r->c->target->images[r->acquired_buffer];
 	target_image->display_head_orientation_valid = false;
+	target_image->display_view_poses_valid = false;
 #endif
 
 	struct xrt_vec3 default_eye_relation = {
@@ -944,7 +945,19 @@ calc_pose_data(struct comp_renderer *r,
 		// For remote rendering targets.
 		r->c->base.frame_params.fovs[i] = fov;
 		r->c->base.frame_params.poses[i] = result_scanout_start.pose;
+#ifdef XRT_OS_OSX
+		// The same eye poses for a simulated passthrough room.
+		if (i < 2) {
+			target_image->display_view_poses[i] = result_scanout_start.pose;
+		}
+#endif
 	}
+#ifdef XRT_OS_OSX
+	const enum xrt_space_relation_flags pose_flags =
+	    XRT_SPACE_RELATION_ORIENTATION_VALID_BIT | XRT_SPACE_RELATION_POSITION_VALID_BIT;
+	target_image->display_view_poses_valid =
+	    view_count == 2 && (head_relation[0].relation_flags & pose_flags) == pose_flags;
+#endif
 }
 
 //! @pre comp_target_has_images(r->c->target)

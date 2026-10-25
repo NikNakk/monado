@@ -13,12 +13,15 @@
 #import <QuartzCore/QuartzCore.h>
 
 #include "main/comp_window.h"
+#include "main/comp_macos_presenter.h"
 #include "main/comp_macos_frontend.h"
+#include "main/comp_macos_display.h"
 #include "main/comp_window_macos_trace_buffer.h"
 #include "main/comp_window_macos_latency_guard.h"
 #include "main/comp_window_macos_passthrough_shader.h"
 #include "xrt/xrt_frame.h"
 #include "util/u_debug.h"
+#include "util/u_desktop_pose.h"
 #include "util/u_file.h"
 #include "util/u_passthrough_calibration.h"
 #include "math/m_api.h"
@@ -141,6 +144,8 @@ DEBUG_GET_ONCE_OPTION(macos_display_link, "XRT_MACOS_DISPLAY_LINK", "ca")
 DEBUG_GET_ONCE_BOOL_OPTION(macos_passthrough_rotation, "XRT_MACOS_PASSTHROUGH_ROTATION", true)
 DEBUG_GET_ONCE_NUM_OPTION(macos_passthrough_fov_deg, "XRT_MACOS_PASSTHROUGH_FOV_DEG", 150)
 DEBUG_GET_ONCE_NUM_OPTION(macos_passthrough_convergence_milli, "XRT_MACOS_PASSTHROUGH_CONVERGENCE_MILLI", 100)
+//! Experimental fixed mapping depth from each eye in millimetres; 0 keeps the rotation-only mapping at infinity.
+DEBUG_GET_ONCE_NUM_OPTION(macos_passthrough_depth_mm, "XRT_MACOS_PASSTHROUGH_DEPTH_MM", 0)
 DEBUG_GET_ONCE_NUM_OPTION(macos_passthrough_brightness_percent, "XRT_MACOS_PASSTHROUGH_BRIGHTNESS_PERCENT", 160)
 
 /*
@@ -166,6 +171,7 @@ struct comp_window_macos
 {
 	struct comp_target_swapchain base;
 	uint64_t gpu_trace_id;
+	FILE *trace_gpu;
 	struct comp_macos_frontend *frontend;
 	struct u_macos_hosted_client *hosted_client;
 	//! Borrowed from the frontend.
@@ -932,6 +938,28 @@ macos_passthrough_create_uv_maps(struct comp_window_macos *cwm)
 		          "Passthrough rotation requires a valid calibrated mapping; using static view");
 	}
 
+	/* Eye positions in head space for the fixed-depth mapping. The IPD is the headset's value at map creation;
+	 * later dial changes are not followed. */
+	double depth_m = 0;
+	struct xrt_vec3 eye_positions[2] = {{-0.0315f, 0, 0}, {0.0315f, 0, 0}};
+	long depth_mm = debug_get_num_option_macos_passthrough_depth_mm();
+	if (calibrated && depth_mm > 0) {
+		depth_m = (double)(depth_mm < 200 ? 200 : depth_mm > 100000 ? 100000 : depth_mm) / 1000.0;
+		struct xrt_vec3 eye_relation = {0.063f, 0, 0};
+		struct xrt_space_relation head = XRT_SPACE_RELATION_ZERO;
+		struct xrt_fov fovs[XRT_MAX_VIEWS] = XRT_STRUCT_INIT;
+		struct xrt_pose poses[XRT_MAX_VIEWS] = XRT_STRUCT_INIT;
+		if (xrt_device_get_view_poses(xdev, &eye_relation, os_monotonic_get_ns(), XRT_VIEW_TYPE_STEREO, 2,
+		                              &head, fovs, poses) == XRT_SUCCESS) {
+			eye_positions[0] = poses[0].position;
+			eye_positions[1] = poses[1].position;
+		}
+		COMP_INFO(cwm->base.base.c, "Experimental passthrough mapping depth %.2f m (eyes at x %.4f/%.4f m)",
+		          depth_m, eye_positions[0].x, eye_positions[1].x);
+	} else if (depth_mm > 0) {
+		COMP_WARN(cwm->base.base.c, "XRT_MACOS_PASSTHROUGH_DEPTH_MM requires a valid calibration; ignored");
+	}
+
 	const float fx = 0.3585564f;
 	const float fy = 0.3762281f;
 	const float camera_width_ratio = 1016.0f / 1024.0f;
@@ -985,10 +1013,24 @@ macos_passthrough_create_uv_maps(struct comp_window_macos *cwm)
 				map[index + 2] = tan_x;
 				map[index + 3] = tan_y_down;
 				if (calibrated) {
-					/* PS VR2 view orientations are identity relative to the head.
-					 * At infinity, eye/camera translations do not affect the ray. */
-					struct xrt_vec3 head_ray = {tan_x, -tan_y_down, -1.0f};
+					/* PS VR2 view orientations are identity relative to the head. At infinity,
+					 * eye/camera translations do not affect the ray; at a fixed depth the stored ray
+					 * becomes the camera-centred direction to that point, which GPU rotation then
+					 * uses unchanged (its translation is taken at the display pose). */
+					struct xrt_vec3 eye_ray = {tan_x, -tan_y_down, -1.0f};
+					struct xrt_vec3 head_ray;
 					struct xrt_vec2 uv;
+					if (!u_passthrough_calibration_depth_ray(&calibration.cameras[eye],
+					                                         &eye_positions[eye], &eye_ray, depth_m,
+					                                         &head_ray)) {
+						map[index + 0] = -1.0f;
+						map[index + 1] = -1.0f;
+						map[index + 2] = NAN;
+						map[index + 3] = NAN;
+						continue;
+					}
+					map[index + 2] = head_ray.x;
+					map[index + 3] = -head_ray.y;
 					if (u_passthrough_calibration_project(&calibration.cameras[eye], &head_ray,
 					                                      &uv)) {
 						map[index + 0] = uv.x;
@@ -1056,6 +1098,12 @@ macos_passthrough_init(struct comp_window_macos *cwm)
 	 * IPC devices have no passthrough sinks, as the cameras are the service's.
 	 */
 	struct xrt_device *xdev = cwm->base.base.c->xdev;
+	if (u_desktop_pose_enabled()) {
+		COMP_WARN(cwm->base.base.c,
+		          "The simulated passthrough room is drawn by the WSI presenter only "
+		          "(XRT_MACOS_PRESENTER=wsi, XRT_MACOS_WSI_PASSTHROUGH=1)");
+		return false;
+	}
 	if (xdev == NULL || xdev->set_passthrough_sinks == NULL) {
 		COMP_INFO(cwm->base.base.c,
 		          "PS VR2 passthrough unavailable: the head device has no camera source here");
@@ -2643,7 +2691,7 @@ comp_window_macos_update_timings(struct comp_target *ct)
 	// frame IDs and feedback remain valid. The presentation worker reads this atomically.
 	if (observed_period_ns > 0 && llabs(observed_period_ns - cwm->display_period_ns) > 100 &&
 	    cwm->base.upc != NULL) {
-		u_pc_fake_set_frame_period(cwm->base.upc, observed_period_ns);
+		(void)u_pc_update_frame_period(cwm->base.upc, observed_period_ns);
 		cwm->display_period_ns = observed_period_ns;
 		ct->c->frame_interval_ns = observed_period_ns;
 		COMP_INFO(ct->c, "CADisplayLink measured display period %.6fms (%.3f Hz)",
@@ -2841,6 +2889,10 @@ comp_window_macos_destroy(struct comp_target *ct)
 	}
 	macos_drain_present_worker(cwm);
 	macos_release_prefetched_drawable(cwm, "destroy_release");
+	if (cwm->trace_gpu != NULL) {
+		macos_trace_buffered_fflush(cwm->trace_gpu);
+		fclose(cwm->trace_gpu);
+	}
 	macos_timing_trace_close(cwm);
 	comp_window_macos_free_images(cwm);
 	if (cwm->render_complete_event != nil) {
@@ -2914,6 +2966,17 @@ comp_window_macos_prepare_destroy(struct comp_target *ct)
 	return !atomic_load_explicit(&cwm->present_completion_failed, memory_order_acquire);
 }
 
+static void
+macos_trace_info_gpu(struct comp_target *ct, int64_t frame_id, int64_t start_ns, int64_t end_ns, int64_t when_ns)
+{
+	struct comp_window_macos *cwm = (struct comp_window_macos *)ct;
+	comp_window_macos_info_gpu(ct, frame_id, start_ns, end_ns, when_ns);
+	if (cwm->trace_gpu != NULL) {
+		fprintf(cwm->trace_gpu, "%" PRIi64 ",%" PRIi64 ",%" PRIi64 ",%" PRIi64 "\n", frame_id, start_ns, end_ns,
+		        when_ns);
+	}
+}
+
 static struct comp_target *
 comp_window_macos_create_base(struct comp_compositor *c, struct u_macos_hosted_client *client)
 {
@@ -2975,7 +3038,8 @@ comp_window_macos_create_base(struct comp_compositor *c, struct u_macos_hosted_c
 		u_gpu_trace_present_init(&cwm->presented_state->presentation_trace, cwm->gpu_trace_id);
 	}
 	comp_target_swapchain_init_and_set_fnptrs(&cwm->base, COMP_TARGET_FORCE_FAKE_DISPLAY_TIMING);
-	cwm->base.base.info_gpu = comp_window_macos_info_gpu;
+	cwm->base.base.info_gpu = macos_trace_info_gpu;
+	cwm->trace_gpu = macos_timing_trace_open_file("compositor_gpu", "frame_id,start_ns,end_ns,when_ns");
 	for (uint32_t i = 0; i < MACOS_TARGET_IMAGE_COUNT; i++) {
 		cwm->io_surfaces[i] = XRT_GRAPHICS_BUFFER_HANDLE_INVALID;
 	}
@@ -3007,7 +3071,7 @@ detect(const struct comp_target_factory *ctf, struct comp_compositor *c)
 	(void)ctf;
 	(void)c;
 	@autoreleasepool {
-		return comp_macos_frontend_detect();
+		return !comp_macos_presenter_is_wsi() && comp_macos_frontend_detect();
 	}
 }
 
@@ -3117,127 +3181,11 @@ macos_log_refresh_mode_candidates(struct comp_target *ct)
 	CGDisplayModeRelease(current_mode);
 }
 
-static uint32_t
-macos_collect_refresh_rates(struct comp_window_macos *cwm, float *out_rates)
-{
-	CGDirectDisplayID display_id = cwm->display_id;
-	if (display_id == kCGNullDirectDisplay) {
-		return 0;
-	}
-	CGDisplayModeRef current_mode = CGDisplayCopyDisplayMode(display_id);
-	if (current_mode == NULL) {
-		return 0;
-	}
-	size_t width = CGDisplayModeGetWidth(current_mode);
-	size_t height = CGDisplayModeGetHeight(current_mode);
-	size_t pixel_width = CGDisplayModeGetPixelWidth(current_mode);
-	size_t pixel_height = CGDisplayModeGetPixelHeight(current_mode);
-	CGDisplayModeRelease(current_mode);
-
-	CFArrayRef modes = CGDisplayCopyAllDisplayModes(display_id, NULL);
-	if (modes == NULL) {
-		return 0;
-	}
-	uint32_t count = 0;
-	for (CFIndex i = 0; i < CFArrayGetCount(modes); i++) {
-		CGDisplayModeRef mode = (CGDisplayModeRef)CFArrayGetValueAtIndex(modes, i);
-		if (mode == NULL || CGDisplayModeGetWidth(mode) != width || CGDisplayModeGetHeight(mode) != height ||
-		    CGDisplayModeGetPixelWidth(mode) != pixel_width ||
-		    CGDisplayModeGetPixelHeight(mode) != pixel_height) {
-			continue;
-		}
-		double refresh_hz = CGDisplayModeGetRefreshRate(mode);
-		if (!(refresh_hz > 1.0)) {
-			continue;
-		}
-		bool duplicate = false;
-		for (uint32_t j = 0; j < count; j++) {
-			if (fabs((double)out_rates[j] - refresh_hz) < 0.05) {
-				duplicate = true;
-				break;
-			}
-		}
-		if (!duplicate && count < XRT_MAX_SUPPORTED_REFRESH_RATES) {
-			out_rates[count++] = (float)refresh_hz;
-		}
-	}
-	CFRelease(modes);
-	for (uint32_t i = 1; i < count; i++) {
-		float value = out_rates[i];
-		uint32_t j = i;
-		while (j > 0 && out_rates[j - 1] > value) {
-			out_rates[j] = out_rates[j - 1];
-			j--;
-		}
-		out_rates[j] = value;
-	}
-	return count;
-}
-
-static CGDisplayModeRef
-macos_copy_refresh_mode(struct comp_window_macos *cwm, float requested_hz, float *out_selected_hz)
-{
-	CGDirectDisplayID display_id = cwm->display_id;
-	CGDisplayModeRef current_mode =
-	    display_id != kCGNullDirectDisplay ? CGDisplayCopyDisplayMode(display_id) : NULL;
-	if (current_mode == NULL) {
-		return NULL;
-	}
-	size_t width = CGDisplayModeGetWidth(current_mode);
-	size_t height = CGDisplayModeGetHeight(current_mode);
-	size_t pixel_width = CGDisplayModeGetPixelWidth(current_mode);
-	size_t pixel_height = CGDisplayModeGetPixelHeight(current_mode);
-	CGDisplayModeRelease(current_mode);
-
-	CFArrayRef modes = CGDisplayCopyAllDisplayModes(display_id, NULL);
-	if (modes == NULL) {
-		return NULL;
-	}
-	CGDisplayModeRef selected = NULL;
-	double selected_hz = 0.0;
-	double best_error = HUGE_VAL;
-	for (CFIndex i = 0; i < CFArrayGetCount(modes); i++) {
-		CGDisplayModeRef mode = (CGDisplayModeRef)CFArrayGetValueAtIndex(modes, i);
-		if (mode == NULL || CGDisplayModeGetWidth(mode) != width || CGDisplayModeGetHeight(mode) != height ||
-		    CGDisplayModeGetPixelWidth(mode) != pixel_width ||
-		    CGDisplayModeGetPixelHeight(mode) != pixel_height) {
-			continue;
-		}
-		double refresh_hz = CGDisplayModeGetRefreshRate(mode);
-		if (!(refresh_hz > 1.0)) {
-			continue;
-		}
-		if (requested_hz <= 0.0f) {
-			if (refresh_hz > selected_hz) {
-				selected = mode;
-				selected_hz = refresh_hz;
-			}
-		} else {
-			double error = fabs(refresh_hz - (double)requested_hz);
-			if (error < best_error) {
-				best_error = error;
-				selected = mode;
-				selected_hz = refresh_hz;
-			}
-		}
-	}
-	if (selected != NULL && (requested_hz <= 0.0f || best_error < 0.5)) {
-		CGDisplayModeRetain(selected);
-	} else {
-		selected = NULL;
-	}
-	CFRelease(modes);
-	if (out_selected_hz != NULL) {
-		*out_selected_hz = (float)selected_hz;
-	}
-	return selected;
-}
-
 static xrt_result_t
 comp_window_macos_get_refresh_rates_physical(struct comp_target *ct, uint32_t *out_count, float *out_rates)
 {
 	struct comp_window_macos *cwm = (struct comp_window_macos *)ct;
-	uint32_t count = macos_collect_refresh_rates(cwm, out_rates);
+	uint32_t count = comp_macos_display_rates(cwm->display_id, XRT_MAX_SUPPORTED_REFRESH_RATES, out_rates);
 	if (count == 0) {
 		return comp_window_macos_get_refresh_rates(ct, out_count, out_rates);
 	}
@@ -3300,7 +3248,7 @@ comp_window_macos_request_refresh_rate_physical(struct comp_target *ct, float re
 	}
 
 	float selected_hz = 0.0f;
-	CGDisplayModeRef selected_mode = macos_copy_refresh_mode(cwm, requested_hz, &selected_hz);
+	CGDisplayModeRef selected_mode = comp_macos_display_copy_mode(cwm->display_id, requested_hz, &selected_hz);
 	if (selected_mode == NULL) {
 		COMP_WARN(ct->c, "PS VR2 refresh request %.3f Hz does not match an available same-geometry mode",
 		          requested_hz);
@@ -3320,11 +3268,12 @@ comp_window_macos_request_refresh_rate_physical(struct comp_target *ct, float re
 	bool display_link_was_running = macos_display_link_is_running(cwm);
 	macos_display_link_stop(cwm);
 
-	CGError cgret = CGDisplaySetDisplayMode(display_id, selected_mode, NULL);
+	// Wait for the mode to settle: CoreGraphics briefly reports transient modes.
+	bool mode_set = comp_macos_display_set_mode(display_id, selected_mode);
 	CGDisplayModeRelease(selected_mode);
-	if (cgret != kCGErrorSuccess) {
-		COMP_ERROR(ct->c, "Failed to switch PS VR2 physical refresh from %.3f to %.3f Hz (CGError %d)",
-		           current_hz, selected_hz, (int)cgret);
+	if (!mode_set) {
+		COMP_ERROR(ct->c, "Failed to switch PS VR2 physical refresh from %.3f to %.3f Hz", current_hz,
+		           selected_hz);
 		(void)macos_recreate_display_link(cwm, display_id, display_link_was_running);
 		return XRT_ERROR_OUTPUT_REQUEST_FAILURE;
 	}
@@ -3337,9 +3286,9 @@ comp_window_macos_request_refresh_rate_physical(struct comp_target *ct, float re
 		cwm->display_period_ns = (int64_t)llround((double)U_TIME_1S_IN_NS / (double)selected_hz);
 	}
 	ct->c->frame_interval_ns = cwm->display_period_ns;
+	// Update the pacer in place, so outstanding frame IDs and present-offset feedback stay valid.
 	if (cwm->base.upc != NULL) {
-		u_pc_destroy(&cwm->base.upc);
-		u_pc_fake_create(cwm->display_period_ns, os_monotonic_get_ns(), &cwm->base.upc);
+		(void)u_pc_update_frame_period(cwm->base.upc, cwm->display_period_ns);
 	}
 	[CATransaction flush];
 	macos_schedule_drawable_slot(cwm);
@@ -3422,6 +3371,9 @@ static bool
 create_hosted_target(const struct comp_target_factory *ctf, struct comp_compositor *c, struct comp_target **out_ct)
 {
 	const struct comp_macos_hosted_target_factory *factory = (const struct comp_macos_hosted_target_factory *)ctf;
+	if (comp_macos_presenter_is_wsi()) {
+		return comp_window_macos_wsi_create_hosted(c, factory->client, out_ct);
+	}
 	*out_ct = comp_window_macos_create_with_client(c, factory->client);
 	return *out_ct != NULL;
 }
@@ -3459,7 +3411,8 @@ comp_window_macos_hosted_factory_create(struct u_macos_hosted_client *client)
 	if (factory == NULL) {
 		return NULL;
 	}
-	factory->base = comp_target_factory_macos;
+	factory->base =
+	    comp_macos_presenter_is_wsi() ? comp_target_factory_macos_wsi_generic : comp_target_factory_macos;
 	factory->base.name = "macOS Hosted Metal Layer";
 	factory->base.identifier = "macos-hosted";
 	factory->base.disable_peek = true;

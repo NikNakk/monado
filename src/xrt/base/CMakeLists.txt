@@ -22,6 +22,9 @@ target_sources(
 		b_hand_tracker.cpp
 		b_hand_tracker.h
 		b_hand_tracker.hpp
+		b_io_cache.cpp
+		b_io_cache.h
+		b_io_cache.hpp
 		b_session.c
 		b_session.h
 		b_space_overseer.c

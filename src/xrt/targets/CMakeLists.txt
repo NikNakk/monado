@@ -18,6 +18,7 @@ endif()
 
 if(XRT_FEATURE_OPENXR)
 	add_subdirectory(openxr)
+	add_subdirectory(binding_inspector)
 endif()
 
 if(XRT_FEATURE_OPENVR)

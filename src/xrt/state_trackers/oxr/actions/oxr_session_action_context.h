@@ -14,13 +14,20 @@
 
 #include "oxr_forward_declarations.h"
 #include "oxr_extension_support.h"
+#include "oxr_io_cache.h"
+#include "oxr_priority_group_cache.h"
 #include "oxr_subaction.h"
-#include "oxr_interaction_profile_array.h"
+#include "oxr_suggested_profile_array.h"
 
 
 #ifdef __cplusplus
 extern "C" {
 #endif
+
+
+struct xrt_system_devices;
+struct xrt_space_overseer;
+struct oxr_logger;
 
 
 /*
@@ -92,16 +99,28 @@ struct oxr_session_action_context
 	 */
 
 	/*!
-	 * Clone of all suggested binding profiles at the point of action set/session attachment.
+	 * Clone of suggested binding profiles at action set/session attachment, this
+	 * is mandated by the OpenXR specification. It says that the suggested binding
+	 * profiles should be snapshotted when action sets are attached to the session.
+	 *
 	 * @ref oxr_session_attach_action_sets
 	 */
-	struct oxr_interaction_profile_array profiles_on_attachment;
+	struct oxr_suggested_profile_array profiles_on_attachment;
+
+	/*!
+	 * Binding registry used to resolve this session action context.
+	 */
+	struct oxr_binding_registry *binding_registry;
 
 	//! Cache of the last known system roles generation_id
 	uint64_t dynamic_roles_generation_id;
 
 	//! Protects access to dynamic_roles_generation_id during sync actions
 	struct os_mutex sync_actions_mutex;
+
+	struct oxr_priority_group_cache priority_group_cache;
+
+	struct oxr_io_cache io_cache;
 
 	/*!
 	 * Currently bound interaction profile.
@@ -129,11 +148,16 @@ struct oxr_session_action_context
  *
  * @public @memberof oxr_session_action_context
  */
-XRT_NONNULL_ALL XRT_CHECK_RESULT XrResult
-oxr_session_action_context_init(struct oxr_session_action_context *action_context);
+XRT_CHECK_RESULT XrResult
+oxr_session_action_context_init(struct oxr_session_action_context *action_context,
+                                struct xrt_system_devices *xsysd,
+                                struct xrt_space_overseer *xso);
 
 /*!
  * Finalize and cleanup the action context for a session.
+ *
+ * Safe to call after a failed @ref oxr_session_action_context_init; only resources
+ * that init successfully created are torn down.
  *
  * @public @memberof oxr_session_action_context
  */

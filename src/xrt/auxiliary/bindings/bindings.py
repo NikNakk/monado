@@ -179,22 +179,19 @@ class Component:
         self.components_for_subpath = components_for_subpath
 
     def get_full_openxr_paths(self):
-        """A group of paths that derive from the same component.
-        For example .../thumbstick, .../thumbstick/x, .../thumbstick/y
-        """
-        paths = []
-
+        """Concrete OpenXR component paths for this component."""
         basepath = self.subaction_path + self.identifier_json_path
 
         if self.component_name == "position":
-            paths.append(basepath + "/" + "x")
-            paths.append(basepath + "/" + "y")
-            paths.append(basepath)
-        else:
-            paths.append(basepath + "/" + self.component_name)
-            paths.append(basepath)
+            return [
+                basepath + "/x",
+                basepath + "/y",
+            ]
 
-        return paths
+        if self.component_name == "haptic":
+            return [basepath]
+
+        return [basepath + "/" + self.component_name]
 
     def get_full_path(self):
         return self.subaction_path + self.identifier_json_path + '/' + self.component_name
@@ -413,6 +410,9 @@ class Profile:
         collector = PathsByLengthCollector()
         for component in self.components:
             collector.add_paths(component.get_full_openxr_paths())
+        for identifier in self.identifiers:
+            if any(component.component_name not in ["pose", "haptic"] for component in identifier.components):
+                collector.add_path(identifier.identifier_path)
         self.subpaths_by_length = collector.to_dict_of_lists()
 
         collector = PathsByLengthCollector()

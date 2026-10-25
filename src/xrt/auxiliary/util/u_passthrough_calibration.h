@@ -35,6 +35,18 @@ u_passthrough_calibration_project(const struct u_passthrough_camera *camera,
                                   const struct xrt_vec3 *head_ray,
                                   struct xrt_vec2 *out_uv);
 
+/*!
+ * Fixed-depth mapping: the head-space ray from @p eye_position meets a sphere of radius @p depth_m around the eye;
+ * return the direction to that point from the camera centre, scaled to z = -1 (the map's tangent form). A depth of
+ * zero or less keeps @p head_ray (infinity). False when the point is not in front of the camera's head plane.
+ */
+bool
+u_passthrough_calibration_depth_ray(const struct u_passthrough_camera *camera,
+                                    const struct xrt_vec3 *eye_position,
+                                    const struct xrt_vec3 *head_ray,
+                                    double depth_m,
+                                    struct xrt_vec3 *out_ray);
+
 //! Require mapped hardware timing and a frame less than 250 ms old (never future-dated).
 bool
 u_passthrough_calibration_frame_is_fresh(int64_t timestamp_ns, int64_t source_timestamp_ns, int64_t now_ns);

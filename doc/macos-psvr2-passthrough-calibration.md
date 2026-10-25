@@ -788,3 +788,33 @@ The user also reports that latency now feels fine with rotational timewarp.
 The earlier subjective lag concern is therefore no longer an immediate blocker.
 Formal camera-age, exposure/display timing and latency measurements remain a
 later follow-up; no measured latency value is claimed. Translation stays deferred.
+
+
+## WSI parity prepared, 2026-10-16
+
+The WSI integration now reuses the native calibration helpers and Metal rotation
+shader, automatic serial-bound file selection, header-time capture pose and the
+compute renderer's exact display orientation. Its user-operated camera-only,
+blended service and blended hosted checks are prepared in the
+[WSI migration note](macos-wsi-migration.md#calibrated-wsi-passthrough-prepared-16-october-2026).
+The native hardware confirmations above remain valid; they do not constitute
+WSI calibration/rotation validation. Defaults await that check.
+
+
+### WSI visual follow-up, 2026-10-16
+
+Camera-only service WSI is user-confirmed good, and the complete blended scene
+aligns during gentle motion. Rapid motion produces shimmer that the user does
+not see with the native control. Matching camera-queue priority has no subjective
+benefit. Earlier compositor wake improves cadence from about 89 to 102 frames/s
+on the 120 Hz display but leaves intermittent smoothness. Stage tracing measures
+a roughly 6 ms median blocking bridge, chiefly waiting for distortion and Metal
+camera completion on the compositor thread. Keep native default while pursuing
+GPU handoff; retain the calibrated geometry. See
+[the measured bridge evidence](macos-wsi-migration.md#blocking-bridge-measured-16-october-2026).
+
+
+The subsequent [Vulkan camera replacement](macos-wsi-vulkan-passthrough.md)
+keeps these calibration/rotation rules while removing cross-API CPU waits.
+Its first functional capture has much better cadence; renewed moving-head
+visual acceptance is still required.

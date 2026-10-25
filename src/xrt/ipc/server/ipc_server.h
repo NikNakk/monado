@@ -63,6 +63,7 @@ extern "C" {
 #define IPC_MAX_CLIENT_HAND_TRACKERS 16
 #define IPC_MAX_CLIENT_APP_INSTANCES 4
 #define IPC_MAX_CLIENT_APP_SYSTEMS (IPC_MAX_CLIENT_APP_INSTANCES * 4)
+#define IPC_MAX_CLIENT_IO_CACHES 16
 #define IPC_MAX_CLIENT_SEMAPHORES 8
 #define IPC_MAX_CLIENT_SWAPCHAINS (XRT_MAX_LAYERS * 2)
 #define IPC_MAX_CLIENT_SPACES 128
@@ -71,6 +72,7 @@ extern "C" {
 struct xrt_instance;
 struct xrt_body_tracker;
 struct xrt_hand_tracker;
+struct xrt_io_cache;
 struct xrt_compositor;
 struct xrt_compositor_native;
 
@@ -143,6 +145,11 @@ struct ipc_client_state
 		 * Array of app systems owned by this client.
 		 */
 		struct xrt_app_system *xasys[IPC_MAX_CLIENT_APP_SYSTEMS];
+
+		/*!
+		 * Input/output caches owned by this client.
+		 */
+		struct xrt_io_cache *xics[IPC_MAX_CLIENT_IO_CACHES];
 	} objects;
 
 	//! Session for this client.

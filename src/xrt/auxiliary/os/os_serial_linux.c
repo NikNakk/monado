@@ -20,6 +20,7 @@
 #include <util/u_logging.h>
 
 #include "os_serial.h"
+#include "os/os_fd.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -28,7 +29,6 @@
 #include <errno.h>
 #include <termios.h>
 #include <unistd.h>
-#include <poll.h>
 #include <sys/ioctl.h>
 
 struct serial_linux
@@ -48,34 +48,8 @@ static ssize_t
 linux_serial_read(struct os_serial_device *serial_dev, uint8_t *data, size_t size, int milliseconds)
 {
 	struct serial_linux *serial = serial_linux(serial_dev);
-	struct pollfd fds;
-	int ret;
 
-	if (milliseconds >= 0) {
-		fds.fd = serial->fd;
-		fds.events = POLLIN;
-		fds.revents = 0;
-		ret = poll(&fds, 1, milliseconds);
-
-		if (ret == -1 || ret == 0) {
-			// Error or timeout.
-			return ret;
-		}
-
-		if (fds.revents & (POLLERR | POLLHUP | POLLNVAL)) {
-			// Device disconnect?
-			return -1;
-		}
-	}
-
-	ret = read(serial->fd, data, size);
-
-	if (ret < 0 && (errno == EAGAIN || errno == EINPROGRESS)) {
-		// Process most likely received a signal.
-		ret = 0;
-	}
-
-	return ret;
+	return os_fd_read(serial->fd, data, size, milliseconds);
 }
 
 static ssize_t

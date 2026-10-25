@@ -251,3 +251,52 @@ deferred. Static calibrated passthrough remains the fallback for unavailable
 timing or tracking. The user confirmed camera/virtual alignment during yaw,
 pitch and roll with hosted compositing at `3d6f136e5`, then requested these defaults.
 See the [implementation and launchd check](macos-psvr2-passthrough-calibration.md#opt-in-camera-rotational-reprojection-2026-10-08).
+
+## Simultaneous Sense mode-4 camera delivery (2026-10-25)
+
+A guided-survey wearer run exposed a missing source path: mode-4 frames reached
+the optical tracker but never the passthrough sinks. The driver now converts the
+lower pair into the existing BC4 transport while keeping Sense's mode 4 active.
+The path runs only for an attached passthrough consumer. Pixel/delivery/lifetime
+tests pass; simultaneous camera image, alignment and tracking quality still need
+hardware validation. See [the source diagnosis and limits](macos-pssense-controller-survey.md#version-3-mode-4-passthrough-and-options-reset).
+
+With `PSVR2_LED_DETECTOR_BLOBS` (a 6DoF default), Sense tracking does not need
+mode 4, and `PSVR2_CAMERA_MODE=16` gives native passthrough alongside it; the
+detector stream then owns exposure timing. The user confirmed this on 25 October. See
+[version 4](macos-pssense-controller-survey.md#version-4-mode-16-passthrough-with-detector-tracking).
+
+## Near-object swim during head rotation (2026-10-25)
+
+With Sense tracking verified world-stable during head turns, the user sees
+fixed hands move slightly in the passthrough image as the head rotates. This is
+the expected limit of the rotation-only mapping at infinity: the lower cameras
+are several centimetres ahead of and below the eyes, so the camera ray to a
+nearby point differs from the eye ray by an amount that changes with where the
+point sits in the view. The installed calibration's translations (about 10 cm
+forward, 2 cm down; hand-eye translation not trusted in the source) predict a
+few degrees at 0.45 m and under about 1° beyond 3 m. The next step is an opt-in
+fixed-depth reprojection: intersect each eye ray with a sphere at a chosen
+distance and project that point from the camera centre, then compare
+infinity with about 0.5 m and 1 m.
+
+`XRT_MACOS_PASSTHROUGH_DEPTH_MM` now implements this as an opt-in (default 0,
+infinity). Each optical eye ray meets a sphere of the given radius around its
+eye; the map stores the direction to that point from the calibrated camera
+centre, which the existing GPU rotation then uses unchanged. The camera
+translation is therefore taken at the display pose rather than the capture
+pose, an error of roughly translation × rotation during capture-to-display
+latency divided by depth: under 1° for fast turns at 0.5 m. The eye positions
+use the headset IPD at map creation. Rays whose point would be level with or
+behind the camera are masked. Built into both the Metal and Vulkan presenters,
+with unit tests; the comparison of infinity, 2 m, 1 m and 0.5 m on the headset
+is prepared in `20261025-depth-hold-v4/commands.txt` and is pending.
+
+### Fixed-depth headset comparison (25 October 2026)
+
+User-operated, working tree over `0daaffc4a`, `20261025-depth-hold-v4`
+(client compositing, mode 16, `--generic-controller --passthrough`): depths 0
+(infinity), 2 m, 1 m and 0.5 m, each confirmed in its client log. Hands swam
+less at the smaller depths, but the room looked worse, most of all at 0.5 m.
+The user prefers infinity overall. The default stays 0 (infinity);
+`XRT_MACOS_PASSTHROUGH_DEPTH_MM` remains an opt-in for close-range work.

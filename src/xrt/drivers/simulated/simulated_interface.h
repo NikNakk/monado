@@ -41,6 +41,8 @@ enum simulated_movement
 	SIMULATED_MOVEMENT_WOBBLE,
 	SIMULATED_MOVEMENT_ROTATE,
 	SIMULATED_MOVEMENT_STATIONARY,
+	//! Steered from desktop input, see @ref u_desktop_pose.h.
+	SIMULATED_MOVEMENT_DESKTOP,
 };
 
 /*!

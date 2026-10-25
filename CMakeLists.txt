@@ -404,6 +404,12 @@ option(XRT_FEATURE_OPENXR_ACTIVE_ACTION_SET_PRIORITY "Enable XR_EXT_active_actio
 option(XRT_FEATURE_OPENXR_BODY_TRACKING_BD "Enable XR_BD_body_tracking (PICO)" OFF)
 option(XRT_FEATURE_OPENXR_BODY_TRACKING_FB "Enable XR_FB_body_tracking" OFF)
 option(XRT_FEATURE_OPENXR_DISPLAY_REFRESH_RATE "Enable XR_FB_display_refresh_rate" ON)
+if(APPLE)
+	set(XRT_OPENXR_ENUMERATE_SWAPCHAIN_FORMATS2_DEFAULT OFF)
+else()
+	set(XRT_OPENXR_ENUMERATE_SWAPCHAIN_FORMATS2_DEFAULT ON)
+endif()
+option(XRT_FEATURE_OPENXR_ENUMERATE_SWAPCHAIN_FORMATS2 "Enable XR_EXT_enumerate_swapchain_formats2" ${XRT_OPENXR_ENUMERATE_SWAPCHAIN_FORMATS2_DEFAULT})
 option(XRT_FEATURE_OPENXR_FACE_TRACKING_ANDROID "Enable XR_ANDROID_face_tracking" ON)
 option(XRT_FEATURE_OPENXR_FACE_TRACKING2_FB "Enable XR_FB_face_tracking2" ON)
 option(XRT_FEATURE_OPENXR_FB_SWAPCHAIN_UPDATE_STATE "Enable XR_FB_swapchain_update_state" OFF)
@@ -436,9 +442,6 @@ option_with_deps(XRT_FEATURE_OPENXR_BODY_TRACKING_FIDELITY_META "Enable XR_META_
 option(XRT_FEATURE_OPENXR_INTERACTION_EXT_EYE_GAZE "Enable XR_EXT_eye_gaze_interaction" ON)
 option(XRT_FEATURE_OPENXR_INTERACTION_EXT_HAND "Enable XR_EXT_hand_interaction" ON)
 option(XRT_FEATURE_OPENXR_INTERACTION_EXT_PALM_POSE "Enable XR_EXT_palm_pose" OFF)
-# This can't be enabled currently because the current code in Monado doesn't
-# follow the spec. Common code or driver code to correctly map to the generic
-# controller interaction profile will need to be added.
 option(XRT_FEATURE_OPENXR_INTERACTION_KHR_GENERIC "Enable XR_KHR_generic_controller" OFF)
 option(XRT_FEATURE_OPENXR_INTERACTION_ML2 "Enable XR_ML_ml2_controller_interaction" ON)
 option(XRT_FEATURE_OPENXR_INTERACTION_MNDX "Enable XR_MNDX_ball_on_a_stick_controller, XR_MNDX_hydra, XR_MNDX_flipvr, and XR_MNDX_system_buttons" ON)
@@ -550,6 +553,13 @@ endif()
 
 if(XRT_HAVE_XLIB AND NOT XRT_HAVE_XRANDR)
 	message(WARNING "XRT_HAVE_XLIB requires XRT_HAVE_XRANDR but XRT_HAVE_XRANDR is disabled")
+endif()
+
+if(XRT_HAVE_OPENGL_GLX AND NOT XRT_HAVE_XLIB)
+	message(
+		FATAL_ERROR
+			"XRT_HAVE_OPENGL_GLX requires XRT_HAVE_XLIB but XRT_HAVE_XLIB is disabled"
+		)
 endif()
 
 if(XRT_HAVE_OPENGLES AND NOT XRT_HAVE_EGL)
@@ -703,6 +713,7 @@ if(XRT_MODULE_OPENXR_STATE_TRACKER)
 	message(STATUS "#    FEATURE_OPENXR_BODY_TRACKING_FULL_BODY_META:           ${XRT_FEATURE_OPENXR_BODY_TRACKING_FULL_BODY_META}")
 	message(STATUS "#    FEATURE_OPENXR_DEBUG_UTILS:                            ${XRT_FEATURE_OPENXR_DEBUG_UTILS}")
 	message(STATUS "#    FEATURE_OPENXR_DISPLAY_REFRESH_RATE:                   ${XRT_FEATURE_OPENXR_DISPLAY_REFRESH_RATE}")
+	message(STATUS "#    FEATURE_OPENXR_ENUMERATE_SWAPCHAIN_FORMATS2:           ${XRT_FEATURE_OPENXR_ENUMERATE_SWAPCHAIN_FORMATS2}")
 	message(STATUS "#    FEATURE_OPENXR_FACE_TRACKING2_FB:                      ${XRT_FEATURE_OPENXR_FACE_TRACKING2_FB}")
 	message(STATUS "#    FEATURE_OPENXR_FACE_TRACKING_ANDROID:                  ${XRT_FEATURE_OPENXR_FACE_TRACKING_ANDROID}")
 	message(STATUS "#    FEATURE_OPENXR_FACIAL_TRACKING_HTC:                    ${XRT_FEATURE_OPENXR_FACIAL_TRACKING_HTC}")

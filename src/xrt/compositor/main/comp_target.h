@@ -68,6 +68,9 @@ struct comp_target_image
 	//! Head orientation used for this image's timewarp, before eye offsets.
 	struct xrt_quat display_head_orientation;
 	bool display_head_orientation_valid;
+	//! Each eye's world pose at the start of scanout, as used for timewarp.
+	struct xrt_pose display_view_poses[2];
+	bool display_view_poses_valid;
 };
 
 /*!
@@ -138,6 +141,9 @@ struct comp_target
 {
 	//! Owning compositor.
 	struct comp_compositor *c;
+
+	//! Explicit opt-out for targets without a configured passthrough path.
+	bool passthrough_unsupported;
 
 	//! Name of the backing system.
 	const char *name;
@@ -352,7 +358,10 @@ struct comp_target
 	xrt_result_t (*get_current_refresh_rate)(struct comp_target *ct, float *out_display_refresh_rate_hz);
 
 	/*!
-	 * Get the current refresh rate for the compositor target
+	 * Request a refresh rate for the compositor target.
+	 *
+	 * The target updates its pacer and compositor frame_interval_ns when the
+	 * change takes effect. A successful same-rate request preserves its measured period.
 	 *
 	 * @param ct                      The compositor target.
 	 * @param display_refresh_rate_hz The requested refresh rate, in Hz.

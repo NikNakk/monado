@@ -42,6 +42,14 @@ SwapchainCache::ensureSwapchain(xrt_compositor *xc,
 		return XRT_SUCCESS;
 	}
 
+	// OpenVR apps will sometimes do silly things, this stops that
+	width = MAX(width, 1);
+	height = MAX(height, 1);
+
+	if (width > xc->info.max_texture_size || height > xc->info.max_texture_size) {
+		return XRT_ERROR_ALLOCATION;
+	}
+
 	// Free the existing swapchain if it exists, since the cache failed
 	if (this->xsc != nullptr) {
 		this->width = 0;
@@ -207,7 +215,8 @@ vr::EVRCompositorError
 Compositor::submit(openvr_logger &logger,
                    vr::EVREye eye,
                    const vr::Texture_t &texture,
-                   const vr::VRTextureBounds_t &bounds,
+                   uint32_t array_index,
+                   vr::VRTextureBounds_t bounds,
                    vr::EVRSubmitFlags nSubmitFlags)
 {
 	// @todo return DoNotHaveFocus if the application doesn't have focus
@@ -215,13 +224,14 @@ Compositor::submit(openvr_logger &logger,
 	// @todo return SharedTexturesNotSupported when the app doesn't use CreateDXGIFactory1 or later
 	// @todo return TextureUsesUnsupportedFormat when the app uses a DXGI non-sharable format
 
+	// SteamVR returns InvalidTexture first
+	if (texture.handle == nullptr) {
+		return vr::EVRCompositorError::VRCompositorError_InvalidTexture;
+	}
+
 	// We don't have a compositor eg. we're not a scene application.
 	if (this->xsysc == nullptr) {
 		return vr::EVRCompositorError::VRCompositorError_IsNotSceneApplication;
-	}
-
-	if (texture.handle == nullptr) {
-		return vr::EVRCompositorError::VRCompositorError_InvalidTexture;
 	}
 
 	// Eye has already been submit
@@ -230,12 +240,17 @@ Compositor::submit(openvr_logger &logger,
 		return vr::EVRCompositorError::VRCompositorError_AlreadySubmitted;
 	}
 
+	bounds.uMin = MAX(0.0f, bounds.uMin);
+	bounds.vMin = MAX(0.0f, bounds.vMin);
+	bounds.uMax = MIN(1.0f, bounds.uMax);
+	bounds.vMax = MIN(1.0f, bounds.vMax);
+
 	switch (texture.eType) {
 #ifdef XRT_HAVE_VULKAN
 	case vr::ETextureType::TextureType_Vulkan: {
 		// Supported.
 		auto error = this->submitVulkan(logger, eye, *static_cast<vr::VRVulkanTextureData_t *>(texture.handle),
-		                                texture.eColorSpace, bounds);
+		                                array_index, texture.eColorSpace, bounds);
 
 		if (error != vr::EVRCompositorError::VRCompositorError_None) {
 			return error;

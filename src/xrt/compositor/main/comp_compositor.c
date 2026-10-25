@@ -298,7 +298,24 @@ static bool
 compositor_init_renderer(struct comp_compositor *c);
 
 static void
-compositor_session_cleanup(struct comp_compositor *c);
+compositor_session_cleanup_locked(struct comp_compositor *c);
+
+/*!
+ * Applies a display refresh rate request, with the refresh request mutex held:
+ * on the compositor thread between frames, or on the caller's thread while no
+ * session is running.
+ */
+static xrt_result_t
+compositor_apply_refresh_rate_locked(void *ptr, float display_refresh_rate_hz)
+{
+	struct comp_compositor *c = (struct comp_compositor *)ptr;
+	if (c->target == NULL || c->target->request_refresh_rate == NULL) {
+		return XRT_SUCCESS;
+	}
+
+	// The target owns its measured period, including on a successful same-rate request.
+	return comp_target_request_refresh_rate(c->target, display_refresh_rate_hz);
+}
 
 static xrt_result_t
 compositor_begin_session(struct xrt_compositor *xc, const struct xrt_begin_session_info *info)
@@ -306,19 +323,28 @@ compositor_begin_session(struct xrt_compositor *xc, const struct xrt_begin_sessi
 	struct comp_compositor *c = comp_compositor(xc);
 	COMP_DEBUG(c, "BEGIN_SESSION");
 
+	// Refresh requests must not see a half-created target.
+	comp_refresh_request_lock(&c->refresh_request);
+
 	// clang-format off
 	if (c->deferred_surface) {
 		if (!compositor_init_window_post_vulkan(c) ||
 		    !compositor_init_swapchain(c) ||
 		    !compositor_init_renderer(c)) {
 			COMP_ERROR(c, "Failed to init compositor %p", (void *)c);
-			compositor_session_cleanup(c);
+			compositor_session_cleanup_locked(c);
+			comp_refresh_request_unlock(&c->refresh_request);
 			return XRT_ERROR_VULKAN;
 		}
 		comp_target_set_title(c->target, WINDOW_TITLE);
 		comp_renderer_add_debug_vars(c->r);
 	}
 	// clang-format on
+
+	// From here on the compositor thread applies refresh requests between frames.
+	comp_refresh_request_set_session_active_locked(&c->refresh_request, true, compositor_apply_refresh_rate_locked,
+	                                               c);
+	comp_refresh_request_unlock(&c->refresh_request);
 
 	return XRT_SUCCESS;
 }
@@ -329,13 +355,18 @@ compositor_end_session(struct xrt_compositor *xc)
 	struct comp_compositor *c = comp_compositor(xc);
 	COMP_DEBUG(c, "END_SESSION");
 
-	compositor_session_cleanup(c);
+	// Apply any outstanding request before frames stop, then destroy a deferred target.
+	comp_refresh_request_lock(&c->refresh_request);
+	comp_refresh_request_set_session_active_locked(&c->refresh_request, false, compositor_apply_refresh_rate_locked,
+	                                               c);
+	compositor_session_cleanup_locked(c);
+	comp_refresh_request_unlock(&c->refresh_request);
 
 	return XRT_SUCCESS;
 }
 
 static void
-compositor_session_cleanup(struct comp_compositor *c)
+compositor_session_cleanup_locked(struct comp_compositor *c)
 {
 	if (c->deferred_surface) {
 // Make sure we don't have anything to destroy.
@@ -367,6 +398,9 @@ compositor_predict_frame(struct xrt_compositor *xc,
 #endif
 
 	COMP_SPEW(c, "PREDICT_FRAME");
+
+	// Between frames, so the target and its pacer are not in use.
+	comp_refresh_request_process(&c->refresh_request, compositor_apply_refresh_rate_locked, c);
 
 	comp_target_update_timings(c->target);
 
@@ -469,6 +503,14 @@ compositor_layer_begin(struct xrt_compositor *xc, const struct xrt_layer_frame_d
 	c->passthrough_active = false;
 	c->passthrough_has_application_layers = false;
 	return comp_layer_accum_begin(&c->base.layer_accum, data);
+}
+
+static xrt_result_t
+compositor_create_passthrough(struct xrt_compositor *xc, const struct xrt_passthrough_create_info *info)
+{
+	(void)info;
+	struct comp_compositor *c = comp_compositor(xc);
+	return c->target != NULL && c->target->passthrough_unsupported ? XRT_ERROR_FEATURE_NOT_SUPPORTED : XRT_SUCCESS;
 }
 
 static xrt_result_t
@@ -605,10 +647,17 @@ compositor_get_display_refresh_rate(struct xrt_compositor *xc, float *out_displa
 #else
 	struct comp_compositor *c = comp_compositor(xc);
 
+	// A deferred target may be created or destroyed by a session transition.
+	comp_refresh_request_lock(&c->refresh_request);
+	xrt_result_t xret = XRT_SUCCESS;
 	if (c->target && c->target->get_current_refresh_rate) {
-		return comp_target_get_current_refresh_rate(c->target, out_display_refresh_rate_hz);
+		xret = comp_target_get_current_refresh_rate(c->target, out_display_refresh_rate_hz);
 	} else {
 		*out_display_refresh_rate_hz = (float)(1. / time_ns_to_s(c->frame_interval_ns));
+	}
+	comp_refresh_request_unlock(&c->refresh_request);
+	if (xret != XRT_SUCCESS) {
+		return xret;
 	}
 #endif
 
@@ -644,14 +693,11 @@ compositor_request_display_refresh_rate(struct xrt_compositor *xc, float display
 	}
 	dlclose(android_handle);
 #else
+	// A mode switch can take a second or more on some displays.
+	const uint64_t timeout_ns = 5 * (uint64_t)U_TIME_1S_IN_NS;
 	struct comp_compositor *c = comp_compositor(xc);
-	if (c->target && c->target->request_refresh_rate) {
-		xrt_result_t result = comp_target_request_refresh_rate(c->target, display_refresh_rate_hz);
-		// Assume refresh rate change is immediate
-		if (result == XRT_SUCCESS)
-			c->frame_interval_ns = U_TIME_1S_IN_NS / display_refresh_rate_hz;
-		return result;
-	}
+	return comp_refresh_request_submit(&c->refresh_request, display_refresh_rate_hz, timeout_ns,
+	                                   compositor_apply_refresh_rate_locked, c);
 #endif
 	return XRT_SUCCESS;
 }
@@ -663,6 +709,9 @@ compositor_destroy(struct xrt_compositor *xc)
 	struct vk_bundle *vk = get_vk(c);
 
 	COMP_DEBUG(c, "COMP_DESTROY");
+
+	// Fail any waiting refresh request; no session is running any more.
+	comp_refresh_request_fini(&c->refresh_request);
 
 #ifdef XRT_OS_OSX
 	// Final device-owned work is distinct from client cancellation. A bounded
@@ -1129,6 +1178,7 @@ const struct comp_target_factory *ctfs[] = {
 #endif
 #ifdef XRT_OS_OSX
     &comp_target_factory_macos,
+    &comp_target_factory_macos_wsi_generic,
 #endif
 #ifdef VK_USE_PLATFORM_XLIB_XRANDR_EXT
     &comp_target_factory_direct_nvidia,
@@ -1425,10 +1475,12 @@ comp_main_create_system_compositor(struct xrt_device *xdev,
 
 	// Do this as early as possible.
 	comp_base_init(&c->base);
+	comp_refresh_request_init(&c->refresh_request);
 
 	/* Override the generic no-op passthrough hooks for the native compositor. */
 	iface->layer_begin = compositor_layer_begin;
 	iface->layer_passthrough = compositor_layer_passthrough;
+	iface->create_passthrough = compositor_create_passthrough;
 
 	// Init the settings to default.
 	comp_settings_init(&c->settings, xdev);

@@ -31,6 +31,7 @@
 #include <unistd.h>
 
 #include <algorithm>
+#include <chrono>
 #include <array>
 #include <cmath>
 #include <cstdio>
@@ -39,6 +40,8 @@
 #include <mutex>
 #include <string>
 #include <vector>
+#include <time.h>
+#include "psvr2_controller_survey.h"
 
 /*!
  * A zero-initialised OpenXR structure with its type set. The usual
@@ -90,6 +93,10 @@ static gpu_timing_state g_gpu_timing_foveated_standard;
 static void
 record_gpu_timing(gpu_timing_state &state, const char *label, id<MTLCommandBuffer> command_buffer)
 {
+	if (command_buffer.status == MTLCommandBufferStatusError) {
+		fprintf(stderr, "psvr2-openxr-test: GPU command error: %s\n",
+		        command_buffer.error.localizedDescription.UTF8String);
+	}
 	const CFTimeInterval start = command_buffer.GPUStartTime;
 	const CFTimeInterval end = command_buffer.GPUEndTime;
 	if (!(end > start)) {
@@ -146,6 +153,9 @@ struct xr_api
 	PFN_xrGetInstanceProcAddr get_instance_proc_addr = nullptr;
 	PFN_xrEnumerateInstanceExtensionProperties enumerate_instance_extension_properties = nullptr;
 	PFN_xrCreateInstance create_instance = nullptr;
+	PFN_xrEnumerateDisplayRefreshRatesFB enumerate_refresh = nullptr;
+	PFN_xrGetDisplayRefreshRateFB get_refresh = nullptr;
+	PFN_xrRequestDisplayRefreshRateFB request_refresh = nullptr;
 	PFN_xrDestroyInstance destroy_instance = nullptr;
 	PFN_xrGetInstanceProperties get_instance_properties = nullptr;
 	PFN_xrGetSystem get_system = nullptr;
@@ -416,6 +426,21 @@ static std::array<uint8_t, 7>
 glyph_5x7(char c)
 {
 	switch (c) {
+	case 'B': return {0x1e, 0x11, 0x11, 0x1e, 0x11, 0x11, 0x1e};
+	case 'J': return {0x07, 0x02, 0x02, 0x02, 0x12, 0x12, 0x0c};
+	case 'Q': return {0x0e, 0x11, 0x11, 0x11, 0x15, 0x12, 0x0d};
+	case 'U': return {0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x0e};
+	case 'W': return {0x11, 0x11, 0x11, 0x15, 0x15, 0x1b, 0x11};
+	case 'Z': return {0x1f, 0x01, 0x02, 0x04, 0x08, 0x10, 0x1f};
+	case '0': return {0x0e, 0x11, 0x13, 0x15, 0x19, 0x11, 0x0e};
+	case '4': return {0x02, 0x06, 0x0a, 0x12, 0x1f, 0x02, 0x02};
+	case '5': return {0x1f, 0x10, 0x10, 0x1e, 0x01, 0x01, 0x1e};
+	case '6': return {0x0e, 0x10, 0x10, 0x1e, 0x11, 0x11, 0x0e};
+	case '7': return {0x1f, 0x01, 0x02, 0x04, 0x08, 0x08, 0x08};
+	case '8': return {0x0e, 0x11, 0x11, 0x0e, 0x11, 0x11, 0x0e};
+	case '9': return {0x0e, 0x11, 0x11, 0x0f, 0x01, 0x01, 0x0e};
+	case '/': return {0x01, 0x02, 0x02, 0x04, 0x08, 0x08, 0x10};
+	case '-': return {0, 0, 0, 0x1f, 0, 0, 0};
 	case 'A': return {0x0e, 0x11, 0x11, 0x1f, 0x11, 0x11, 0x11};
 	case 'C': return {0x0e, 0x11, 0x10, 0x10, 0x10, 0x11, 0x0e};
 	case 'G': return {0x0e, 0x11, 0x10, 0x17, 0x11, 0x11, 0x0f};
@@ -952,6 +977,19 @@ struct application
 	bool passthrough_only = false;
 	bool test_gaze = false;
 	bool test_generic_controller = false;
+	//! Size of the head-relative input panels (1 = full, 0 = hidden); 'p' in the terminal cycles it.
+	float controller_panel_scale = 1.0f;
+	controller_survey_capture controller_survey;
+	diagnostic_scene survey_anchor;
+	struct controller_pose_sample
+	{
+		XrSpaceLocation location{};
+		XrSpaceVelocity velocity{};
+		XrResult result = XR_SUCCESS;
+		bool active = false;
+	};
+	std::array<std::array<controller_pose_sample, 2>, 2> controller_samples{};
+	bool animate = false;
 	bool gaze_calibrate = false;
 	bool gaze_foveation = false;
 	bool standard_foveation = false;
@@ -1076,6 +1114,12 @@ create_instance(application &app)
 	}
 
 	std::vector<const char *> extensions = {XR_KHR_METAL_ENABLE_EXTENSION_NAME};
+	if (getenv("PSVR2_TEST_REFRESH_CYCLE") != nullptr) {
+		if (!has_extension(app.xr, XR_FB_DISPLAY_REFRESH_RATE_EXTENSION_NAME)) {
+			fatal("refresh integration test requires XR_FB_display_refresh_rate");
+		}
+		extensions.push_back(XR_FB_DISPLAY_REFRESH_RATE_EXTENSION_NAME);
+	}
 	if (app.submit_depth_layer) {
 		extensions.push_back(XR_KHR_COMPOSITION_LAYER_DEPTH_EXTENSION_NAME);
 	}
@@ -1108,6 +1152,14 @@ create_instance(application &app)
 	create_info.enabledExtensionNames = extensions.data();
 	check_xr(app.xr.create_instance(&create_info, &app.instance), "xrCreateInstance");
 	load_instance_xr_functions(app.xr, app.instance);
+	if (getenv("PSVR2_TEST_REFRESH_CYCLE") != nullptr) {
+		load_xr_proc(app.xr.get_instance_proc_addr, app.instance, "xrEnumerateDisplayRefreshRatesFB",
+		             &app.xr.enumerate_refresh);
+		load_xr_proc(app.xr.get_instance_proc_addr, app.instance, "xrGetDisplayRefreshRateFB",
+		             &app.xr.get_refresh);
+		load_xr_proc(app.xr.get_instance_proc_addr, app.instance, "xrRequestDisplayRefreshRateFB",
+		             &app.xr.request_refresh);
+	}
 	if (app.standard_foveation) {
 		load_xr_proc(app.xr.get_instance_proc_addr, app.instance, "xrCreateFoveationProfileFB",
 		             &app.xr.create_foveation_profile_fb);
@@ -2495,12 +2547,19 @@ append_controller_markers(application &app, XrTime predicted_display_time)
 			info.subactionPath = app.controller_hand_paths[hand];
 			XrActionStatePose state = xr_struct<XrActionStatePose>(XR_TYPE_ACTION_STATE_POSE);
 			XrSpaceLocation location = xr_struct<XrSpaceLocation>(XR_TYPE_SPACE_LOCATION);
-			if (space != XR_NULL_HANDLE &&
-			    XR_SUCCEEDED(app.xr.get_action_state_pose(app.session, &info, &state)) &&
-			    state.isActive == XR_TRUE &&
-			    XR_FAILED(app.xr.locate_space(space, app.app_space, predicted_display_time, &location))) {
-				location.locationFlags = 0;
+			XrSpaceVelocity velocity = xr_struct<XrSpaceVelocity>(XR_TYPE_SPACE_VELOCITY);
+			location.next = &velocity;
+			XrResult result = app.xr.get_action_state_pose(app.session, &info, &state);
+			const bool active = XR_SUCCEEDED(result) && state.isActive == XR_TRUE;
+			if (space != XR_NULL_HANDLE && active) {
+				result = app.xr.locate_space(space, app.app_space, predicted_display_time, &location);
 			}
+			if (XR_FAILED(result) || !active) {
+				location.locationFlags = 0;
+				velocity.velocityFlags = 0;
+			}
+			location.next = nullptr;
+			app.controller_samples[hand][kind] = {location, velocity, result, active};
 			const bool have_pose = (location.locationFlags & valid) == valid;
 			const bool is_tracked = (location.locationFlags & tracked) == tracked;
 			if (location.locationFlags != app.controller_pose_flags[hand][kind] ||
@@ -2548,16 +2607,30 @@ append_controller_input_panels(application &app, const XrPosef &head_pose)
 	panel.right = rotate_vector(head_pose.orientation, make_float3(1, 0, 0));
 	panel.up = rotate_vector(head_pose.orientation, make_float3(0, 1, 0));
 	panel.forward = rotate_vector(head_pose.orientation, make_float3(0, 0, -1));
+	const float s = app.controller_panel_scale;
+	if (s <= 0.0f)
+		return;
 	const simd_float4 off = make_float4(0.35f, 0.38f, 0.42f, 1);
 	const simd_float4 on = make_float4(0.15f, 1, 0.25f, 1);
 	const simd_float4 inactive = make_float4(1, 0.12f, 0.12f, 1);
 	for (size_t hand = 0; hand < 2; ++hand) {
 		const float x = hand == 0 ? -0.18f : 0.18f;
+		/*
+		 * Layout at full size, then scaled about the panel centre (x, -0.20). Smaller panels also move out
+		 * and down, towards the lower corners of the view, to leave the centre clear.
+		 */
+		const float cx = x * (1.0f + 0.45f * (1.0f - s)), cy = -0.20f - 0.08f * (1.0f - s);
+		auto box = [&](float bx, float by, float z, simd_float3 size, simd_float4 color) {
+			add_world_box(panel, cx + (bx - x) * s, cy + (by + 0.20f) * s, z,
+			              make_float3(size.x * s, size.y * s, size.z), color);
+		};
+		auto text = [&](float tx, float ty, float z, float pixel, const char *str, simd_float4 color) {
+			add_world_text(panel, cx + (tx - x) * s, cy + (ty + 0.20f) * s, z, pixel * s, str, color);
+		};
 		const auto &input = app.controller_inputs[hand];
-		add_world_box(panel, x, -0.20f, 0.82f, make_float3(0.34f, 0.35f, 0.008f),
-		              make_float4(0.015f, 0.02f, 0.025f, 1));
-		add_world_text(panel, x, -0.065f, 0.80f, 0.006f, hand == 0 ? "LEFT" : "RIGHT",
-		               hand == 0 ? make_float4(0.05f, 0.85f, 1, 1) : make_float4(1, 0.35f, 0.05f, 1));
+		box(x, -0.20f, 0.82f, make_float3(0.34f, 0.35f, 0.008f), make_float4(0.015f, 0.02f, 0.025f, 1));
+		text(x, -0.065f, 0.80f, 0.006f, hand == 0 ? "LEFT" : "RIGHT",
+		     hand == 0 ? make_float4(0.05f, 0.85f, 1, 1) : make_float4(1, 0.35f, 0.05f, 1));
 		const char *labels[] = {"FACE 1", "FACE 2", "TRIGGER", "GRIP", "STICK"};
 		const float levels[] = {input.primary ? 1.0f : 0.0f, input.secondary ? 1.0f : 0.0f,
 		                        std::clamp(input.trigger, 0.0f, 1.0f), std::clamp(input.squeeze, 0.0f, 1.0f),
@@ -2565,12 +2638,11 @@ append_controller_input_panels(application &app, const XrPosef &head_pose)
 		for (size_t row = 0; row < 5; ++row) {
 			const float y = -0.11f - (float)row * 0.042f;
 			const simd_float4 color = !input.active[row] ? inactive : levels[row] > 0.05f ? on : off;
-			add_world_text(panel, x - 0.04f, y, 0.80f, 0.0045f, labels[row], color);
-			add_world_box(panel, x + 0.108f, y, 0.80f, make_float3(0.066f, 0.019f, 0.005f), off);
+			text(x - 0.04f, y, 0.80f, 0.0045f, labels[row], color);
+			box(x + 0.108f, y, 0.80f, make_float3(0.066f, 0.019f, 0.005f), off);
 			if (input.active[row] && levels[row] > 0) {
 				const float width = 0.066f * levels[row];
-				add_world_box(panel, x + 0.075f + width / 2, y, 0.795f,
-				              make_float3(width, 0.019f, 0.005f), on);
+				box(x + 0.075f + width / 2, y, 0.795f, make_float3(width, 0.019f, 0.005f), on);
 			}
 		}
 		const auto flags = app.controller_pose_flags[hand][0];
@@ -2580,7 +2652,7 @@ append_controller_input_panels(application &app, const XrPosef &head_pose)
 		    XR_SPACE_LOCATION_POSITION_TRACKED_BIT | XR_SPACE_LOCATION_ORIENTATION_TRACKED_BIT;
 		const bool have_pose = (flags & valid) == valid;
 		const bool tracking = have_pose && (flags & tracked) == tracked;
-		add_world_text(panel, x, -0.33f, 0.80f, 0.0045f,
+		text(x, -0.33f, 0.80f, 0.0045f,
 		               tracking    ? "TRACKED"
 		               : have_pose ? "POSE ONLY"
 		                           : "NO POSE",
@@ -2593,13 +2665,284 @@ append_controller_input_panels(application &app, const XrPosef &head_pose)
 }
 
 static void
+append_controller_survey(application &app, XrTime time, const XrPosef &head_pose)
+{
+	auto &capture = app.controller_survey;
+	auto &state = capture.state;
+	struct timespec clock{};
+	if (clock_gettime(CLOCK_UPTIME_RAW, &clock) != 0)
+		fatal("survey host clock unavailable");
+	const int64_t now = clock.tv_sec * int64_t{1000000000} + clock.tv_nsec;
+	XrSpaceLocation head = xr_struct<XrSpaceLocation>(XR_TYPE_SPACE_LOCATION);
+	XrResult head_result = app.xr.locate_space(app.view_space, app.app_space, time, &head);
+	if (XR_FAILED(head_result))
+		head.locationFlags = 0;
+	const XrSpaceLocationFlags head_required =
+	    XR_SPACE_LOCATION_POSITION_TRACKED_BIT | XR_SPACE_LOCATION_ORIENTATION_TRACKED_BIT |
+	    XR_SPACE_LOCATION_POSITION_VALID_BIT | XR_SPACE_LOCATION_ORIENTATION_VALID_BIT;
+	const bool usable =
+	    app.session_state == XR_SESSION_STATE_FOCUSED && (head.locationFlags & head_required) == head_required;
+	bool trigger = false, pause = false, skip = false;
+	for (const auto &input : app.controller_inputs) {
+		trigger |= input.active[2] && input.trigger > .75f;
+		pause |= input.active[0] && input.primary;
+		skip |= input.active[1] && input.secondary;
+	}
+	if (!app.survey_anchor.initialized && state.phase == controller_survey_phase::ready && usable) {
+		auto &anchor = app.survey_anchor;
+		anchor.origin = xr_position(head.pose.position);
+		anchor.up = make_float3(0, 1, 0);
+		anchor.forward = rotate_vector(head.pose.orientation, make_float3(0, 0, -1));
+		anchor.forward.y = 0;
+		if (simd_length(anchor.forward) < .1f)
+			anchor.forward = make_float3(0, 0, -1);
+		anchor.forward = simd_normalize(anchor.forward);
+		anchor.right = simd_cross(anchor.forward, anchor.up);
+		anchor.initialized = true;
+	}
+	const auto &reference = app.survey_anchor;
+	const simd_float3 look_target = reference.origin + reference.forward * 2.0f;
+	const simd_float3 look_delta = look_target - xr_position(head_pose.position);
+	const simd_float3 head_forward = rotate_vector(head_pose.orientation, make_float3(0, 0, -1));
+	const float look_error_deg =
+	    reference.initialized && simd_length(look_delta) > .01f
+	        ? acosf(std::clamp(simd_dot(simd_normalize(look_delta), head_forward), -1.f, 1.f)) * 180.f / (float)M_PI
+	        : 180.f;
+	const bool facing_forward = reference.initialized && look_error_deg <= 15.f;
+	const auto before = state;
+	const bool finished = state.phase == controller_survey_phase::complete;
+	if (finished && trigger && !state.trigger_down && usable)
+		app.exit_requested = true;
+	const char *event = state.update(now, usable, trigger, pause, skip, facing_forward);
+	if (event) {
+		// Skip refers to the trial left, rather than incorrectly labelling its successor.
+		capture.event(now, time, event, strcmp(event, "skipped") == 0 ? &before : nullptr);
+		fprintf(stderr, "CONTROLLER_SURVEY host_uptime_ns=%lld trial=%zu phase=%s event=%s\n", (long long)now,
+		        state.trial, controller_survey_phase_name(state.phase), event);
+	}
+	const bool complete = state.phase == controller_survey_phase::complete;
+	const size_t hand = complete ? 1 : state.hand();
+	const auto &pose = controller_survey_plan[state.pose_index()];
+	const bool returning = state.phase == controller_survey_phase::recover;
+	const float x = (hand == 0 ? -1.f : 1.f) * (returning ? .20f : pose.outward);
+	const float y = returning ? -.25f : pose.up;
+	const float z = returning ? .45f : pose.forward;
+	const auto &anchor = app.survey_anchor;
+	const simd_float3 target = anchor.origin + x * anchor.right + y * anchor.up + z * anchor.forward;
+
+	// Log both hands/poses even during invalid tracking, pauses and return-to-view.
+	if (capture.samples && !complete) {
+		for (size_t h = 0; h < 2; ++h) {
+			for (size_t kind = 0; kind < 2; ++kind) {
+				const auto &sample = app.controller_samples[h][kind];
+				const auto flags = sample.location.locationFlags;
+				const auto vf = sample.velocity.velocityFlags;
+				const auto &p = sample.location.pose;
+				const auto &v = sample.velocity;
+				const float nan = NAN;
+				fprintf(capture.samples, "%lld,%lld,%zu,%s,%d,%d,%zu,%zu,%d,%d,%llu,%llu",
+				        (long long)now, (long long)time, state.trial,
+				        controller_survey_phase_name(state.phase), state.paused, usable, h, kind,
+				        sample.active, (int)sample.result, (unsigned long long)flags,
+				        (unsigned long long)vf);
+				const bool pv = (flags & XR_SPACE_LOCATION_POSITION_VALID_BIT) != 0;
+				const bool qv = (flags & XR_SPACE_LOCATION_ORIENTATION_VALID_BIT) != 0;
+				const bool lv = (vf & XR_SPACE_VELOCITY_LINEAR_VALID_BIT) != 0;
+				const bool av = (vf & XR_SPACE_VELOCITY_ANGULAR_VALID_BIT) != 0;
+				const float values[] = {pv ? p.position.x : nan,        pv ? p.position.y : nan,
+				                        pv ? p.position.z : nan,        qv ? p.orientation.x : nan,
+				                        qv ? p.orientation.y : nan,     qv ? p.orientation.z : nan,
+				                        qv ? p.orientation.w : nan,     lv ? v.linearVelocity.x : nan,
+				                        lv ? v.linearVelocity.y : nan,  lv ? v.linearVelocity.z : nan,
+				                        av ? v.angularVelocity.x : nan, av ? v.angularVelocity.y : nan,
+				                        av ? v.angularVelocity.z : nan};
+				for (float value : values)
+					fprintf(capture.samples, ",%.7g", value);
+				fprintf(capture.samples, ",%llu", (unsigned long long)head.locationFlags);
+				const bool hp = (head.locationFlags & XR_SPACE_LOCATION_POSITION_VALID_BIT) != 0;
+				const bool hq = (head.locationFlags & XR_SPACE_LOCATION_ORIENTATION_VALID_BIT) != 0;
+				const float tail[] = {
+				    hp ? head.pose.position.x : nan,     hp ? head.pose.position.y : nan,
+				    hp ? head.pose.position.z : nan,     hq ? head.pose.orientation.x : nan,
+				    hq ? head.pose.orientation.y : nan,  hq ? head.pose.orientation.z : nan,
+				    hq ? head.pose.orientation.w : nan,  anchor.initialized ? target.x : nan,
+				    anchor.initialized ? target.y : nan, anchor.initialized ? target.z : nan,
+				    app.controller_inputs[h].trigger};
+				for (float value : tail)
+					fprintf(capture.samples, ",%.7g", value);
+				fprintf(
+				    capture.samples, ",%d,%d,%.7g,%.7g,%.7g,%.7g\n", app.controller_inputs[h].primary,
+				    app.controller_inputs[h].secondary, anchor.initialized ? look_target.x : NAN,
+				    anchor.initialized ? look_target.y : NAN, anchor.initialized ? look_target.z : NAN,
+				    usable && anchor.initialized ? look_error_deg : NAN);
+				if (h == hand && kind == 0 && usable && !state.paused &&
+				    state.phase == controller_survey_phase::hold) {
+					auto &counts = capture.counts[state.trial];
+					counts[0]++;
+					counts[1] += sample.active;
+					counts[2] += pv;
+					counts[3] += (flags & XR_SPACE_LOCATION_POSITION_TRACKED_BIT) != 0;
+				}
+			}
+		}
+		if (ferror(capture.samples) || (event && fflush(capture.samples) != 0))
+			throw std::runtime_error("controller survey sample write failed");
+	}
+	if (complete && capture.samples && !capture.close())
+		throw std::runtime_error("controller survey could not finish writing its capture");
+
+	const auto flags = app.controller_pose_flags[hand][0];
+	const bool valid = (flags & XR_SPACE_LOCATION_POSITION_VALID_BIT) != 0;
+	const bool tracked = (flags & XR_SPACE_LOCATION_POSITION_TRACKED_BIT) != 0;
+	const simd_float4 white = make_float4(.9f, .95f, 1, 1);
+	const simd_float4 gold = make_float4(1, .75f, .1f, 1);
+	const simd_float4 green = make_float4(.2f, 1, .4f, 1);
+	const bool near =
+	    valid && anchor.initialized &&
+	    simd_distance(xr_position(app.controller_samples[hand][0].location.pose.position), target) < .12f;
+	if (!complete && anchor.initialized) {
+		// Keep a clearly visible solid target box as well as its enclosing outline.
+		app.frame_instances.push_back(
+		    {basis_model(target, anchor.right, anchor.up, -anchor.forward, make_float3(.045f, .045f, .045f)),
+		     near ? green : gold});
+		// The enclosing outline remains visible around the actual controller marker.
+		for (int a = -1; a <= 1; a += 2) {
+			for (int b = -1; b <= 1; b += 2) {
+				for (int axis = 0; axis < 3; ++axis) {
+					simd_float3 offset = axis == 0   ? make_float3(0, a * .05f, b * .05f)
+					                     : axis == 1 ? make_float3(a * .05f, 0, b * .05f)
+					                                 : make_float3(a * .05f, b * .05f, 0);
+					simd_float3 scale = axis == 0   ? make_float3(.10f, .007f, .007f)
+					                    : axis == 1 ? make_float3(.007f, .10f, .007f)
+					                                : make_float3(.007f, .007f, .10f);
+					app.frame_instances.push_back(
+					    {basis_model(target + offset.x * anchor.right + offset.y * anchor.up -
+					                     offset.z * anchor.forward,
+					                 anchor.right, anchor.up, -anchor.forward, scale),
+					     near ? green : gold});
+				}
+			}
+		}
+	}
+	if (!complete && anchor.initialized) {
+		const auto blue = make_float4(.15f, .55f, 1.f, 1.f);
+		app.frame_instances.push_back({basis_model(look_target, anchor.right, anchor.up, -anchor.forward,
+		                                           make_float3(.070f, .009f, .009f)),
+		                               blue});
+		app.frame_instances.push_back({basis_model(look_target, anchor.right, anchor.up, -anchor.forward,
+		                                           make_float3(.009f, .070f, .009f)),
+		                               blue});
+	}
+	diagnostic_scene panel;
+	panel.origin = xr_position(head_pose.position);
+	panel.right = rotate_vector(head_pose.orientation, make_float3(1, 0, 0));
+	panel.up = rotate_vector(head_pose.orientation, make_float3(0, 1, 0));
+	panel.forward = rotate_vector(head_pose.orientation, make_float3(0, 0, -1));
+	char title[48], status[48];
+	snprintf(title, sizeof(title), "%s HAND %zu OF 14", hand == 0 ? "LEFT" : "RIGHT", state.pose_index() + 1);
+	snprintf(status, sizeof(status), "%s %s",
+	         tracked ? "TRACKED"
+	         : valid ? "ESTIMATED"
+	                 : "POSITION LOST",
+	         near ? "AT TARGET" : "");
+	const char *instruction = returning ? "RETURN HAND TO FRONT" : pose.instruction;
+	char timer[48];
+	snprintf(timer, sizeof(timer), "%s %d",
+	         state.phase == controller_survey_phase::move ? "MOVE"
+	         : returning                                  ? "RETURN"
+	                                                      : "HOLD",
+	         (int)ceil(std::max(0.0, state.duration() - state.elapsed)));
+	add_world_text(panel, 0, .22f, .85f, .003f, complete ? "SURVEY COMPLETE" : title, white);
+	add_world_text(panel, 0, .16f, .85f, .003f, complete ? "TRIGGER TO FINISH" : instruction, gold);
+	add_world_text(panel, 0, .10f, .85f, .003f,
+	               complete       ? "DATA SAVED"
+	               : !usable      ? "WAIT FOR FOCUS AND HEAD TRACKING"
+	               : state.paused ? "PAUSED"
+	               : state.phase == controller_survey_phase::ready
+	                   ? (facing_forward ? "TRIGGER TO START" : "LOOK AT BLUE CROSS TO START")
+			   : timer,
+	               white);
+	add_world_text(panel, 0, .04f, .85f, .003f, complete ? "THANK YOU" : status, tracked ? green : gold);
+	if (!complete) {
+		add_world_text(panel, 0, -.03f, .85f, .0025f, "FACE 1 PAUSE  FACE 2 SKIP", white);
+		add_world_text(panel, 0, -.08f, .85f, .0025f, "OPTIONS HOLD RESET  OTHER HAND IN VIEW", white);
+		add_world_text(panel, 0, -.13f, .85f, .0025f,
+		               state.phase == controller_survey_phase::ready ? "GLANCE AT TARGET THEN LOOK FORWARD"
+		               : state.pose_index() == 13                    ? "TURN HEAD SLOWLY"
+		                                                             : "LOOK AT BLUE CROSS",
+		               white);
+		auto direction = [&](simd_float3 world, float row, const char *label, simd_float4 color) {
+			const simd_float3 delta = world - panel.origin;
+			const float side = simd_dot(delta, panel.right);
+			const float front = simd_dot(delta, panel.forward);
+			const float up = simd_dot(delta, panel.up);
+			const char *arrow = front < 0 || fabsf(side) > .5f * front ? (side < 0 ? "LEFT" : "RIGHT")
+			                    : up > .3f * front                     ? "UP"
+			                    : up < -.3f * front                    ? "DOWN"
+			                                                           : "AHEAD";
+			char text[48];
+			snprintf(text, sizeof(text), "%s %s", label, arrow);
+			add_world_text(panel, 0, row, .85f, .0025f, text, color);
+		};
+		if (anchor.initialized) {
+			direction(look_target, -.18f, "LOOK", make_float4(.15f, .55f, 1.f, 1.f));
+			direction(target, -.37f, "HAND TARGET", gold);
+		}
+		add_world_text(panel, 0, -.32f, .85f, .0025f, "TOP VIEW", white);
+		// Top-down inset remains visible when a target is behind the wearer.
+		add_world_box(panel, 0, -.23f, .85f, make_float3(.016f, .016f, .006f), white);
+		add_world_box(panel, x * .22f, -.23f + z * .22f, .85f, make_float3(.012f, .012f, .006f), gold);
+	}
+	app.frame_instances.insert(app.frame_instances.end(), panel.world_instances.begin(),
+	                           panel.world_instances.end());
+}
+
+/*
+ * --animate adds moving objects, positioned for each frame's
+ * predicted display time. Timewarp corrects head motion but not object motion,
+ * so these show repeated or late application frames as stalls and jumps.
+ */
+static void
+append_animated_objects(application &app, XrTime predicted_display_time)
+{
+	if (!app.animate || !app.scene.initialized) {
+		return;
+	}
+	const diagnostic_scene &scene = app.scene;
+	const double t_s = (double)predicted_display_time * 1e-9;
+
+	// Eight boxes orbiting at eye height, 1.6 m away, at one radian per second.
+	const double orbit = fmod(t_s, 2.0 * M_PI);
+	for (int i = 0; i < 8; i++) {
+		const float angle = (float)(orbit + i * M_PI / 4.0);
+		const simd_float3 position =
+		    scene.origin + 1.6f * (cosf(angle) * scene.forward + sinf(angle) * scene.right);
+		const simd_float4 color = make_float4(1.0f, 0.25f + 0.09f * i, 0.15f, 1.0f);
+		app.frame_instances.push_back(
+		    {basis_model(position, scene.right, scene.up, -scene.forward, make_float3(0.12f, 0.12f, 0.12f)),
+		     color});
+	}
+
+	// A white box swinging 0.6 m each side, 1.2 m ahead, every 1.5 s: up to 2.5 m/s.
+	const float swing = 0.6f * (float)sin(fmod(t_s, 1.5) * 2.0 * M_PI / 1.5);
+	const simd_float3 swing_position = scene.origin + 1.2f * scene.forward + swing * scene.right;
+	app.frame_instances.push_back(
+	    {basis_model(swing_position, scene.right, scene.up, -scene.forward, make_float3(0.08f, 0.08f, 0.08f)),
+	     make_float4(1.0f, 1.0f, 1.0f, 1.0f)});
+}
+
+static void
 render_views(application &app, XrTime predicted_display_time)
 {
 	const XrPosef head_pose = head_pose_for_frame(app, predicted_display_time);
 	if (!app.scene.initialized) {
 		initialize_scene(app.scene, head_pose);
 	}
-	if (app.gaze_calibrate) {
+	if (!app.controller_survey.directory.empty()) {
+		app.frame_instances.clear();
+		append_controller_markers(app, predicted_display_time);
+		append_controller_survey(app, predicted_display_time, head_pose);
+	} else if (app.gaze_calibrate) {
 		app.frame_instances.clear();
 		update_gaze_calibration(app, predicted_display_time, head_pose);
 	} else {
@@ -2608,6 +2951,7 @@ render_views(application &app, XrTime predicted_display_time)
 		append_gaze_marker(app, predicted_display_time);
 		append_controller_markers(app, predicted_display_time);
 		append_controller_input_panels(app, head_pose);
+		append_animated_objects(app, predicted_display_time);
 	}
 	if (app.frame_instances.size() > app.renderer.max_instances) {
 		fatal("diagnostic scene exceeded Metal instance buffer capacity");
@@ -2723,26 +3067,42 @@ render_views(application &app, XrTime predicted_display_time)
 		    app.submit_depth_layer ? MTLStoreActionStore : MTLStoreActionDontCare;
 		render_pass.depthAttachment.clearDepth = 1.0;
 
-		id<MTLRenderCommandEncoder> encoder = [command_buffer renderCommandEncoderWithDescriptor:render_pass];
-		if (encoder == nil) {
-			fatal("could not create Metal render command encoder");
+		// Repeat complete cleared passes so depth rejection cannot eliminate the load.
+		static const int stress_passes = [] {
+			const char *value = getenv("PSVR2_TEST_GPU_PASSES");
+			const int passes = value ? std::clamp(atoi(value), 1, 64) : 1;
+			fprintf(stderr, "psvr2-openxr-test: stress GPU passes per eye=%d\n", passes);
+			return passes;
+		}();
+		static const size_t instance_limit = [] {
+			const char *value = getenv("PSVR2_TEST_MAX_INSTANCES");
+			const size_t limit = value ? (size_t)std::clamp(atoi(value), 1, 10000) : 10000;
+			fprintf(stderr, "psvr2-openxr-test: stress instance limit=%zu\n", limit);
+			return limit;
+		}();
+		for (int pass = 0; pass < stress_passes; ++pass) {
+			id<MTLRenderCommandEncoder> encoder =
+			    [command_buffer renderCommandEncoderWithDescriptor:render_pass];
+			if (encoder == nil) {
+				fatal("could not create Metal render command encoder");
+			}
+			[encoder setRenderPipelineState:app.renderer.pipeline];
+			[encoder setDepthStencilState:app.renderer.depth_state];
+			[encoder setCullMode:MTLCullModeNone];
+			[encoder setViewport:MTLViewport{0.0, 0.0, (double)swapchain.width, (double)swapchain.height,
+			                                 0.0, 1.0}];
+			[encoder setVertexBuffer:app.renderer.cube_vertex_buffer offset:0 atIndex:0];
+			[encoder setVertexBuffer:app.renderer.instance_buffer offset:0 atIndex:1];
+			const matrix_float4x4 projection = projection_matrix(app.views[i].fov, 0.05f, 100.0f);
+			const matrix_float4x4 view = view_matrix(app.views[i].pose);
+			const matrix_float4x4 view_projection = simd_mul(projection, view);
+			[encoder setVertexBytes:&view_projection length:sizeof(view_projection) atIndex:2];
+			[encoder drawPrimitives:MTLPrimitiveTypeTriangle
+			            vertexStart:0
+			            vertexCount:sizeof(k_cube_vertices) / sizeof(k_cube_vertices[0])
+			          instanceCount:std::min(app.frame_instances.size(), instance_limit)];
+			[encoder endEncoding];
 		}
-		[encoder setRenderPipelineState:app.renderer.pipeline];
-		[encoder setDepthStencilState:app.renderer.depth_state];
-		[encoder setCullMode:MTLCullModeNone];
-		[encoder
-		    setViewport:MTLViewport{0.0, 0.0, (double)swapchain.width, (double)swapchain.height, 0.0, 1.0}];
-		[encoder setVertexBuffer:app.renderer.cube_vertex_buffer offset:0 atIndex:0];
-		[encoder setVertexBuffer:app.renderer.instance_buffer offset:0 atIndex:1];
-		const matrix_float4x4 projection = projection_matrix(app.views[i].fov, 0.05f, 100.0f);
-		const matrix_float4x4 view = view_matrix(app.views[i].pose);
-		const matrix_float4x4 view_projection = simd_mul(projection, view);
-		[encoder setVertexBytes:&view_projection length:sizeof(view_projection) atIndex:2];
-		[encoder drawPrimitives:MTLPrimitiveTypeTriangle
-		            vertexStart:0
-		            vertexCount:sizeof(k_cube_vertices) / sizeof(k_cube_vertices[0])
-		          instanceCount:app.frame_instances.size()];
-		[encoder endEncoding];
 
 		if (app.gaze_foveation) {
 			encode_gaze_foveation_resolve(app, swapchain, resolve_command_buffer, color_texture);
@@ -2792,6 +3152,25 @@ poll_events(application &app)
 			    reinterpret_cast<const XrEventDataSessionStateChanged *>(&event);
 			app.session_state = state_changed->state;
 			if (state_changed->state == XR_SESSION_STATE_READY && !app.session_running) {
+				if (app.xr.request_refresh != nullptr && app.controller_survey.directory.empty()) {
+					const auto before = std::chrono::steady_clock::now();
+					check_xr(app.xr.request_refresh(app.session, 90.0f),
+					         "xrRequestDisplayRefreshRateFB(before begin)");
+					const auto elapsed =
+					    std::chrono::duration<double>(std::chrono::steady_clock::now() - before)
+					        .count();
+					float current = 0;
+					check_xr(app.xr.get_refresh(app.session, &current),
+					         "xrGetDisplayRefreshRateFB(before begin)");
+					if (fabsf(current - 90.0f) > 0.5f || elapsed >= 5.0) {
+						fatal(
+						    "idle refresh request failed or waited for the inactive "
+						    "compositor");
+					}
+					fprintf(stderr,
+					        "psvr2-openxr-test: refresh before begin verified %.3f Hz in %.3f s\n",
+					        current, elapsed);
+				}
 				XrSessionBeginInfo begin_info =
 				    xr_struct<XrSessionBeginInfo>(XR_TYPE_SESSION_BEGIN_INFO);
 				begin_info.primaryViewConfigurationType = XR_VIEW_CONFIGURATION_TYPE_PRIMARY_STEREO;
@@ -2807,6 +3186,21 @@ poll_events(application &app)
 			}
 			break;
 		}
+		case XR_TYPE_EVENT_DATA_REFERENCE_SPACE_CHANGE_PENDING:
+			if (!app.controller_survey.directory.empty()) {
+				auto &state = app.controller_survey.state;
+				if (state.phase != controller_survey_phase::complete) {
+					state.reset_reference();
+					app.survey_anchor.initialized = false;
+					struct timespec now{};
+					clock_gettime(CLOCK_UPTIME_RAW, &now);
+					const auto *change =
+					    reinterpret_cast<const XrEventDataReferenceSpaceChangePending *>(&event);
+					app.controller_survey.event(now.tv_sec * int64_t{1000000000} + now.tv_nsec,
+					                            change->changeTime, "reference_space_changed");
+				}
+			}
+			break;
 		case XR_TYPE_EVENT_DATA_INSTANCE_LOSS_PENDING: return false;
 		default: break;
 		}
@@ -2910,7 +3304,50 @@ render_frame(application &app)
 	end_info.environmentBlendMode = app.blend_mode;
 	end_info.layerCount = layer_count;
 	end_info.layers = layer_count > 0 ? layers : nullptr;
+	// Controlled application scheduling stalls, independent of the presenter.
+	static uint64_t stress_frame = 0;
+	static const int delay_us = [] {
+		const char *value = getenv("PSVR2_TEST_CPU_DELAY_US");
+		return value ? std::clamp(atoi(value), 0, 100000) : 0;
+	}();
+	if (++stress_frame % 90 == 0 && delay_us > 0 && app.controller_survey.directory.empty()) {
+		fprintf(stderr, "psvr2-openxr-test: stress CPU delay frame=%llu us=%d\n",
+		        (unsigned long long)stress_frame, delay_us);
+		usleep((useconds_t)delay_us);
+	}
 	check_xr(app.xr.end_frame(app.session, &end_info), "xrEndFrame");
+	if (!app.controller_survey.directory.empty())
+		return; // Keep survey refresh/load stable.
+	if (app.xr.request_refresh != nullptr && (stress_frame == 90 || stress_frame == 270 || stress_frame == 450)) {
+		float requested = stress_frame == 270 ? 90.0f : 120.0f;
+		check_xr(app.xr.request_refresh(app.session, requested), "xrRequestDisplayRefreshRateFB");
+		float current = 0;
+		check_xr(app.xr.get_refresh(app.session, &current), "xrGetDisplayRefreshRateFB");
+		if (fabsf(current - requested) > 0.5f) {
+			fatal("physical refresh request did not apply");
+		}
+		fprintf(stderr, "psvr2-openxr-test: refresh cycle verified %.3f Hz frame=%llu\n", current,
+		        (unsigned long long)stress_frame);
+	}
+	if (app.xr.request_refresh != nullptr && stress_frame == 30) {
+		uint32_t count = 0;
+		check_xr(app.xr.enumerate_refresh(app.session, 0, &count, nullptr), "xrEnumerateDisplayRefreshRatesFB");
+		std::vector<float> rates(count);
+		check_xr(app.xr.enumerate_refresh(app.session, count, &count, rates.data()),
+		         "xrEnumerateDisplayRefreshRatesFB");
+		fprintf(stderr, "psvr2-openxr-test: refresh rates count=%u\n", count);
+		float previous = 0, after = 0;
+		check_xr(app.xr.get_refresh(app.session, &previous), "xrGetDisplayRefreshRateFB");
+		XrResult invalid = app.xr.request_refresh(app.session, 73.0f);
+		if (invalid != XR_ERROR_DISPLAY_REFRESH_RATE_UNSUPPORTED_FB) {
+			fatal("unsupported refresh request was not rejected");
+		}
+		check_xr(app.xr.get_refresh(app.session, &after), "xrGetDisplayRefreshRateFB");
+		if (fabsf(previous - after) > 0.05f) {
+			fatal("unsupported refresh request changed display mode");
+		}
+		fprintf(stderr, "psvr2-openxr-test: unsupported refresh rejected without mode change\n");
+	}
 }
 
 static void
@@ -2934,7 +3371,7 @@ set_foveation_profile(application &app, int index)
 static void
 initialize_terminal_controls(application &app)
 {
-	if (!app.gaze_foveation || !isatty(STDIN_FILENO)) {
+	if ((!app.gaze_foveation && !app.test_generic_controller) || !isatty(STDIN_FILENO)) {
 		return;
 	}
 	app.terminal_input.old_flags = fcntl(STDIN_FILENO, F_GETFL, 0);
@@ -2951,9 +3388,14 @@ initialize_terminal_controls(application &app)
 		return;
 	}
 	app.terminal_input.active = true;
-	fprintf(stderr,
-	        "psvr2-openxr-test: live foveation controls: 1=reference 2=strong 3=aggressive 4=aggressive-plus "
-	        "5=near-extreme 6=extreme, [ ]=step, r=reference\n");
+	if (app.gaze_foveation) {
+		fprintf(stderr,
+		        "psvr2-openxr-test: live foveation controls: 1=reference 2=strong 3=aggressive "
+		        "4=aggressive-plus 5=near-extreme 6=extreme, [ ]=step, r=reference\n");
+	}
+	if (app.test_generic_controller) {
+		fprintf(stderr, "psvr2-openxr-test: p cycles the input panel size (100%%, 50%%, 30%%, hidden)\n");
+	}
 }
 
 static void
@@ -2978,6 +3420,22 @@ poll_terminal_controls(application &app)
 	while ((count = read(STDIN_FILENO, buffer, sizeof(buffer))) > 0) {
 		for (ssize_t i = 0; i < count; ++i) {
 			const char key = buffer[i];
+			if ((key == 'p' || key == 'P') && app.test_generic_controller) {
+				const float sizes[] = {1.0f, 0.5f, 0.3f, 0.0f};
+				size_t next = 0;
+				for (size_t k = 0; k < 4; k++) {
+					if (std::fabs(app.controller_panel_scale - sizes[k]) < 0.01f) {
+						next = (k + 1) % 4;
+					}
+				}
+				app.controller_panel_scale = sizes[next];
+				fprintf(stderr, "psvr2-openxr-test: input panels %s\n",
+				        sizes[next] == 0.0f ? "hidden" : sizes[next] == 1.0f ? "100%" : sizes[next] == 0.5f ? "50%" : "30%");
+				continue;
+			}
+			if (!app.gaze_foveation) {
+				continue;
+			}
 			if (key >= '1' && key <= '6') {
 				set_foveation_profile(app, key - '1');
 			} else if (key == ']' || key == '+') {
@@ -3090,12 +3548,16 @@ static int
 run(int argc, char **argv)
 {
 	const char *loader_path = nullptr;
+	const char *survey_output = nullptr;
+	const char *survey_hands = "both";
 	XrEnvironmentBlendMode blend_mode = XR_ENVIRONMENT_BLEND_MODE_OPAQUE;
 	bool submit_depth_layer = false;
 	bool submit_passthrough = false;
 	bool passthrough_only = false;
 	bool test_gaze = false;
 	bool test_generic_controller = false;
+	float panel_scale = 1.0f;
+	bool animate = false;
 	bool gaze_calibrate = false;
 	bool gaze_foveation = false;
 	bool standard_foveation = false;
@@ -3124,8 +3586,27 @@ run(int argc, char **argv)
 		} else if (strcmp(argv[i], "--passthrough-only") == 0) {
 			submit_passthrough = true;
 			passthrough_only = true;
+		} else if (strcmp(argv[i], "--controller-survey-hand") == 0) {
+			if (i + 1 >= argc)
+				fatal("--controller-survey-hand requires both, left or right");
+			survey_hands = argv[++i];
+			if (strcmp(survey_hands, "both") && strcmp(survey_hands, "left") &&
+			    strcmp(survey_hands, "right"))
+				fatal("--controller-survey-hand requires both, left or right");
+		} else if (strcmp(argv[i], "--controller-survey") == 0) {
+			if (i + 1 >= argc || argv[i + 1][0] == '-')
+				fatal("--controller-survey requires a new output directory");
+			survey_output = argv[++i];
+			test_generic_controller = true;
 		} else if (strcmp(argv[i], "--generic-controller") == 0) {
 			test_generic_controller = true;
+		} else if (strcmp(argv[i], "--panel-scale") == 0) {
+			char *end = nullptr;
+			if (i + 1 >= argc || (panel_scale = strtof(argv[++i], &end), *end != '\0') || !(panel_scale >= 0) ||
+			    panel_scale > 1)
+				fatal("--panel-scale requires a size from 0 (hidden) to 1 (full)");
+		} else if (strcmp(argv[i], "--animate") == 0) {
+			animate = true;
 		} else if (strcmp(argv[i], "--gaze") == 0) {
 			test_gaze = true;
 		} else if (strcmp(argv[i], "--gaze-calibrate") == 0) {
@@ -3155,7 +3636,8 @@ run(int argc, char **argv)
 			    stderr,
 			    "Usage: %s [--loader /path/to/libopenxr_loader.1.dylib] [--blendmode Opaque|AlphaBlend] "
 			    "[--depth-layer] "
-			    "[--passthrough|--passthrough-only] [--generic-controller] "
+			    "[--passthrough|--passthrough-only] [--generic-controller [--panel-scale S]] [--controller-survey "
+			    "NEW-DIRECTORY] [--animate] "
 			    "[--gaze|--gaze-calibrate|--gaze-foveation] "
 			    "[--fb-foveation|--fb-eye-foveation] [--fb-foveation-sparse-check] "
 			    "[--foveation-profile reference|strong|aggressive|aggressive-plus|near-extreme|extreme]\n"
@@ -3168,6 +3650,16 @@ run(int argc, char **argv)
 			    "  --generic-controller validates XR_KHR_generic_controller on both hands and logs action "
 			    "state, draws controller poses and head-relative input panels (green pressed, red "
 			    "inactive).\n"
+			    "  --panel-scale S sizes those panels from 0 (hidden) to 1 (full, default); smaller panels sit "
+			    "lower and further out. In a terminal, p cycles 100%%, 50%%, 30%% and hidden.\n"
+			    "  --controller-survey NEW-DIRECTORY guides both hands through 28 placement/occlusion "
+			    "trials, "
+			    "records poses/events/summary; trigger starts, primary pauses, secondary skips. "
+			    "Enable the service CTD recorder separately for camera/IMU evidence.\n"
+			    "  --controller-survey-hand both|left|right selects hands (default both); add "
+			    "--passthrough for cameras behind the survey.\n"
+			    "  --animate adds orbiting boxes and a swinging white box, positioned for each frame's "
+			    "predicted display time, to show repeated or mistimed frames.\n"
 			    "  --gaze enables XR_EXT_eye_gaze_interaction and draws a yellow gaze marker.\n"
 			    "  --gaze-calibrate runs a 9-point head-relative calibration and saves it for the driver.\n"
 			    "  --gaze-foveation renders through gaze-driven Metal VRR plus an application resolve "
@@ -3192,7 +3684,17 @@ run(int argc, char **argv)
 		}
 	}
 
+	if (survey_output &&
+	    (gaze_calibrate || test_gaze || standard_foveation || gaze_foveation || animate || passthrough_only)) {
+		fatal(
+		    "controller survey requires its dedicated scene; gaze, animation, foveation and passthrough-only "
+		    "modes cannot be combined");
+	}
+	if (!survey_output && strcmp(survey_hands, "both"))
+		fatal("--controller-survey-hand requires --controller-survey");
 	application app;
+	if (survey_output)
+		app.controller_survey.open(survey_output, survey_hands, submit_passthrough);
 	app.blend_mode = blend_mode;
 	app.submit_depth_layer = submit_depth_layer;
 	app.submit_passthrough = submit_passthrough;
@@ -3211,6 +3713,11 @@ run(int argc, char **argv)
 	}
 	app.test_gaze = test_gaze;
 	app.test_generic_controller = test_generic_controller;
+	app.controller_panel_scale = panel_scale;
+	app.animate = animate;
+	if (animate) {
+		fprintf(stderr, "psvr2-openxr-test: animated objects enabled\n");
+	}
 	app.gaze_calibrate = gaze_calibrate;
 	app.gaze_foveation = gaze_foveation;
 	app.standard_foveation = standard_foveation;
@@ -3251,6 +3758,13 @@ run(int argc, char **argv)
 		render_frame(app);
 	}
 
+	if (survey_output) {
+		struct timespec now{};
+		clock_gettime(CLOCK_UPTIME_RAW, &now);
+		app.controller_survey.event(now.tv_sec * int64_t{1000000000} + now.tv_nsec, 0, "closed");
+		if (!app.controller_survey.close())
+			throw std::runtime_error("controller survey output write failed");
+	}
 	cleanup(app);
 	return EXIT_SUCCESS;
 }
@@ -3261,6 +3775,11 @@ main(int argc, char **argv)
 	signal(SIGINT, handle_signal);
 	signal(SIGTERM, handle_signal);
 	@autoreleasepool {
-		return run(argc, argv);
+		try {
+			return run(argc, argv);
+		} catch (const std::exception &error) {
+			fprintf(stderr, "psvr2-openxr-test: %s\n", error.what());
+			return EXIT_FAILURE;
+		}
 	}
 }

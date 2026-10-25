@@ -47,6 +47,9 @@ constexpr uint32_t kConfirmSolves = 3;
  * 3-4 deg). At 0.8 a partly occluded ring was rejected with 12-21 matches over three or four cameras at 0.2-0.3 px.
  */
 constexpr float kOrientedMinCoverage = 0.5f;
+//! A prior re-acquisition this close in time and space to the previous solve continues its track (confirmation).
+constexpr int64_t kPriorContinueNs = 100'000'000;
+constexpr float kPriorContinueM = 0.05f;
 //! Status log interval.
 constexpr int64_t kStatusIntervalNs = 5'000'000'000;
 //! An exposure slower than this is logged (JOINT_SLOW), at most every kSlowLogIntervalNs.
@@ -433,9 +436,11 @@ JointProcessor::process(JointExposure &exposure)
 		int best = -1;
 		StereoBootstrapResult best_result;
 		bool best_oriented = false;
+		bool best_prior = false;
 		for (size_t i = 0; i < need_bootstrap.size(); i++) {
 			StereoBootstrapResult result;
 			bool oriented = false;
+			bool prior = false;
 			bool ok = timed([&] {
 				return stereo_bootstrap(cameras, need_bootstrap[i]->params.led_model,
 				                        StereoBootstrapParams{}, result);
@@ -456,6 +461,27 @@ JointProcessor::process(JointExposure &exposure)
 					oriented = true;
 				}
 			}
+			// Fewer blobs than either bootstrap needs: search near the predicted (or last solved) position.
+			const JointDeviceState &state = this->devices[need_bootstrap[i]->id];
+			if (!ok && this->prior_reacquire_enabled && state.last_solved_ns != 0 &&
+			    aligned_orientation(need_bootstrap[i]->id, orientation)) {
+				xrt_vec3 position = state.Tcv_world_device.position;
+				const xrt_space_relation &predicted = predictions[need_bootstrap[i]->id];
+				if (relation_has(predicted, XRT_SPACE_RELATION_POSITION_VALID_BIT)) {
+					xrt_pose Tcv_predicted;
+					math_pose_convert_from_opencv(&predicted.pose, &Tcv_predicted);
+					position = Tcv_predicted.position;
+				}
+				OrientedBootstrapResult prior_result;
+				ok = timed([&] {
+					return prior_reacquire(cameras, need_bootstrap[i]->params.led_model, orientation,
+					                       position, PriorReacquireParams{}, prior_result);
+				});
+				if (ok) {
+					result.refined = prior_result.refined;
+					prior = true;
+				}
+			}
 			if (!ok) {
 				continue;
 			}
@@ -468,6 +494,7 @@ JointProcessor::process(JointExposure &exposure)
 				best = (int)i;
 				best_result = result;
 				best_oriented = oriented;
+				best_prior = prior;
 			}
 		}
 		if (best < 0) {
@@ -477,7 +504,22 @@ JointProcessor::process(JointExposure &exposure)
 			this->device_oriented++;
 			this->devices[need_bootstrap[best]->id].loss.oriented++;
 		}
-		commit(need_bootstrap[best], best_result.refined, true);
+		bool bootstrapped = true;
+		if (best_prior) {
+			// Sparse views are only trusted over consecutive exposures: a result near a recent solve
+			// continues that track towards confirmation; anything else starts a new tentative track.
+			const JointDeviceState &state = this->devices[need_bootstrap[best]->id];
+			const xrt_vec3 &a = state.Tcv_world_device.position;
+			const xrt_vec3 &b = best_result.refined.Tcv_world_device.position;
+			float dx = a.x - b.x, dy = a.y - b.y, dz = a.z - b.z;
+			bootstrapped = !(state.tracking && exposure.timestamp_ns - state.last_solved_ns < kPriorContinueNs &&
+			                 std::sqrt(dx * dx + dy * dy + dz * dz) < kPriorContinueM);
+			this->device_prior++;
+			if (!bootstrapped) {
+				this->device_prior_continued++;
+			}
+		}
+		commit(need_bootstrap[best], best_result.refined, bootstrapped);
 		need_bootstrap.erase(need_bootstrap.begin() + best);
 	}
 	for (Device *device : need_bootstrap) {
@@ -576,10 +618,11 @@ JointProcessor::process(JointExposure &exposure)
 		CT_INFO(ct,
 		        "JOINT_STATUS exposures=%" PRIu64 " processed=%" PRIu64 " skipped=%" PRIu64
 		        " late_samples=%" PRIu64 " tracked=%" PRIu64 " bootstrapped=%" PRIu64 " oriented=%" PRIu64
-		        " failed=%" PRIu64 " unconfirmed=%" PRIu64
+		        " prior=%" PRIu64 " prior_continued=%" PRIu64 " failed=%" PRIu64 " unconfirmed=%" PRIu64
 		        " mean_solve_us=%.0f max_solve_us=%.0f pose_age_ms_p50=%.2f pose_age_ms_p95=%.2f",
 		        assembled, this->processed, skipped, late, this->device_tracked, this->device_bootstrapped,
-		        this->device_oriented, this->device_failed, this->unconfirmed_dropped,
+		        this->device_oriented, this->device_prior, this->device_prior_continued, this->device_failed,
+		        this->unconfirmed_dropped,
 		        solves ? this->solve_us_total / (double)solves : 0.0, this->solve_us_max, (double)age_p50,
 		        (double)age_p95);
 		this->last_status_ns = exposure.timestamp_ns;
@@ -658,12 +701,12 @@ JointProcessor::accountLosses(int64_t timestamp_ns,
 				        "lit_ambiguous=%u lit_single=%u dark_in_view=%u dark_out_of_view=%u "
 				        "dark_unpredicted=%u oriented=%u "
 				        "max_excess_blobs=%.1f start_cameras=%u start_in_view=%u start_margin_px=%.0f "
-				        "background=%s",
+				        "background=%s timestamp_ns=%" PRId64,
 				        (unsigned)device->id, (double)gap_ns / 1e6, loss.exposures, loss.acquiring,
 				        loss.lit_multi, loss.lit_ambiguous, loss.lit_single, loss.dark_in_view,
 				        loss.dark_out_of_view, loss.dark_unpredicted, loss.oriented,
 				        loss.max_excess_blobs, loss.start_cameras, loss.start_in_view,
-				        loss.start_margin_px, background.c_str());
+				        loss.start_margin_px, background.c_str(), timestamp_ns);
 			}
 			loss = JointDeviceState::Loss{};
 			loss.last_confirmed_ns = timestamp_ns;
@@ -721,6 +764,22 @@ JointProcessor::accountLosses(int64_t timestamp_ns,
 			loss.dark_in_view++;
 		} else {
 			loss.dark_out_of_view++;
+		}
+
+		// Report while still missing: a loss that never recovers must leave evidence too.
+		if (timestamp_ns - loss.last_confirmed_ns >= kLossLogMinNs &&
+		    (loss.last_report_ns == 0 || timestamp_ns - loss.last_report_ns >= kStatusIntervalNs)) {
+			CT_WARN(ct,
+			        "JOINT_LOSS_ACTIVE device=%u timestamp_ns=%" PRId64
+			        " gap_ms=%.1f exposures=%u acquiring=%u lit_multi=%u lit_ambiguous=%u "
+			        "lit_single=%u dark_in_view=%u dark_out_of_view=%u dark_unpredicted=%u "
+			        "start_cameras=%u start_in_view=%u start_margin_px=%.0f prediction=%u in_view=%u",
+			        (unsigned)device->id, timestamp_ns,
+			        (double)(timestamp_ns - loss.last_confirmed_ns) / 1e6, loss.exposures, loss.acquiring,
+			        loss.lit_multi, loss.lit_ambiguous, loss.lit_single, loss.dark_in_view,
+			        loss.dark_out_of_view, loss.dark_unpredicted, loss.start_cameras, loss.start_in_view,
+			        loss.start_margin_px, have_prediction ? 1u : 0u, in_view);
+			loss.last_report_ns = timestamp_ns;
 		}
 	}
 }

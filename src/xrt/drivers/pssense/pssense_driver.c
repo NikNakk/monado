@@ -44,6 +44,7 @@
 #include "pssense_protocol.h"
 #include "pssense_led_correction.h"
 #include "pssense_clock.h"
+#include "pssense_position_hold.h"
 
 #include <errno.h>
 #include <inttypes.h>
@@ -146,6 +147,14 @@ DEBUG_GET_ONCE_BOOL_OPTION(pssense_gyro_bias_auto, "PSSENSE_GYRO_BIAS_AUTO", fal
  * from interpolated optical poses and orientation from the IMU fusion's own world.
  */
 DEBUG_GET_ONCE_BOOL_OPTION(pssense_filter, "PSSENSE_FILTER", false)
+//! Application-only position validity after optical loss; zero retains the filter's 300 ms default.
+DEBUG_GET_ONCE_NUM_OPTION(pssense_imu_fallback_ms, "PSSENSE_IMU_FALLBACK_MS", 0)
+//! Hold the last valid position (untracked) after position validity expires; see pssense_position_hold.h.
+DEBUG_GET_ONCE_BOOL_OPTION(pssense_hold_position, "PSSENSE_HOLD_POSITION", false)
+//! Stillness-gated IMU coast after position validity expires (implies the hold); see pssense_position_hold.h.
+DEBUG_GET_ONCE_BOOL_OPTION(pssense_coast_position, "PSSENSE_COAST_POSITION", false)
+//! Application pose state transitions plus one heartbeat per second, under controller_thread lock.
+DEBUG_GET_ONCE_BOOL_OPTION(pssense_pose_diag, "PSSENSE_POSE_DIAG", false)
 DEBUG_GET_ONCE_BOOL_OPTION(pssense_joint, "CONSTELLATION_TRACKER_JOINT", false)
 /*
  * On shutdown, send LED_ALL_OFF for ~150 ms before closing, instead of stopping mid-schedule. The always-lit fault has
@@ -234,48 +243,6 @@ static struct xrt_binding_output_pair simple_outputs_pssense[] = {
     {XRT_OUTPUT_NAME_SIMPLE_VIBRATION, XRT_OUTPUT_NAME_PSSENSE_VIBRATION},
 };
 
-/*
- * XR_KHR_generic_controller is a hardware-neutral fallback interaction
- * profile. Keep the mapping explicit so OpenXR applications can bind to
- * standard generic paths without pretending Sense is another vendor's
- * controller.
- *
- * L1/R1 is the closest squeeze actuator. Monado's existing input transform
- * converts its boolean click to the 0/1 float required by squeeze/value,
- * avoiding a second driver-level representation of the same physical input.
- * grip_surface first uses a driver's calibrated generic palm pose when one
- * is exposed, with the existing grip pose retained as a last-resort fallback.
- */
-static struct xrt_binding_input_pair generic_inputs_pssense_left[] = {
-    {XRT_INPUT_GENERIC_PRIMARY_CLICK, XRT_INPUT_PSSENSE_SQUARE_CLICK},
-    {XRT_INPUT_GENERIC_SECONDARY_CLICK, XRT_INPUT_PSSENSE_TRIANGLE_CLICK},
-    {XRT_INPUT_GENERIC_THUMBSTICK_CLICK, XRT_INPUT_PSSENSE_THUMBSTICK_CLICK},
-    {XRT_INPUT_GENERIC_THUMBSTICK, XRT_INPUT_PSSENSE_THUMBSTICK},
-    {XRT_INPUT_GENERIC_SQUEEZE_VALUE, XRT_INPUT_PSSENSE_SQUEEZE_CLICK},
-    {XRT_INPUT_GENERIC_TRIGGER_VALUE, XRT_INPUT_PSSENSE_TRIGGER_VALUE},
-    {XRT_INPUT_GENERIC_GRIP_POSE, XRT_INPUT_PSSENSE_GRIP_POSE},
-    {XRT_INPUT_GENERIC_GRIP_SURFACE_POSE, XRT_INPUT_GENERIC_PALM_POSE},
-    {XRT_INPUT_GENERIC_GRIP_SURFACE_POSE, XRT_INPUT_PSSENSE_GRIP_POSE},
-    {XRT_INPUT_GENERIC_AIM_POSE, XRT_INPUT_PSSENSE_AIM_POSE},
-};
-
-static struct xrt_binding_input_pair generic_inputs_pssense_right[] = {
-    {XRT_INPUT_GENERIC_PRIMARY_CLICK, XRT_INPUT_PSSENSE_CROSS_CLICK},
-    {XRT_INPUT_GENERIC_SECONDARY_CLICK, XRT_INPUT_PSSENSE_CIRCLE_CLICK},
-    {XRT_INPUT_GENERIC_THUMBSTICK_CLICK, XRT_INPUT_PSSENSE_THUMBSTICK_CLICK},
-    {XRT_INPUT_GENERIC_THUMBSTICK, XRT_INPUT_PSSENSE_THUMBSTICK},
-    {XRT_INPUT_GENERIC_SQUEEZE_VALUE, XRT_INPUT_PSSENSE_SQUEEZE_CLICK},
-    {XRT_INPUT_GENERIC_TRIGGER_VALUE, XRT_INPUT_PSSENSE_TRIGGER_VALUE},
-    {XRT_INPUT_GENERIC_GRIP_POSE, XRT_INPUT_PSSENSE_GRIP_POSE},
-    {XRT_INPUT_GENERIC_GRIP_SURFACE_POSE, XRT_INPUT_GENERIC_PALM_POSE},
-    {XRT_INPUT_GENERIC_GRIP_SURFACE_POSE, XRT_INPUT_PSSENSE_GRIP_POSE},
-    {XRT_INPUT_GENERIC_AIM_POSE, XRT_INPUT_PSSENSE_AIM_POSE},
-};
-
-static struct xrt_binding_output_pair generic_outputs_pssense[] = {
-    {XRT_OUTPUT_NAME_GENERIC_VIBRATION, XRT_OUTPUT_NAME_PSSENSE_VIBRATION},
-};
-
 static struct xrt_binding_input_pair index_inputs_pssense_left[] = {
     {XRT_INPUT_INDEX_SYSTEM_CLICK, XRT_INPUT_PSSENSE_PS_CLICK},
     {XRT_INPUT_INDEX_A_CLICK, XRT_INPUT_PSSENSE_SQUARE_CLICK},
@@ -318,13 +285,6 @@ static struct xrt_binding_output_pair index_outputs_pssense[] = {
 
 static struct xrt_binding_profile binding_profiles_pssense_left[] = {
     {
-        .name = XRT_DEVICE_GENERIC_CONTROLLER,
-        .inputs = generic_inputs_pssense_left,
-        .input_count = ARRAY_SIZE(generic_inputs_pssense_left),
-        .outputs = generic_outputs_pssense,
-        .output_count = ARRAY_SIZE(generic_outputs_pssense),
-    },
-    {
         .name = XRT_DEVICE_TOUCH_CONTROLLER,
         .inputs = touch_inputs_pssense,
         .input_count = ARRAY_SIZE(touch_inputs_pssense),
@@ -348,13 +308,6 @@ static struct xrt_binding_profile binding_profiles_pssense_left[] = {
 };
 
 static struct xrt_binding_profile binding_profiles_pssense_right[] = {
-    {
-        .name = XRT_DEVICE_GENERIC_CONTROLLER,
-        .inputs = generic_inputs_pssense_right,
-        .input_count = ARRAY_SIZE(generic_inputs_pssense_right),
-        .outputs = generic_outputs_pssense,
-        .output_count = ARRAY_SIZE(generic_outputs_pssense),
-    },
     {
         .name = XRT_DEVICE_TOUCH_CONTROLLER,
         .inputs = touch_inputs_pssense,
@@ -583,7 +536,10 @@ struct pssense_device
 
 		//! PSSENSE_FILTER: IMU + optical EKF; NULL when off. Locked by controller_thread.
 		struct t_imu_optical_filter *filter;
+		struct pssense_position_hold position_hold;
 		uint64_t filter_last_logged_updates;
+		int64_t pose_diag_last_ns;
+		uint32_t pose_diag_flags;
 		struct xrt_pose pose;
 
 		uint32_t received_frames;
@@ -1169,6 +1125,12 @@ pssense_update_fusion(struct pssense_device *pssense)
 		timepoint_ns host_ns;
 		if (pssense_device_ts_to_host(pssense, pssense->timing.latest_imu_time_ns, &host_ns)) {
 			t_imu_optical_filter_push_imu(pssense->tracking.filter, host_ns, &accel_led, &gyro_led);
+			struct xrt_space_relation filter_rel;
+			if (debug_get_bool_option_pssense_coast_position() &&
+			    t_imu_optical_filter_get_relation(pssense->tracking.filter, host_ns, &filter_rel)) {
+				pssense_position_coast_step(&pssense->tracking.position_hold, host_ns, &filter_rel, gyro,
+				                            accel);
+			}
 		}
 	}
 
@@ -1777,9 +1739,11 @@ pssense_reset_connection_locked(struct pssense_device *pssense)
 		t_imu_optical_filter_default_params(&filter_params);
 		t_imu_optical_filter_destroy(&pssense->tracking.filter);
 		pssense->tracking.filter = t_imu_optical_filter_create(&filter_params);
+		pssense_position_hold_reset(&pssense->tracking.position_hold);
 	}
 	pssense->tracking.have_last_fused_pose = false;
 	pssense->tracking.last_optical_timestamp_ns = 0;
+	pssense->tracking.pose_diag_last_ns = 0;
 	pssense->orientation_alignment_initialized = false;
 
 	t_led_phase_bootstrap_stop(&pssense->tracking.led_bootstrap);
@@ -2087,15 +2051,27 @@ pssense_get_constellation_pose(struct pssense_device *pssense,
 }
 
 static void
-parse_pssense_calibration(const struct pssense_calibration_data *calibration_data,
+parse_pssense_calibration(struct pssense_device *pssense,
+                          const struct pssense_calibration_data *calibration_data,
                           struct pssense_parsed_calibration *out_parsed)
 {
-	const float rad_per_sec_ref = M_PI * 3.f;
+	int16_t gyro_speed_ref1 = (int16_t)__le16_to_cpu(calibration_data->gyro_speed_ref1);
+	int16_t gyro_speed_ref2 = (int16_t)__le16_to_cpu(calibration_data->gyro_speed_ref2);
+	float rad_per_sec_ref = ((float)gyro_speed_ref1 + (float)gyro_speed_ref2) * 0.5f * (float)(M_PI / 180.0);
+	if (!(rad_per_sec_ref > 0.0f)) {
+		PSSENSE_DEBUG(pssense, "Got invalid gyro speed reference of %f rad/s. Falling back to default.",
+		              rad_per_sec_ref);
+		rad_per_sec_ref = (float)(M_PI * 3.0);
+	}
+
+	PSSENSE_DEBUG(pssense, "Gyro speed reference: %f rad/s", rad_per_sec_ref);
 
 	int16_t gyro_plus_x = __le16_to_cpu(calibration_data->gyro_plus_x);
 	int16_t gyro_minus_x = __le16_to_cpu(calibration_data->gyro_minus_x);
+
 	int16_t gyro_plus_y = __le16_to_cpu(calibration_data->gyro_plus_y);
 	int16_t gyro_minus_y = __le16_to_cpu(calibration_data->gyro_minus_y);
+
 	int16_t gyro_plus_z = __le16_to_cpu(calibration_data->gyro_plus_z);
 	int16_t gyro_minus_z = __le16_to_cpu(calibration_data->gyro_minus_z);
 
@@ -2137,10 +2113,17 @@ parse_pssense_calibration(const struct pssense_calibration_data *calibration_dat
 	    .z = (1.0f / (float)(accel_plus_z - accel_bias.z)) * MATH_GRAVITY_M_S2,
 	};
 
+	PSSENSE_DEBUG(pssense, "Gyro scale: %f\t%f\t%f rad/s", gyro_scale.x, gyro_scale.y, gyro_scale.z);
+	PSSENSE_DEBUG(pssense, "Gyro bias: %d\t%d\t%d", gyro_bias.x, gyro_bias.y, gyro_bias.z);
+	PSSENSE_DEBUG(pssense, "Accel scale: %f\t%f\t%f m/s^2", accel_scale.x, accel_scale.y, accel_scale.z);
+	PSSENSE_DEBUG(pssense, "Accel bias: %f\t%f\t%f", accel_bias.x, accel_bias.y, accel_bias.z);
+
 	(*out_parsed) = XRT_C11_COMPOUND(struct pssense_parsed_calibration){
-	    .gyro_bias = gyro_bias,
 	    .gyro_scale = gyro_scale,
 	    .accel_scale = accel_scale,
+
+	    .accel_bias = accel_bias,
+	    .gyro_bias = gyro_bias,
 	};
 }
 
@@ -2213,7 +2196,7 @@ pssense_get_calibration_data(struct pssense_device *pssense)
 		}
 	} while (invalid_crc);
 
-	parse_pssense_calibration(&calibration_data, &pssense->calibration);
+	parse_pssense_calibration(pssense, &calibration_data, &pssense->calibration);
 	pssense->has_calibration = true;
 
 	PSSENSE_DEBUG(pssense, "Calibration data retrieved and parsed successfully");
@@ -3143,21 +3126,24 @@ pssense_commit_optical_pose_locked(struct pssense_device *pssense,
 		struct t_imu_optical_filter_stats stats;
 		t_imu_optical_filter_get_stats(pssense->tracking.filter, &stats);
 		if (result == T_IMU_OPTICAL_FILTER_INITIALISED || result == T_IMU_OPTICAL_FILTER_REINITIALISED ||
+		    (debug_get_bool_option_pssense_pose_diag() && result == T_IMU_OPTICAL_FILTER_REJECTED &&
+		     (stats.rejections == 1 || stats.rejections % 30 == 0)) ||
 		    stats.updates >= pssense->tracking.filter_last_logged_updates + 300) {
 			pssense->tracking.filter_last_logged_updates = stats.updates;
 			PSSENSE_INFO(pssense,
-			             "FILTER side=%c event=%s updates=%" PRIu64 " rejections=%" PRIu64
-			             " reinitialisations=%" PRIu64
+			             "FILTER side=%c event=%s timestamp_ns=%" PRId64 " updates=%" PRIu64
+			             " rejections=%" PRIu64 " reinitialisations=%" PRIu64
 			             " mahalanobis2=%.2f gyro_bias_deg_s=%.2f,%.2f,%.2f "
 			             "accel_bias_m_s2=%.3f,%.3f,%.3f",
 			             pssense->hand == XRT_HAND_LEFT ? 'L' : 'R',
 			             result == T_IMU_OPTICAL_FILTER_INITIALISED     ? "initialised"
 			             : result == T_IMU_OPTICAL_FILTER_REINITIALISED ? "reinitialised"
+			             : result == T_IMU_OPTICAL_FILTER_REJECTED      ? "rejected"
 			                                                            : "status",
-			             stats.updates, stats.rejections, stats.reinitialisations, stats.last_mahalanobis2,
-			             stats.gyro_bias_rad_s.x * 180.0 / M_PI, stats.gyro_bias_rad_s.y * 180.0 / M_PI,
-			             stats.gyro_bias_rad_s.z * 180.0 / M_PI, stats.accel_bias_m_s2.x,
-			             stats.accel_bias_m_s2.y, stats.accel_bias_m_s2.z);
+			             sample->timestamp_ns, stats.updates, stats.rejections, stats.reinitialisations,
+			             stats.last_mahalanobis2, stats.gyro_bias_rad_s.x * 180.0 / M_PI,
+			             stats.gyro_bias_rad_s.y * 180.0 / M_PI, stats.gyro_bias_rad_s.z * 180.0 / M_PI,
+			             stats.accel_bias_m_s2.x, stats.accel_bias_m_s2.y, stats.accel_bias_m_s2.z);
 		}
 	}
 
@@ -3982,7 +3968,46 @@ pssense_get_tracked_pose(struct xrt_device *xdev,
 
 	os_thread_helper_lock(&pssense->controller_thread);
 	if (pssense->tracking.use_constellation) {
-		pssense_get_constellation_pose(pssense, at_timestamp_ns, rel);
+		int64_t fallback_ms = CLAMP(debug_get_num_option_pssense_imu_fallback_ms(), 0, 1000);
+		bool have_fallback =
+		    pssense->tracking.filter != NULL && fallback_ms > 0 &&
+		    t_imu_optical_filter_get_relation_with_fallback(pssense->tracking.filter, at_timestamp_ns,
+		                                                    fallback_ms * U_TIME_1MS_IN_NS, rel);
+		if (!have_fallback) {
+			pssense_get_constellation_pose(pssense, at_timestamp_ns, rel);
+		}
+		if (debug_get_bool_option_pssense_hold_position() || debug_get_bool_option_pssense_coast_position()) {
+			pssense_position_hold_apply(&pssense->tracking.position_hold, rel);
+		}
+		if (debug_get_bool_option_pssense_pose_diag() && pssense->tracking.filter != NULL) {
+			const int64_t now = os_monotonic_get_ns();
+			uint32_t flags = (uint32_t)rel->relation_flags;
+			if (pssense->tracking.pose_diag_last_ns == 0 || flags != pssense->tracking.pose_diag_flags ||
+			    now - pssense->tracking.pose_diag_last_ns >= U_TIME_1S_IN_NS) {
+				struct t_imu_optical_filter_stats stats;
+				t_imu_optical_filter_get_stats(pssense->tracking.filter, &stats);
+				PSSENSE_INFO(
+				    pssense,
+				    "POSE_STATE side=%c device=%u now_ns=%" PRId64 " target_ns=%" PRId64
+				    " flags=0x%x state=%s optical_age_ms=%.1f imu_age_ms=%.1f last_cameras=%u "
+				    "updates=%" PRIu64 " rejections=%" PRIu64 " reinitialisations=%" PRIu64
+				    " fallback_ms=%" PRId64 " position_m=%.4f,%.4f,%.4f",
+				    pssense->hand == XRT_HAND_LEFT ? 'L' : 'R',
+				    (unsigned)pssense->tracking.constellation_device_id, now, at_timestamp_ns, flags,
+				    (flags & XRT_SPACE_RELATION_POSITION_TRACKED_BIT)      ? "tracked"
+				    : (flags & XRT_SPACE_RELATION_POSITION_VALID_BIT)      ? "inertial"
+				    : (flags & XRT_SPACE_RELATION_ORIENTATION_TRACKED_BIT) ? "orientation_only"
+				                                                           : "untracked",
+				    stats.last_accepted_pose_ns ? (double)(now - stats.last_accepted_pose_ns) / 1e6
+				                                : -1.0,
+				    stats.last_imu_ns ? (double)(now - stats.last_imu_ns) / 1e6 : -1.0,
+				    pssense->tracking.last_fused_camera_count, stats.updates, stats.rejections,
+				    stats.reinitialisations, fallback_ms, rel->pose.position.x, rel->pose.position.y,
+				    rel->pose.position.z);
+				pssense->tracking.pose_diag_last_ns = now;
+				pssense->tracking.pose_diag_flags = flags;
+			}
+		}
 	} else {
 		pssense_get_imu_fusion_pose(pssense, at_timestamp_ns, rel);
 	}
@@ -4197,7 +4222,8 @@ pssense_create_internal(struct os_hid_device *hid,
 		    ARRAY_SIZE(binding_profiles_pssense_left) - (index_profile ? 0 : 1);
 
 		pssense->led_model.match_parameters = DEFAULT_MATCH_PARAMETERS;
-		pssense->led_model.leds = pssense_left_leds;
+		memcpy(pssense->corrected_leds, pssense_left_leds, sizeof(pssense_left_leds));
+		pssense->led_model.leds = pssense->corrected_leds;
 		pssense->led_model.led_count = ARRAY_SIZE(pssense_left_leds);
 
 		pssense->tracking.T_led_imu = (struct xrt_pose){
@@ -4212,7 +4238,8 @@ pssense_create_internal(struct os_hid_device *hid,
 		    ARRAY_SIZE(binding_profiles_pssense_right) - (index_profile ? 0 : 1);
 
 		pssense->led_model.match_parameters = DEFAULT_MATCH_PARAMETERS;
-		pssense->led_model.leds = pssense_right_leds;
+		memcpy(pssense->corrected_leds, pssense_right_leds, sizeof(pssense_right_leds));
+		pssense->led_model.leds = pssense->corrected_leds;
 		pssense->led_model.led_count = ARRAY_SIZE(pssense_right_leds);
 
 		pssense->tracking.T_led_imu = (struct xrt_pose){
@@ -4233,10 +4260,8 @@ pssense_create_internal(struct os_hid_device *hid,
 		const struct xrt_vec3 *corrections =
 		    pssense->hand == XRT_HAND_LEFT ? pssense_left_led_corrections : pssense_right_led_corrections;
 		for (size_t i = 0; i < pssense->led_model.led_count; i++) {
-			pssense->corrected_leds[i] = pssense->led_model.leds[i];
 			math_vec3_accum(&corrections[i], &pssense->corrected_leds[i].position);
 		}
-		pssense->led_model.leds = pssense->corrected_leds;
 		PSSENSE_INFO(pssense, "LED_CORRECTION side=%c leds=%zu", pssense->hand == XRT_HAND_LEFT ? 'L' : 'R',
 		             pssense->led_model.led_count);
 	}

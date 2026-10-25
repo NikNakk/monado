@@ -316,7 +316,7 @@ oxr_instance_create(struct oxr_logger *log,
 	}
 
 	// Might use the path_store and path_cache, do after them.
-	ret = oxr_instance_action_context_create(log, &inst->action_context);
+	ret = oxr_instance_action_context_create_with_registry(log, &inst->path_store, &inst->action_context);
 	if (ret != XR_SUCCESS) {
 		return oxr_error(log, ret, "Failed to create instance action context");
 	}

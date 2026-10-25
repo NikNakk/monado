@@ -27,6 +27,7 @@
 #include "render/render_interface.h"
 
 #include "main/comp_target.h"
+#include "main/comp_refresh_request.h"
 #include "main/comp_window.h"
 #include "main/comp_settings.h"
 #include "main/comp_renderer.h"
@@ -117,6 +118,9 @@ struct comp_compositor
 
 	//! Duration of a frame at current refresh rate.
 	int64_t frame_interval_ns;
+
+	//! Refresh rate requests, applied between frames; also guards @ref target lifetime.
+	struct comp_refresh_request refresh_request;
 
 	//! Timestamp of last-rendered (immersive) frame.
 	int64_t last_frame_time_ns;

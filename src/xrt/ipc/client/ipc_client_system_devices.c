@@ -19,6 +19,7 @@
 #include "ipc_client_generated.h"
 #include "ipc_client_body_tracker.h"
 #include "ipc_client_hand_tracker.h"
+#include "ipc_client_io_cache.h"
 #include "ipc_client_system_devices.h"
 #include "ipc_client_xdev.h"
 
@@ -133,6 +134,21 @@ ipc_client_system_devices_create_hand_tracker(struct xrt_system_devices *xsysd,
 	return ipc_client_hand_tracker_create(usysd->ipc_c, id, out_xht);
 }
 
+static xrt_result_t
+ipc_client_system_devices_create_io_cache(struct xrt_system_devices *xsysd,
+                                          struct xrt_space_overseer *xso,
+                                          struct xrt_io_cache **out_xic)
+{
+	struct ipc_client_system_devices *usysd = ipc_system_devices(xsysd);
+	(void)xso;
+
+	uint32_t id = 0;
+	xrt_result_t xret = ipc_call_io_cache_create(usysd->ipc_c, &id);
+	IPC_CHK_AND_RET(usysd->ipc_c, xret, "ipc_call_io_cache_create");
+
+	return ipc_client_io_cache_create(usysd->ipc_c, id, out_xic);
+}
+
 
 static void
 ipc_client_system_devices_destroy(struct xrt_system_devices *xsysd)
@@ -163,6 +179,7 @@ ipc_client_system_devices_create(struct ipc_connection *ipc_c, struct ipc_client
 	                                            ipc_client_system_devices_destroy);
 	icsd->base.base.create_body_tracker = ipc_client_system_devices_create_body_tracker;
 	icsd->base.base.create_hand_tracker = ipc_client_system_devices_create_hand_tracker;
+	icsd->base.base.create_io_cache = ipc_client_system_devices_create_io_cache;
 	icsd->base.base.feature_inc = ipc_client_system_devices_feature_inc;
 	icsd->base.base.feature_dec = ipc_client_system_devices_feature_dec;
 

@@ -14,10 +14,13 @@ set(SHADERS
     blit.comp
     blit_ms.comp
     clear.comp
+    camera.frag
     distortion.comp
+    fullscreen.vert
     layer.comp
     mesh.frag
     mesh.vert
+    output.frag
     layer_cylinder.frag
     layer_cylinder.vert
     layer_equirect2.frag
@@ -37,6 +40,8 @@ shader_specializations(
 	SHADER_SPECIALIZATION_HEADERS
 	OUTPUT_DIR
 	${SHADER_SPECIALIZATION_OUTPUT_DIR}
+	PREFIX
+	render_
 	STRUCT_NAMES
 	${CMAKE_CURRENT_SOURCE_DIR}/shader_specialization_struct_names.json
 	NAME_STYLE_SNAKE_CASE

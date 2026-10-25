@@ -460,6 +460,7 @@ struct JointDeviceState
 	struct Loss
 	{
 		bool active{false};
+		int64_t last_report_ns{0};
 		int64_t last_confirmed_ns{0};
 		//! Position of the last confirmed solve, the reference while the device has no predicted position.
 		xrt_vec3 last_confirmed_position{};
@@ -518,6 +519,11 @@ struct JointProcessor
 	//! Of those, re-acquired by @ref oriented_bootstrap (CONSTELLATION_TRACKER_ORIENTED_BOOTSTRAP=1).
 	uint64_t device_oriented{0};
 	bool oriented_bootstrap_enabled{false};
+	//! Of those, re-acquired by @ref prior_reacquire (CONSTELLATION_TRACKER_PRIOR_REACQUIRE=1), and how many of
+	//! those continued a recent nearby solve rather than starting a new track.
+	uint64_t device_prior{0};
+	uint64_t device_prior_continued{0};
+	bool prior_reacquire_enabled{false};
 	uint64_t device_failed{0};
 	uint64_t unconfirmed_dropped{0};
 	double solve_us_total{0.0};

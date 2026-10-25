@@ -14,6 +14,8 @@
 #include "math/m_relation_history.h"
 #include "math/m_space.h"
 
+#include "os/os_time.h"
+
 #include "interfaces/context.hpp"
 
 #include "util/u_debug.h"
@@ -60,6 +62,8 @@ struct InputClass
 	xrt_device_name name;
 	const std::vector<xrt_input_name> poses;
 	const std::unordered_map<std::string_view, xrt_input_name> non_poses;
+	//! Other interaction profiles this device can be bound as.
+	std::span<xrt_binding_profile> binding_profiles{};
 };
 
 namespace {
@@ -217,13 +221,59 @@ const std::unordered_map<std::string_view, InputClass> controller_classes{
         },
     },
 };
-int64_t
-chrono_timestamp_ns()
-{
-	auto now = std::chrono::steady_clock::now().time_since_epoch();
-	int64_t ts = std::chrono::duration_cast<std::chrono::nanoseconds>(now).count();
-	return ts;
-}
+
+// The VP2 exposes its buttons with the same names as the Vive Pro, so this is an identity mapping.
+xrt_binding_input_pair vive_pro_inputs_vp2[] = {
+    {XRT_INPUT_VIVE_PRO_SYSTEM_CLICK, XRT_INPUT_VIVE_PRO_SYSTEM_CLICK},
+    {XRT_INPUT_VIVE_PRO_VOLUP_CLICK, XRT_INPUT_VIVE_PRO_VOLUP_CLICK},
+    {XRT_INPUT_VIVE_PRO_VOLDN_CLICK, XRT_INPUT_VIVE_PRO_VOLDN_CLICK},
+    {XRT_INPUT_VIVE_PRO_MUTE_MIC_CLICK, XRT_INPUT_VIVE_PRO_MUTE_MIC_CLICK},
+};
+
+xrt_binding_profile vp2_binding_profiles[] = {
+    {
+        .name = XRT_DEVICE_VIVE_PRO,
+        .inputs = vive_pro_inputs_vp2,
+        .input_count = std::size(vive_pro_inputs_vp2),
+        .outputs = nullptr,
+        .output_count = 0,
+    },
+};
+
+// Used for any HMD that isn't in hmd_classes.
+const InputClass generic_hmd_class{
+    XRT_DEVICE_GENERIC_HMD,
+    {
+        XRT_INPUT_GENERIC_HEAD_POSE,
+    },
+    {
+        {"/proximity", XRT_INPUT_GENERIC_HEAD_DETECT},
+    },
+};
+
+// Adding support for a new HMD is as simple as adding it here.
+// The key for the map is the variant determined from the model number given by the lighthouse driver, as the
+// lighthouse driver gives the same input profile to multiple HMDs (e.g. the Vive Pro and Vive Pro 2).
+const std::unordered_map<VIVE_VARIANT, InputClass> hmd_classes{
+    {
+        VIVE_VARIANT_PRO2,
+        InputClass{
+            XRT_DEVICE_VIVE_PRO2,
+            {
+                XRT_INPUT_GENERIC_HEAD_POSE,
+            },
+            {
+                {"/proximity", XRT_INPUT_GENERIC_HEAD_DETECT},
+                // Paths from the lighthouse vive_pro profile, on VP2 these are fed from the HID device.
+                {"/input/system/click", XRT_INPUT_VIVE_PRO_SYSTEM_CLICK},
+                {"/input/volume_up/click", XRT_INPUT_VIVE_PRO_VOLUP_CLICK},
+                {"/input/volume_down/click", XRT_INPUT_VIVE_PRO_VOLDN_CLICK},
+                {"/input/mute_mic/click", XRT_INPUT_VIVE_PRO_MUTE_MIC_CLICK},
+            },
+            vp2_binding_profiles,
+        },
+    },
+};
 
 // Template for calling a member function of Device from a free function
 template <typename DeviceType, auto Func, typename Ret, typename... Args>
@@ -273,15 +323,11 @@ HmdDevice::HmdDevice(const DeviceBuilder &builder) : Device(builder)
 
 	this->supported.compositor_info = true;
 
-	inputs_vec = {
-	    xrt_input{true, 0, XRT_INPUT_GENERIC_HEAD_POSE, {}},
-	    xrt_input{false, 0, XRT_INPUT_GENERIC_HEAD_DETECT, {}},
-	};
-	this->inputs_map["/proximity"] = &inputs_vec[1];
-	this->inputs = inputs_vec.data();
-	this->input_count = inputs_vec.size();
+	// Refined once lighthouse gives us the model number, see handle_property_write.
+	set_hmd_class(&generic_hmd_class);
 
 #define SETUP_MEMBER_FUNC(name) this->xrt_device::name = &device_bouncer<HmdDevice, &HmdDevice::name, xrt_result_t>
+	SETUP_MEMBER_FUNC(update_inputs);
 	SETUP_MEMBER_FUNC(get_view_poses);
 	SETUP_MEMBER_FUNC(compute_distortion);
 	SETUP_MEMBER_FUNC(set_brightness);
@@ -380,9 +426,9 @@ Device::Device(const DeviceBuilder &builder) : xrt_device({}), ctx(builder.ctx),
 // should be done after this function is called, otherwise the pointers in inputs_map/finger_inputs_map
 // would be invalidated.
 void
-ControllerDevice::set_input_class(const InputClass *input_class)
+Device::set_input_class(const InputClass *input_class)
 {
-	// this should only be called once
+	// this should only be called once, or after clearing the inputs (see HmdDevice::set_hmd_class)
 	assert(inputs_vec.empty());
 	this->input_class = input_class;
 
@@ -399,6 +445,9 @@ ControllerDevice::set_input_class(const InputClass *input_class)
 
 	this->inputs = inputs_vec.data();
 	this->input_count = inputs_vec.size();
+
+	this->binding_profiles = input_class->binding_profiles.data();
+	this->binding_profile_count = input_class->binding_profiles.size();
 }
 
 xrt_hand
@@ -849,6 +898,66 @@ HmdDevice::get_compositor_info(const struct xrt_device_compositor_mode *mode,
 	return XRT_SUCCESS;
 }
 
+float
+HmdDevice::getIpdM()
+{
+	// On Vive Pro 2, we get this from the VP2 HID device.
+	if (this->vp2.hid) {
+		float lens_separation;
+		bool bret = vp2_get_status( //
+		    this->vp2.hid,          //
+		    nullptr,                //
+		    &lens_separation,       //
+		    nullptr,                //
+		    nullptr,                //
+		    nullptr,                //
+		    nullptr);               //
+		if (bret) {
+			return lens_separation;
+		}
+	}
+
+	return this->lh_ipd;
+}
+
+xrt_result_t
+HmdDevice::update_inputs()
+{
+	// On Vive Pro 2, the proximity sensor and buttons are read from the VP2 HID device rather than lighthouse.
+	if (this->vp2.hid) {
+		bool proximity, system, volume_up, volume_down, mute_mic;
+		bool bret = vp2_get_status( //
+		    this->vp2.hid,          //
+		    &proximity,             //
+		    nullptr,                //
+		    &system,                //
+		    &volume_up,             //
+		    &volume_down,           //
+		    &mute_mic);             //
+		if (bret) {
+			int64_t now = os_monotonic_get_ns();
+			auto set_bool = [&](std::string_view path, bool value) {
+				auto input = inputs_map.find(path);
+				if (input == inputs_map.end()) {
+					return;
+				}
+				input->second->active = true;
+				input->second->value.boolean = value;
+				input->second->timestamp = now;
+			};
+
+			// Paths match the input class in hmd_classes.
+			set_bool("/proximity", proximity);
+			set_bool("/input/system/click", system);
+			set_bool("/input/volume_up/click", volume_up);
+			set_bool("/input/volume_down/click", volume_down);
+			set_bool("/input/mute_mic/click", mute_mic);
+		}
+	}
+
+	return XRT_SUCCESS;
+}
+
 xrt_result_t
 HmdDevice::get_tracked_pose(xrt_input_name name, uint64_t at_timestamp_ns, xrt_space_relation *out_relation)
 {
@@ -964,15 +1073,12 @@ HmdDevice::get_view_poses(const xrt_vec3 *default_eye_relation,
 {
 	struct xrt_vec3 eye_relation = *default_eye_relation;
 
-	eye_relation.x = ipd;
+	eye_relation.x = this->getIpdM();
 
 	float override_ipd_mm = debug_get_float_option_lh_override_ipd();
 	if (override_ipd_mm != -1.0f) {
 		// Convert from mm -> m
 		eye_relation.x = override_ipd_mm / 1000.0f;
-	} else if (this->variant == VIVE_VARIANT_PRO2) {
-		// Default to 63mm on Vive Pro 2, the IPD reading is completely borked and always sends 15mm
-		eye_relation.x = 0.063f;
 	}
 
 	xrt_result_t xret = u_device_get_view_poses( //
@@ -1203,7 +1309,7 @@ Device::update_pose(const vr::DriverPose_t &newPose) const
 	math_quat_rotate_vec3(&chaperone.orientation, &relation.linear_velocity, &relation.linear_velocity);
 	math_quat_rotate_vec3(&chaperone.orientation, &relation.angular_velocity, &relation.angular_velocity);
 
-	const int64_t ts = chrono_timestamp_ns() + time_s_to_ns(newPose.poseTimeOffset);
+	const int64_t ts = os_monotonic_get_ns() + time_s_to_ns(newPose.poseTimeOffset);
 
 	m_relation_history_push(relation_hist, &relation, ts);
 }
@@ -1337,6 +1443,26 @@ Device::handle_property_write(const vr::PropertyWrite_t &prop)
 	return handle_generic_property_write(prop);
 }
 
+void
+HmdDevice::set_hmd_class(const InputClass *hmd_class)
+{
+	if (this->input_class == hmd_class) {
+		return;
+	}
+
+	// Input components hold pointers into inputs_vec, so the inputs can't be rebuilt once any exist.
+	if (!this->handles.empty()) {
+		DEV_WARN("HMD input components already created, keeping current input class");
+		return;
+	}
+
+	inputs_vec.clear();
+	inputs_map.clear();
+
+	this->name = hmd_class->name;
+	set_input_class(hmd_class);
+}
+
 bool
 HmdDevice::init_vive_pro_2(struct xrt_prober *xp)
 {
@@ -1376,6 +1502,13 @@ HmdDevice::init_vive_pro_2(struct xrt_prober *xp)
 
 	xrt_prober_unlock_list(xp, &devices);
 
+	if (this->vp2.hid == nullptr) {
+		if (ret == 0) {
+			DEV_ERR("Vive Pro 2 HID device (%04x:%04x) not found", VP2_VID, VP2_PID);
+		}
+		return false;
+	}
+
 	int width, height;
 	vp2_resolution_get_extents(vp2_get_resolution(this->vp2.hid), &width, &height);
 
@@ -1398,6 +1531,7 @@ HmdDevice::init_vive_pro_2(struct xrt_prober *xp)
 	htc_config_get_fov(&config->base, 1, &this->hmd_parts->base.distortion.fov[1]);
 
 	this->supported.brightness_control = true;
+	this->supported.presence = true;
 
 	return ret == 0;
 }
@@ -1411,6 +1545,9 @@ HmdDevice::handle_property_write(const vr::PropertyWrite_t &prop)
 
 		this->variant = vive_determine_variant(model_number.c_str());
 
+		auto hmd_class = hmd_classes.find(this->variant);
+		set_hmd_class(hmd_class != hmd_classes.end() ? &hmd_class->second : &generic_hmd_class);
+
 		return Device::handle_property_write(prop);
 	}
 	case vr::Prop_DisplayFrequency_Float: {
@@ -1422,7 +1559,7 @@ HmdDevice::handle_property_write(const vr::PropertyWrite_t &prop)
 	}
 	case vr::Prop_UserIpdMeters_Float: {
 		if (*static_cast<float *>(prop.pvBuffer) != 0) {
-			ipd = *static_cast<float *>(prop.pvBuffer);
+			lh_ipd = *static_cast<float *>(prop.pvBuffer);
 		}
 		break;
 	}
@@ -1449,6 +1586,11 @@ HmdDevice::handle_property_write(const vr::PropertyWrite_t &prop)
 		break;
 	}
 	case vr::Prop_ContainsProximitySensor_Bool: {
+		// Ignored on VP2
+		if (this->variant == VIVE_VARIANT_PRO2) {
+			break;
+		}
+
 		this->supported.presence = *static_cast<bool *>(prop.pvBuffer);
 		break;
 	}

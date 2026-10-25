@@ -152,6 +152,7 @@ bool
 comp_window_macos_prepare_destroy(struct comp_target *ct);
 
 extern const struct comp_target_factory comp_target_factory_macos;
+extern const struct comp_target_factory comp_target_factory_macos_wsi_generic;
 #endif // XRT_OS_OSX
 
 #ifdef __cplusplus

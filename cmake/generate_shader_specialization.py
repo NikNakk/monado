@@ -83,9 +83,13 @@ class ShaderSpec:
         yield "};"
         yield ""
 
-    def write_hpp_map_lines(self, field_naming: FieldNaming) -> Iterator[str]:
+    def write_hpp_map_lines(
+        self,
+        field_naming: FieldNaming,
+        h_inc_name: str = "render_shader_specialization.h.inc",
+    ) -> Iterator[str]:
         yield f"//! Generated from {self.shader_path.name} by generate_shader_specialization.py"
-        yield f"//! Uses @c struct {self.struct_name} from @c render_shader_specialization.h.inc."
+        yield f"//! Uses @c struct {self.struct_name} from @c {h_inc_name}."
         yield f"template <> struct ShaderSpecializationMap<{self.struct_name}>"
         yield "{"
         yield "\tstatic constexpr auto kEntries = std::to_array<VkSpecializationMapEntry>({"
@@ -339,9 +343,13 @@ def generate_h_inc_lines(specs: Sequence[ShaderSpec], field_naming: FieldNaming)
     yield from write_specialization_macro_lines(specs, c_style=True)
 
 
-def generate_hpp_inc_lines(specs: Sequence[ShaderSpec], field_naming: FieldNaming) -> Iterator[str]:
+def generate_hpp_inc_lines(
+    specs: Sequence[ShaderSpec],
+    field_naming: FieldNaming,
+    h_inc_name: str = "render_shader_specialization.h.inc",
+) -> Iterator[str]:
     for spec in specs:
-        yield from spec.write_hpp_map_lines(field_naming)
+        yield from spec.write_hpp_map_lines(field_naming, h_inc_name)
 
     yield from write_specialization_macro_lines(specs, c_style=False)
 
@@ -367,7 +375,10 @@ def write_specializations(
     struct_names = load_struct_names(struct_names_path)
     specs = gather_shader_specs(glslang, shader_paths, include_dirs, struct_names)
     write_generated_file(h_inc_output.resolve(), generate_h_inc_lines(specs, field_naming))
-    write_generated_file(hpp_inc_output.resolve(), generate_hpp_inc_lines(specs, field_naming))
+    write_generated_file(
+        hpp_inc_output.resolve(),
+        generate_hpp_inc_lines(specs, field_naming, h_inc_output.name),
+    )
 
 
 def parse_field_naming(args: argparse.Namespace) -> FieldNaming:
@@ -419,6 +430,10 @@ def run_self_tests() -> None:
     assert "ShaderSpecializationMap<render_distortion_spec>" in hpp_text
     assert "struct render_distortion_spec\n{" not in hpp_text
     assert "output_depth_encoding_swapped_upper_left_corner" in hpp_text
+    assert "render_shader_specialization.h.inc" in hpp_text
+    assert "ext_shader_specialization.h.inc" in "\n".join(
+        spec.write_hpp_map_lines("snake_case", "ext_shader_specialization.h.inc")
+    )
 
     consolidated_h = "\n".join(generate_h_inc_lines([spec], "snake_case"))
     assert "RENDER_SHADER_SPECIALIZATION_KEYS(X)" in consolidated_h

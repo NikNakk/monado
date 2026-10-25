@@ -44,6 +44,12 @@ struct comp_target_swapchain
 	//! If we should use display timing.
 	enum comp_target_display_timing_usage timing_usage;
 
+	/*!
+	 * Optional, called with each feedback entry before the pacer consumes it.
+	 * A target may correct the entry where its platform reports it differently.
+	 */
+	void (*on_present_feedback)(struct comp_target_swapchain *, VkPastPresentationTimingGOOGLE *);
+
 	//! Also works as a frame index.
 	int64_t current_frame_id;
 

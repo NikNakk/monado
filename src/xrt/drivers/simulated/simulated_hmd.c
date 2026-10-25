@@ -15,6 +15,7 @@
 #include "math/m_mathinclude.h"
 
 #include "util/u_debug.h"
+#include "util/u_desktop_pose.h"
 #include "util/u_device.h"
 #include "util/u_distortion_mesh.h"
 #include "util/u_logging.h"
@@ -136,6 +137,13 @@ simulated_hmd_get_tracked_pose(struct xrt_device *xdev,
 		// Reset pose.
 		hmd->pose = hmd->center;
 		break;
+	case SIMULATED_MOVEMENT_DESKTOP: {
+		struct xrt_pose tmp;
+		u_desktop_pose_get(&tmp);
+
+		// Transform with center to set it.
+		math_pose_transform(&hmd->center, &tmp, &hmd->pose);
+	} break;
 	}
 
 	out_relation->pose = hmd->pose;
@@ -143,6 +151,19 @@ simulated_hmd_get_tracked_pose(struct xrt_device *xdev,
 	                                                               XRT_SPACE_RELATION_POSITION_VALID_BIT |
 	                                                               XRT_SPACE_RELATION_ORIENTATION_TRACKED_BIT);
 
+	return XRT_SUCCESS;
+}
+
+/*!
+ * With SIMULATED_DESKTOP the compositor draws a simulated room as passthrough,
+ * so advertise support. There are no camera frames to deliver.
+ */
+static xrt_result_t
+simulated_hmd_set_passthrough_sinks(struct xrt_device *xdev, struct xrt_frame_sink *left, struct xrt_frame_sink *right)
+{
+	(void)xdev;
+	(void)left;
+	(void)right;
 	return XRT_SUCCESS;
 }
 
@@ -207,6 +228,9 @@ simulated_hmd_create(enum simulated_movement movement, const struct xrt_pose *ce
 	hmd->diameter_m = 0.05f;
 	hmd->log_level = simulated_log_level();
 	hmd->movement = movement;
+	if (movement == SIMULATED_MOVEMENT_DESKTOP) {
+		hmd->base.set_passthrough_sinks = simulated_hmd_set_passthrough_sinks;
+	}
 
 	hmd->base.hmd->view_count = debug_get_num_option_view_count();
 	// Print name.

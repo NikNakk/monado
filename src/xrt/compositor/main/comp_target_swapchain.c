@@ -415,6 +415,9 @@ do_update_timings_google_display_timing(struct comp_target_swapchain *cts)
 	    timings);                          //
 	int64_t now_ns = os_monotonic_get_ns();
 	for (uint32_t i = 0; i < count; i++) {
+		if (cts->on_present_feedback != NULL) {
+			cts->on_present_feedback(cts, &timings[i]);
+		}
 		u_pc_info(cts->upc,                       //
 		          timings[i].presentID,           //
 		          timings[i].desiredPresentTime,  //
@@ -1315,6 +1318,7 @@ comp_target_swapchain_init_and_set_fnptrs(struct comp_target_swapchain *cts,
                                           enum comp_target_display_timing_usage timing_usage)
 {
 	cts->timing_usage = timing_usage;
+	cts->on_present_feedback = NULL;
 	cts->base.check_ready = comp_target_swapchain_check_ready;
 	cts->base.is_shared_presentable_image = comp_target_swapchain_is_shared_presentable_image;
 	cts->base.create_images = comp_target_swapchain_create_images;

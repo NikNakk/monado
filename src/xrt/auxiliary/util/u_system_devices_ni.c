@@ -39,6 +39,15 @@ u_system_devices_ni_create_hand_tracker(struct xrt_system_devices *xsysd,
 }
 
 xrt_result_t
+u_system_devices_ni_create_io_cache(struct xrt_system_devices *xsysd,
+                                    struct xrt_space_overseer *xso,
+                                    struct xrt_io_cache **out_xic)
+{
+	E(create_io_cache);
+	return XRT_ERROR_FEATURE_NOT_SUPPORTED;
+}
+
+xrt_result_t
 u_system_devices_ni_feature_inc(struct xrt_system_devices *xsysd, enum xrt_device_feature_type type)
 {
 	E(feature_inc);

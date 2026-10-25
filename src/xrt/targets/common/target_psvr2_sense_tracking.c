@@ -233,6 +233,12 @@ static const char *const sense_tracking_defaults[][2] = {
     {"PSSENSE_LED_BOOTSTRAP_QUICK_LOCK", "1"},
     {"PSVR2_LED_DETECTOR_BLOBS", "1"},
     {"PSSENSE_RECONNECT", "1"},
+    // Validated on 25 Oct (20261025-depth-hold-v4): no fall back to the tracking origin after a controller's first
+    // lock. Offline on the v3 survey, prior re-acquisition cut the jump on recapture from 101 to 14 mm median and the
+    // stillness-gated coast beat both holding and an unbounded coast from 0.5 to 3 s.
+    {"PSSENSE_HOLD_POSITION", "1"},
+    {"PSSENSE_COAST_POSITION", "1"},
+    {"CONSTELLATION_TRACKER_PRIOR_REACQUIRE", "1"},
 };
 
 struct psvr2_sense_tracking

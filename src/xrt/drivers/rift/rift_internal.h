@@ -905,15 +905,9 @@ struct rift_hmd
 
 	struct os_thread_helper sensor_thread;
 
-	uint32_t last_remote_sample_time_us;
-	timepoint_ns last_remote_sample_time_ns;
+	struct m_clock_bit_extender clock_extender;
 	timepoint_ns last_sample_local_timestamp_ns;
 
-	uint32_t last_remote_exposure_time_us;
-	//! The time of the last exposure in remote time, only accessed from the sensor thread, not locked.
-	timepoint_ns last_remote_exposure_time_ns;
-	//! The time of the last exposure, locked by sensor_thread.
-	timepoint_ns last_local_exposure_time_ns;
 	//! A total counter for how many exposures have occurred
 	uint32_t exposure_counter;
 	uint16_t last_tracking_count;

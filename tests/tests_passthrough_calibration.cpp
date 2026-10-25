@@ -157,3 +157,43 @@ TEST_CASE("Camera reprojection rejects arrival-only, future and stale timestamps
 	CHECK_FALSE(u_passthrough_calibration_frame_is_fresh(now + 1, 900000000, now));
 	CHECK_FALSE(u_passthrough_calibration_frame_is_fresh(now - 250000000, 900000000, now));
 }
+
+TEST_CASE("Fixed-depth passthrough ray points from the camera to the eye ray's point at that depth")
+{
+	u_passthrough_camera camera = {};
+	camera.head_from_camera.orientation.w = 1;
+	camera.head_from_camera.position = {0.03f, -0.02f, -0.10f};
+	const xrt_vec3 eye = {-0.0315f, 0, 0};
+	const xrt_vec3 ray = {0.3f, -0.2f, -1.0f};
+	xrt_vec3 out;
+
+	// Zero depth keeps the infinity mapping.
+	REQUIRE(u_passthrough_calibration_depth_ray(&camera, &eye, &ray, 0, &out));
+	CHECK(out.x == ray.x);
+	CHECK(out.y == ray.y);
+
+	// The result is the camera-to-point direction for the point at 0.5 m along the eye ray.
+	const double depth = 0.5;
+	const double len = std::sqrt(0.3 * 0.3 + 0.2 * 0.2 + 1.0);
+	const double px = eye.x + depth * 0.3 / len - 0.03, py = depth * -0.2 / len + 0.02,
+	             pz = depth * -1.0 / len + 0.10;
+	REQUIRE(u_passthrough_calibration_depth_ray(&camera, &eye, &ray, depth, &out));
+	CHECK(out.z == -1.0f);
+	CHECK(out.x == Catch::Approx(px / -pz).epsilon(1e-5));
+	CHECK(out.y == Catch::Approx(py / -pz).epsilon(1e-5));
+
+	// Far depths converge to the infinity ray; a camera at the eye leaves the direction unchanged at any depth.
+	REQUIRE(u_passthrough_calibration_depth_ray(&camera, &eye, &ray, 100000.0, &out));
+	CHECK(out.x == Catch::Approx(0.3).margin(1e-4));
+	camera.head_from_camera.position = eye;
+	REQUIRE(u_passthrough_calibration_depth_ray(&camera, &eye, &ray, 0.4, &out));
+	CHECK(out.x == Catch::Approx(0.3).margin(1e-6));
+	CHECK(out.y == Catch::Approx(-0.2).margin(1e-6));
+
+	// A point beside or behind the camera plane is rejected.
+	camera.head_from_camera.position = {0, 0, -0.10f};
+	const xrt_vec3 wide = {10.0f, 0, -1.0f};
+	CHECK_FALSE(u_passthrough_calibration_depth_ray(&camera, &eye, &wide, 0.2, &out));
+	const xrt_vec3 zero = {0, 0, 0};
+	CHECK_FALSE(u_passthrough_calibration_depth_ray(&camera, &eye, &zero, 0.5, &out));
+}

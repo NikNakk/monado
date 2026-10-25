@@ -1104,7 +1104,9 @@ world frame). No fault.
   recorded IMU and the tracker's poses through the filter, each pose arriving 35 ms after its exposure. It hides
   optical for 300 ms every 2 s and compares the filter at each hidden exposure with the hidden pose and with holding the
   last pose. It also reports filter-versus-optical on visible exposures, the still accelerometer rotated into the world
-  (a gravity-axis check) and the learnt biases.
+  (a gravity-axis check) and the learnt biases. Tool-only `FILTER_GAP_MS`, `FILTER_GAP_PERIOD_MS`,
+  `FILTER_DAMP_MS` and `FILTER_STILL_GATE=1` vary the gaps and add a damped or stillness-gated coast column; see
+  [the 25 Oct coast evidence](macos-pssense-occlusion.md#offline-coast-and-blob-evidence-25-october-2026).
 
 **Offline, on `sessions/20260926-010135-imu-capture`** (the first recording with IMU samples). The Sense IMU arrives at
 only 66 Hz, one sample per Bluetooth report (~15 ms).

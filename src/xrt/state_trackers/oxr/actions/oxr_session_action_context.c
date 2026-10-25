@@ -8,26 +8,41 @@
  * @ingroup oxr_main
  */
 
+#include "xrt/xrt_system.h"
+
 #include "util/u_debug.h"
 #include "util/u_hashmap.h"
+#include "util/u_misc.h"
 
 #include "oxr_session_action_context.h"
-#include "../oxr_logger.h"
+#include "oxr_binding_registry.h"
+#include "oxr_io_cache.h"
+#include "oxr_priority_group_cache.h"
+#include "oxr_suggested_profile_array.h"
 #include "../oxr_objects.h"
 #include "oxr_input.h"
 
 
 XrResult
-oxr_session_action_context_init(struct oxr_session_action_context *action_context)
+oxr_session_action_context_init(struct oxr_session_action_context *action_context,
+                                struct xrt_system_devices *xsysd,
+                                struct xrt_space_overseer *xso)
 {
-	// Initialize dynamic roles generation_id and mutex
-	action_context->dynamic_roles_generation_id = 0;
+	U_ZERO(action_context);
+
 	os_mutex_init(&action_context->sync_actions_mutex);
 
 	// Action system hashmaps.
 	int h_ret = u_hashmap_int_create(&action_context->act_sets_attachments_by_key);
 	if (h_ret != 0) {
+		oxr_session_action_context_fini(action_context);
 		return XR_ERROR_RUNTIME_FAILURE;
+	}
+
+	XrResult ret = oxr_priority_group_cache_init(&action_context->priority_group_cache);
+	if (ret != XR_SUCCESS) {
+		oxr_session_action_context_fini(action_context);
+		return ret;
 	}
 
 	// Initialize action set attachments
@@ -39,13 +54,21 @@ oxr_session_action_context_init(struct oxr_session_action_context *action_contex
 	OXR_FOR_EACH_VALID_SUBACTION_PATH(INIT_PATH)
 #undef INIT_PATH
 
+	ret = oxr_io_cache_init(&action_context->io_cache, xsysd, xso);
+	if (ret != XR_SUCCESS) {
+		oxr_session_action_context_fini(action_context);
+		return ret;
+	}
+
 	return XR_SUCCESS;
 }
 
 void
 oxr_session_action_context_fini(struct oxr_session_action_context *action_context)
 {
-	oxr_interaction_profile_array_clear(&action_context->profiles_on_attachment);
+	oxr_suggested_profile_array_clear(&action_context->profiles_on_attachment);
+	oxr_binding_registry_unref(action_context->binding_registry);
+	action_context->binding_registry = NULL;
 
 	// Teardown action set attachments
 	for (size_t i = 0; i < action_context->action_set_attachment_count; ++i) {
@@ -54,6 +77,10 @@ oxr_session_action_context_fini(struct oxr_session_action_context *action_contex
 	free(action_context->act_set_attachments);
 	action_context->act_set_attachments = NULL;
 	action_context->action_set_attachment_count = 0;
+
+	oxr_priority_group_cache_fini(&action_context->priority_group_cache);
+
+	oxr_io_cache_fini(&action_context->io_cache);
 
 	// If we tore everything down correctly, these are empty now.
 	assert(action_context->act_sets_attachments_by_key == NULL ||

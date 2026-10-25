@@ -17,6 +17,8 @@
 #include "os/os_time.h"
 #include "util/u_debug.h"
 #include "util/u_logging.h"
+#include "util/u_macos_display_host.h"
+#include "b_system.h"
 
 #include <stdint.h>
 #include <stdio.h>
@@ -305,6 +307,44 @@ poll_compositor_display_lifecycle(struct ipc_server *vs)
 }
 
 /*
+ * The user closed the compositor's window (only the simulated-HMD desktop
+ * window has a close button). Ask every session to exit, as if each
+ * application had called xrRequestExitSession, and stop the service once the
+ * clients have gone, or after a grace period for one that does not respond.
+ */
+#define WINDOW_CLOSE_GRACE_NS (3ULL * 1000000000ULL)
+static uint64_t g_window_close_since_ns = 0;
+
+static void
+poll_window_close(struct ipc_server *vs)
+{
+	if (g_window_close_since_ns == 0) {
+		if (!u_macos_display_host_take_close_request()) {
+			return;
+		}
+		g_window_close_since_ns = os_monotonic_get_ns();
+		U_LOG_I("Compositor window closed; asking clients to exit, then stopping the service");
+		// The service's system always comes from b_system (target_instance.c).
+		struct b_system *bsys = container_of(vs->xsys, struct b_system, base);
+		union xrt_session_event xse = {0};
+		xse.type = XRT_SESSION_EVENT_REQUEST_EXIT;
+		b_system_broadcast_event(bsys, &xse);
+	}
+
+	os_mutex_lock(&vs->global_state.lock);
+	uint32_t connected_clients = vs->global_state.connected_client_count;
+	os_mutex_unlock(&vs->global_state.lock);
+
+	if (connected_clients != 0 && os_monotonic_get_ns() - g_window_close_since_ns < WINDOW_CLOSE_GRACE_NS) {
+		return;
+	}
+	if (connected_clients != 0) {
+		U_LOG_W("%u client(s) still connected after the window closed; stopping anyway", connected_clients);
+	}
+	ipc_server_handle_shutdown_signal(vs);
+}
+
+/*
  * Idle display sleep turns a headset's display off like any other, which also
  * looks like display loss above. While clients are connected, keep displays
  * awake as a video player does. Opt-in with XRT_MACOS_PREVENT_DISPLAY_SLEEP=1.
@@ -383,6 +423,7 @@ ipc_server_mainloop_poll(struct ipc_server *vs, struct ipc_server_mainloop *ml)
 	ipc_server_mainloop_apple_poll(vs, ml);
 	ipc_metal_xpc_service_expire_tokens();
 	poll_compositor_display_lifecycle(vs);
+	poll_window_close(vs);
 	poll_display_sleep_assertion(vs);
 }
 

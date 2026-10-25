@@ -23,6 +23,8 @@
 #define QWERTY_RIGHT_STR "Qwerty Right Controller"
 #define QWERTY_RIGHT_TRACKER_STR QWERTY_RIGHT_STR " Tracker"
 
+struct u_desktop_input_event;
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -41,6 +43,8 @@ struct qwerty_system
 	bool hmd_focused;   //!< For gui var tracking only, true if hmd is the focused device
 	bool lctrl_focused; //!< Same as `hmd_focused` but for the left controller
 	bool rctrl_focused; //!< Same as `hmd_focused` but for the right controller
+	bool ctrl_pressed;  //!< Left control held: input goes to the left controller
+	bool alt_pressed;   //!< Left alt held: input goes to the right controller
 };
 
 /*!
@@ -70,6 +74,8 @@ struct qwerty_device
 	bool sprint_pressed; //!< Movement speed boost
 	float yaw_delta;     //!< How much extra yaw to add for the next pose. Then reset to 0.
 	float pitch_delta;   //!< Similar to `yaw_delta`
+	float right_delta;   //!< Metres to move right for the next pose, relative to the device. Then reset to 0.
+	float forward_delta; //!< Similar to `right_delta`, forward
 };
 
 /*!
@@ -234,6 +240,14 @@ qwerty_add_look_delta(struct qwerty_device *qd, float yaw, float pitch);
  */
 void
 qwerty_change_movement_speed(struct qwerty_device *qd, float steps);
+
+/*!
+ * Move the device by @p right_m and @p forward_m metres relative to its
+ * orientation, once, on the next pose update.
+ * @public @memberof qwerty_device
+ */
+void
+qwerty_add_move_delta(struct qwerty_device *qd, float right_m, float forward_m);
 
 /*!
  * Release all movement input
@@ -406,6 +420,19 @@ qwerty_follow_hmd(struct qwerty_controller *qc, bool follow);
  */
 void
 qwerty_reset_controller_pose(struct qwerty_controller *qc);
+
+/*!
+ * Apply a keyboard or pointer event to the focused qwerty device: the left
+ * controller while left control is held, the right while left alt is held,
+ * otherwise @p default_qdev. @p default_qctrl takes controller-only input when
+ * no controller is focused. Used by both the SDL and desktop-window paths.
+ * @public @memberof qwerty_system
+ */
+void
+qwerty_process_input(struct qwerty_system *qsys,
+                     struct qwerty_device *default_qdev,
+                     struct qwerty_controller *default_qctrl,
+                     const struct u_desktop_input_event *event);
 
 
 /*!

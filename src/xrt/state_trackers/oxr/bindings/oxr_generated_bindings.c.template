@@ -22,4 +22,8 @@ struct oxr_profile_template oxr_profile_templates[$template_count] = { // array 
 $profile_templates
 }; // /array of oxr_profile_template
 
+struct oxr_rebinding_profile_template oxr_rebinding_profile_templates[$rebinding_template_count] = { // array of oxr_rebinding_profile_template
+$rebinding_profile_templates
+}; // /array of oxr_rebinding_profile_template
+
 // clang-format on

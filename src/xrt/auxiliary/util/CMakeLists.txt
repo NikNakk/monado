@@ -33,6 +33,10 @@ add_library(
 	u_cobs.h
 	u_debug.c
 	u_debug.h
+	u_desktop_input.c
+	u_desktop_input.h
+	u_desktop_pose.c
+	u_desktop_pose.h
 	u_deque.cpp
 	u_deque.h
 	u_device.c
@@ -56,6 +60,10 @@ add_library(
 	u_format.h
 	u_frame.c
 	u_frame.h
+	u_frameserver.c
+	u_frameserver.h
+	u_frameserver_ni.c
+	u_frameserver_ni.h
 	u_future.h
 	u_future.cpp
 	u_gpu_trace.h

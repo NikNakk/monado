@@ -91,6 +91,7 @@ if(XRT_BUILD_DRIVER_QWERTY)
 		drv_qwerty STATIC
 		qwerty/qwerty_device.c
 		qwerty/qwerty_device.h
+		qwerty/qwerty_input.c
 		qwerty/qwerty_interface.h
 		qwerty/qwerty_prober.c
 		qwerty/qwerty_sdl.c
@@ -625,7 +626,14 @@ if(XRT_BUILD_DRIVER_SIMULAVR)
 endif()
 
 if(XRT_BUILD_DRIVER_STEAMVR_LIGHTHOUSE OR XRT_BUILD_DRIVER_SURVIVE)
-	add_library(drv_vp2 STATIC vp2/vp2_hid.c vp2/vp2_hid.h vp2/vp2_config.cpp vp2/vp2_config.h)
+	add_library(
+		drv_vp2 STATIC
+		vp2/vp2_hid.c
+		vp2/vp2_hid.h
+		vp2/vp2_config.cpp
+		vp2/vp2_config.h
+		vp2/vp2_protocol.h
+		)
 	target_link_libraries(
 		drv_vp2
 		PRIVATE

@@ -66,6 +66,7 @@
             "enum": [
                 "gamepad",
                 "holographic_controller",
+                "khr_generic_controller",
                 "khr_simple_controller",
                 "knuckles",
                 "oculus_touch",

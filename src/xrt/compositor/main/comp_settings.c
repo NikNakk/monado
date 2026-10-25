@@ -9,7 +9,11 @@
  */
 
 #include "util/u_debug.h"
+#include <stdlib.h>
 #include "comp_settings.h"
+#ifdef XRT_OS_OSX
+#include "comp_macos_presenter.h"
+#endif
 
 #ifdef XRT_OS_ANDROID
 #define USE_COMPUTE_DEFAULT false
@@ -37,6 +41,9 @@ DEBUG_GET_ONCE_NUM_OPTION(xcb_display, "XRT_COMPOSITOR_XCB_DISPLAY", -1)
 DEBUG_GET_ONCE_NUM_OPTION(default_framerate, "XRT_COMPOSITOR_DEFAULT_FRAMERATE", 60)
 DEBUG_GET_ONCE_BOOL_OPTION(compute, "XRT_COMPOSITOR_COMPUTE", USE_COMPUTE_DEFAULT)
 DEBUG_GET_ONCE_BOOL_OPTION(force_debug_image, "XRT_COMPOSITOR_FORCE_DEBUG_IMAGE", false)
+#ifdef XRT_OS_OSX
+DEBUG_GET_ONCE_BOOL_OPTION(macos_wsi_passthrough, "XRT_MACOS_WSI_PASSTHROUGH", false)
+#endif
 // clang-format on
 
 static inline void
@@ -103,6 +110,18 @@ comp_settings_init(struct comp_settings *s, struct xrt_device *xdev)
 	}
 
 	s->use_compute = debug_get_bool_option_compute();
+#ifdef XRT_OS_OSX
+	/*
+	 * Keep the validated graphics WSI default. Explicit compute now renders
+	 * into private images and copies to the WSI images, like the native
+	 * target's separation of rendering from presentation. Its visual quality
+	 * still needs hardware validation. Passthrough needs compute's alpha.
+	 */
+	if (comp_macos_presenter_is_wsi() && !debug_get_bool_option_macos_wsi_passthrough() &&
+	    getenv("XRT_COMPOSITOR_COMPUTE") == NULL) {
+		s->use_compute = false;
+	}
+#endif
 
 	if (s->use_compute) {
 #if defined(XRT_OS_OSX)

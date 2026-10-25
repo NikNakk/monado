@@ -192,6 +192,17 @@ struct u_pacing_compositor
 	                              int64_t present_to_display_offset_ns);
 
 	/*!
+	 * Change the display period, for example after a refresh rate switch,
+	 * without discarding outstanding frames, frame IDs, phase or present offset.
+	 *
+	 * Optional. Call on the thread that calls @ref predict.
+	 *
+	 * @param[in] upc             The compositor pacing helper.
+	 * @param[in] frame_period_ns The new display period, must be positive.
+	 */
+	void (*update_frame_period)(struct u_pacing_compositor *upc, int64_t frame_period_ns);
+
+	/*!
 	 * Destroy this u_pacing_compositor.
 	 */
 	void (*destroy)(struct u_pacing_compositor *upc);
@@ -304,6 +315,26 @@ static inline void
 u_pc_update_present_offset(struct u_pacing_compositor *upc, int64_t frame_id, int64_t present_to_display_offset_ns)
 {
 	upc->update_present_offset(upc, frame_id, present_to_display_offset_ns);
+}
+
+/*!
+ * @copydoc u_pacing_compositor::update_frame_period
+ *
+ * Helper for calling through the function pointer.
+ *
+ * @return false if this pacer cannot change its period.
+ *
+ * @public @memberof u_pacing_compositor
+ * @ingroup aux_pacing
+ */
+static inline bool
+u_pc_update_frame_period(struct u_pacing_compositor *upc, int64_t frame_period_ns)
+{
+	if (upc->update_frame_period == NULL || frame_period_ns <= 0) {
+		return false;
+	}
+	upc->update_frame_period(upc, frame_period_ns);
+	return true;
 }
 
 /*!
@@ -773,14 +804,6 @@ u_pc_display_timing_create(int64_t estimated_frame_period_ns,
  */
 xrt_result_t
 u_pc_fake_create(int64_t estimated_frame_period_ns, int64_t now_ns, struct u_pacing_compositor **out_upc);
-
-/*!
- * Refine the frame period of a fake pacer without discarding outstanding frames,
- * frame IDs, phase or present-offset feedback. Call on the pacer's owning thread.
- * The compositor time budget remains unchanged.
- */
-void
-u_pc_fake_set_frame_period(struct u_pacing_compositor *upc, int64_t frame_period_ns);
 
 /*!
  * Creates a new application pacing factory helper.

@@ -204,7 +204,7 @@ leap_input_loop(void *ptr_to_xdev)
 	Leap::Controller LeapController;
 	os_nanosleep(U_1_000_000_000 * 0.01);
 	// sleep for an arbitrary amount of time so that Leap::Controller can initialize and connect to the service.
-	float start = (float)os_monotonic_get_ns() / (float)U_1_000_000_000;
+	float start = (float)os_monotonic_get_ns() / (float)U_TIME_1S_IN_NS;
 	// would be nice to do this only if we're not building release ^^. don't know how to do that though.
 
 	for (int i = 0; i < num_tries; i++) {
@@ -228,10 +228,10 @@ leap_input_loop(void *ptr_to_xdev)
 			          "Retrying (%i / %i)",
 			          i, num_tries);
 		}
-		os_nanosleep(U_1_000_000_000 * retry_sleep_time); // 1 second * retry_sleep_time
+		os_nanosleep(U_TIME_1S_IN_NS * retry_sleep_time); // 1 second * retry_sleep_time
 	}
 
-	ULV2_DEBUG(ulv2d, "Waited %f seconds", ((float)os_monotonic_get_ns() / (float)U_1_000_000_000) - start);
+	ULV2_DEBUG(ulv2d, "Waited %f seconds", ((float)os_monotonic_get_ns() / (float)U_TIME_1S_IN_NS) - start);
 
 	bool hmdpolicyset = false;
 
@@ -264,7 +264,7 @@ leap_input_loop(void *ptr_to_xdev)
 			ULV2_DEBUG(ulv2d, "HMD policy set.");
 			break;
 		}
-		os_nanosleep(U_1_000_000_000 * retry_sleep_time); // 1 second * retry_sleep_time
+		os_nanosleep(U_TIME_1S_IN_NS * retry_sleep_time); // 1 second * retry_sleep_time
 	}
 	ULV2_TRACE(ulv2d, "thread OK\n");
 	ulv2d->our_thread_status = THREAD_OK;

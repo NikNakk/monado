@@ -13,8 +13,11 @@
 
 #include "interfaces/context.hpp"
 
+#include "os/os_time.h"
+
 #include "util/u_var.h"
 #include "util/u_device.h"
+#include "util/u_time.h"
 
 #include "vive/vive_bindings.h"
 
@@ -301,7 +304,7 @@ Context::setup_hmd(const char *serial, vr::ITrackedDeviceServerDriver *driver)
 	}
 
 	u_var_add_root(hmd, "SteamVR HMD Device", true);
-	u_var_add_f32(hmd, &hmd->ipd, "IPD");
+	u_var_add_f32(hmd, &hmd->lh_ipd, "Lighthouse IPD");
 
 	u_var_add_f32(hmd, &distortion.fov[0].angle_up, "View 0 FovAngleUp");
 	u_var_add_f32(hmd, &distortion.fov[0].angle_down, "View 0 FovAngleDown");
@@ -359,14 +362,6 @@ Context::setup_controller(const char *serial, vr::ITrackedDeviceServerDriver *dr
 
 	enum xrt_device_name name = device->name;
 	switch (name) {
-	case XRT_DEVICE_VIVE_WAND:
-		device->binding_profiles = vive_binding_profiles_wand;
-		device->binding_profile_count = vive_binding_profiles_wand_count;
-		break;
-	case XRT_DEVICE_INDEX_CONTROLLER:
-		device->binding_profiles = vive_binding_profiles_index;
-		device->binding_profile_count = vive_binding_profiles_index_count;
-		break;
 	case XRT_DEVICE_FLIPVR:
 		device->binding_profiles = vive_binding_profiles_flipvr;
 		device->binding_profile_count = vive_binding_profiles_flipvr_count;
@@ -590,9 +585,7 @@ Context::GetRawTrackedDevicePoses(float fPredictedSecondsFromNow,
 	// This is the bare minimum required for SlimeVR's HMD feedback to work
 	if (unTrackedDevicePoseArrayCount != 10 || this->hmd == nullptr)
 		return;
-	const uint64_t time =
-	    std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now().time_since_epoch())
-	        .count();
+	const int64_t time = os_monotonic_get_ns();
 	xrt_space_relation head = {};
 	xrt_device_get_tracked_pose(this->hmd, XRT_INPUT_GENERIC_HEAD_POSE, time, &head);
 	xrt_matrix_3x3 rot = {};
@@ -660,19 +653,14 @@ Context::create_component_common(vr::PropertyContainerHandle_t container,
 }
 
 xrt_input *
-Context::update_component_common_locked(vr::VRInputComponentHandle_t handle,
-                                        double offset,
-                                        std::chrono::steady_clock::time_point now)
+Context::update_component_common_locked(vr::VRInputComponentHandle_t handle, double offset)
 {
 	xrt_input *input{nullptr};
 
 	if (handle != vr::k_ulInvalidInputComponentHandle) {
 		input = this->input.handle_to_input[handle];
-		std::chrono::duration<double, std::chrono::seconds::period> offset_dur(offset);
-		std::chrono::duration offset = (now + offset_dur).time_since_epoch();
-		int64_t timestamp = std::chrono::duration_cast<std::chrono::nanoseconds>(offset).count();
 		input->active = true;
-		input->timestamp = timestamp;
+		input->timestamp = os_monotonic_get_ns() + time_s_to_ns(offset);
 	}
 
 	return input;

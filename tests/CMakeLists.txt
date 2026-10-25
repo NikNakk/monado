@@ -4,12 +4,18 @@
 # SPDX-License-Identifier: BSL-1.0
 
 set(tests
+    tests_comp_refresh_request
+    tests_present_feedback_correction
     tests_cxx_wrappers
+    tests_macos_display_timing
+    tests_macos_presenter
     tests_deque
+    tests_desktop_pose
     tests_floor_calibration
     tests_generic_callbacks
     tests_foveation
     tests_glue_device
+    tests_glue_frameserver
     tests_glue_traits
     tests_history_buf
     tests_id_ringbuffer
@@ -57,6 +63,9 @@ if(XRT_FEATURE_OPENXR)
 		tests_oxr_layer_color_scale_bias
 		)
 endif()
+if(XRT_FEATURE_OPENXR)
+	list(APPEND tests tests_binding_registry)
+endif()
 if(XRT_HAVE_OPENGL
    AND XRT_HAVE_OPENGL_GLX
    AND XRT_HAVE_SDL2
@@ -92,6 +101,15 @@ foreach(testname ${tests})
 	set_target_properties(${testname} PROPERTIES FOLDER monado_tests)
 endforeach()
 
+if(APPLE)
+	target_sources(tests_macos_presenter PRIVATE ../src/xrt/compositor/main/comp_macos_presenter.c)
+	foreach(mode native wsi wsi-adaptive invalid)
+		add_test(NAME tests_macos_presenter_${mode} COMMAND tests_macos_presenter "[presenter-runtime]")
+		set_tests_properties(tests_macos_presenter_${mode} PROPERTIES
+			ENVIRONMENT "XRT_MACOS_PRESENTER=${mode};XRT_MACOS_WSI_GENERIC=1;XRT_MACOS_WSI_GENERIC_CV=1")
+	endforeach()
+endif()
+
 if(UNIX
    AND NOT ANDROID
    AND TARGET ipc_shared
@@ -117,6 +135,7 @@ endif()
 target_link_libraries(tests_cxx_wrappers PRIVATE xrt-interfaces)
 target_link_libraries(tests_glue_device PRIVATE xrt-interfaces aux_glue)
 target_link_libraries(tests_foveation PRIVATE aux_foveation)
+target_link_libraries(tests_glue_frameserver PRIVATE xrt-interfaces aux_glue)
 target_link_libraries(tests_glue_traits PRIVATE xrt-interfaces aux_glue)
 target_link_libraries(tests_history_buf PRIVATE aux_math)
 target_link_libraries(tests_lowpass_float PRIVATE aux_math)
@@ -204,7 +223,13 @@ if(XRT_HAVE_VULKAN)
 		list(APPEND _distortion_bench_headers "${_header}")
 	endforeach()
 	add_executable(
-		tests_render_compute tests_render_compute.cpp tests_projection_quad.cpp tests_layer_specialization.cpp ${_distortion_bench_headers}
+		tests_render_compute
+		tests_render_compute.cpp
+		tests_render_camera.cpp
+		tests_render_output.cpp
+		tests_projection_quad.cpp
+		tests_layer_specialization.cpp
+		${_distortion_bench_headers}
 		)
 	target_link_libraries(tests_render_compute PRIVATE aux_render aux_render_cache comp_util aux_vk aux_shaders xrt-external-catch2)
 	target_include_directories(tests_render_compute SYSTEM PRIVATE ${CMAKE_CURRENT_BINARY_DIR} ${_aux_shaders_binary_dir})
@@ -250,12 +275,18 @@ if(XRT_FEATURE_OPENXR)
 		tests_input_transform PRIVATE st_oxr xrt-interfaces xrt-external-openxr
 		)
 	target_link_libraries(
-		tests_generic_controller PRIVATE st_oxr xrt-interfaces xrt-external-openxr
+		tests_generic_controller PRIVATE st_oxr base xrt-interfaces xrt-external-openxr
 		)
 	add_dependencies(tests_generic_controller generate_oxr_bindings)
+	if(APPLE AND TARGET ipc_client)
+		target_link_libraries(tests_generic_controller PRIVATE ipc_client)
+	endif()
 	target_link_libraries(
 		tests_foveation_openxr PRIVATE st_oxr aux_foveation xrt-interfaces
 					       xrt-external-openxr
+		)
+	target_link_libraries(
+		tests_binding_registry PRIVATE st_oxr xrt-interfaces xrt-external-openxr
 		)
 endif()
 if(_have_opengl_test)
@@ -595,6 +626,17 @@ if(TARGET constellation_fusion)
 		)
 endif()
 
+if(XRT_BUILD_DRIVER_QWERTY)
+	add_executable(tests_qwerty_desktop_input tests_qwerty_desktop_input.cpp)
+	target_link_libraries(
+		tests_qwerty_desktop_input PRIVATE drv_qwerty drv_qwerty_includes xrt-interfaces aux_util
+						   xrt-external-catch2
+		)
+	add_test(NAME tests_qwerty_desktop_input COMMAND tests_qwerty_desktop_input)
+	set_tests_properties(tests_qwerty_desktop_input PROPERTIES ENVIRONMENT "SIMULATED_DESKTOP=1")
+	set_target_properties(tests_qwerty_desktop_input PROPERTIES FOLDER monado_tests)
+endif()
+
 if(XRT_BUILD_DRIVER_PSVR2 AND XRT_BUILD_DRIVER_PSSENSE)
 	add_executable(tests_psvr2_sense_tracking tests_psvr2_sense_tracking.cpp)
 	target_link_libraries(
@@ -654,4 +696,12 @@ if(XRT_FEATURE_MACOS_PERFETTO)
 			--fixture $<TARGET_FILE:tests_macos_perfetto> --processor ${XRT_PERFETTO_TRACE_PROCESSOR})
 		set_tests_properties(tests_macos_perfetto PROPERTIES TIMEOUT 30)
 	endif()
+endif()
+
+if(UNIX AND XRT_FEATURE_OPENXR AND TARGET ipc_server AND TARGET target_instance)
+	add_executable(tests_io_cache_ipc tests_io_cache_ipc.cpp)
+	target_link_libraries(tests_io_cache_ipc PRIVATE ipc_server ipc_client target_instance target_lists
+		base st_oxr aux_util aux_os xrt-external-openxr xrt-external-catch2)
+	add_test(NAME tests_io_cache_ipc COMMAND tests_io_cache_ipc)
+	set_tests_properties(tests_io_cache_ipc PROPERTIES TIMEOUT 30)
 endif()

@@ -114,7 +114,7 @@ protected:
 	std::unordered_map<std::string_view, xrt_input *> inputs_map;
 	std::vector<xrt_input> inputs_vec;
 	inline static xrt_pose chaperone = XRT_POSE_IDENTITY;
-	const InputClass *input_class;
+	const InputClass *input_class{nullptr};
 	std::string manufacturer;
 	std::string model;
 	float vsync_to_photon_ns{0.f};
@@ -129,6 +129,9 @@ protected:
 
 	virtual vr::ETrackedPropertyError
 	handle_property_write(const vr::PropertyWrite_t &prop);
+
+	void
+	set_input_class(const InputClass *input_class);
 
 private:
 	vr::ITrackedDeviceServerDriver *driver;
@@ -155,7 +158,7 @@ class HmdDevice : public Device
 public:
 	VIVE_VARIANT variant{VIVE_UNKNOWN};
 	xrt_pose eye[2] = {XRT_POSE_IDENTITY, XRT_POSE_IDENTITY};
-	float ipd{0.063}; // meters
+	float lh_ipd{0.063}; // meters
 	struct Parts
 	{
 		xrt_hmd_parts base;
@@ -174,6 +177,12 @@ public:
 	// clang-format on
 
 	HmdDevice(const DeviceBuilder &builder);
+
+	float
+	getIpdM();
+
+	xrt_result_t
+	update_inputs();
 
 	xrt_result_t
 	get_tracked_pose(xrt_input_name name, uint64_t at_timestamp_ns, xrt_space_relation *out_relation) override;
@@ -198,12 +207,6 @@ public:
 	void
 	set_hmd_parts(std::unique_ptr<Parts> parts);
 
-	inline float
-	get_ipd() const
-	{
-		return ipd;
-	}
-
 	xrt_result_t
 	get_brightness(float *out_brightness);
 	xrt_result_t
@@ -217,6 +220,9 @@ public:
 
 private:
 	std::unique_ptr<Parts> hmd_parts{nullptr};
+
+	void
+	set_hmd_class(const InputClass *hmd_class);
 
 	vr::ETrackedPropertyError
 	handle_property_write(const vr::PropertyWrite_t &prop) override;
@@ -263,9 +269,6 @@ public:
 	notify_chirality(bool has_chirality, xrt_hand chirality);
 
 protected:
-	void
-	set_input_class(const InputClass *input_class);
-
 	void
 	generate_palm_pose_offset(std::span<const vr::VRBoneTransform_t> bones, xrt_hand hand);
 

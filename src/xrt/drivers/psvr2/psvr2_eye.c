@@ -126,7 +126,7 @@ process_gaze_packet(struct psvr2_hmd *hmd, uint8_t *buf, size_t bytes_read)
 
 	timepoint_ns last_timestamp_ns = hmd->et_data.last_remote_report_sample_time_ns;
 	timepoint_ns timestamp_ns = hmd->et_data.last_remote_report_sample_time_ns +
-	                            ((int64_t)remote_sample_timestamp_delta_us * OS_NS_PER_USEC);
+	                            ((int64_t)remote_sample_timestamp_delta_us * U_TIME_1US_IN_NS);
 	hmd->et_data.last_remote_report_sample_time_ns = timestamp_ns;
 
 	os_mutex_lock(&hmd->et_data.data_mutex);

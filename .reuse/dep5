@@ -157,3 +157,17 @@ Files: tools/macos-present-compare/*
 Copyright: 2026, Nick Kennedy
 License: BSL-1.0
 Comment: Standalone macOS presentation experiment and analysis tooling.
+
+Files: doc/macos-wsi-cv-experiment.md
+ doc/macos-wsi-experiment.md
+ doc/macos-wsi-generic-experiment.md
+ doc/macos-wsi-native-comparison.md
+ scripts/macos/wsi-experiment/*
+Copyright: 2026, Nick Kennedy
+License: BSL-1.0
+Comment: macOS WSI experiment reports and capture/analysis tooling.
+
+Files: src/xrt/auxiliary/bindings/rebindings/*
+Copyright: 2026, NVIDIA CORPORATION.
+License: BSL-1.0 OR CC0-1.0
+Comment: JSON data files cannot carry SPDX headers cleanly.
