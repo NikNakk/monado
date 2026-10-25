@@ -212,3 +212,24 @@ other preferences are preserved. The loaded LaunchAgent must be reloaded to
 read the edited plist before the next user hardware session. This follow-up
 does not restart a running service or launch a hardware test. The hold length
 remains the one-second default. Changes are uncommitted on top of `805316beb`.
+
+### Installed service configuration repair (2026-10-25)
+
+The user reported missing automatic calibration. Inspection found both
+`XRT_FLOOR_EYE_HEIGHT_M` and `XRT_PSSENSE_STAGE_RECENTER` absent from the
+installed plist and loaded launchd environment. Both remain opt-in runtime
+settings; `XRT_FLOOR_ALIGN` alone defaults on. The persistent installer
+previously replaced the plist with lifecycle defaults, dropping preferences.
+
+The local LaunchAgent now explicitly sets eye height to the user's documented
+**1.72 m**, enables floor alignment and the right Sense Options gesture, and
+sets its hold to **1000 ms**. The idle agent is reloaded for the next client;
+no headset test is started. Stand upright and look ahead for the first steady
+second; holding Options while standing re-measures the floor and recentres.
+
+The installer now preserves an existing persistent plist's environment while
+continuing to exclude the invoking shell's tuning variables. The native helper
+build, floor/space tests and a real reinstall preservation check validate this
+change. The loaded environment is checked separately from the saved plist.
+Configuration work is on `0daaffc4a` plus the working tree; physical calibration
+and gesture confirmation remain user-operated checks.

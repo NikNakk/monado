@@ -153,6 +153,11 @@ outstanding. See the [tracing workflow](macos-gpu-sync-perfetto.md#native-instru
 
 **Current integration branch:** `macos-upstream-clean`
 
+**2026-10-25 Sense occlusion follow-up:** native Alyx logs show both right HID
+transport failures and separate optical losses. Live loss diagnostics and an
+opt-in application-only inertial position horizon are prepared; hardware
+validation remains pending. See [evidence and capture settings](macos-pssense-occlusion.md).
+
 **PS Sense 6DoF integration, updated 2026-10-08:** the joint multi-camera
 solver, EKF, LED bootstrap and calibration/session tools are integrated.
 OpenBrush 3D painting is confirmed. The user has also exercised the combined
@@ -613,6 +618,15 @@ What is still missing before this should be considered calibrated MR support:
 
 ## Eye tracking and foveation
 
+The [2026-10-25 application-owned gaze investigation](macos-app-owned-foveation-investigation.md)
+finds standard gaze-to-game input already available through EXT eye gaze.
+Engine-owned Metal foveation is feasible with application reconstruction;
+performance and Wine forwarding remain unvalidated. Existing FB/META defaults
+and build gates are unchanged.
+Its native Alyx follow-up identifies an existing FDM renderer and a concrete
+OpenVR-centre / Vulkan-offset migration from the private xrizer-to-KK handoff;
+this is separate from Monado's compact Metal swapchain path.
+
 The macOS PS VR2 driver now has a usable eye-gaze path and an experimental
 standards-facing foveation stack. The two are independent: foveation does not
 need eye tracking, and eye tracking does not depend on foveation.
@@ -796,16 +810,25 @@ and the Windows install outside this checkout:
 | `~/Code/monado-2-archive` | Evidence logs cited by the bridge's SteamVR notes, uncommitted patches from retired checkouts, and the pre-reorganisation LaunchAgent plists. |
 
 `scripts/macos/rebuild-both` rebuilds both Monado builds and restarts the
-service. The LaunchAgent is installed with
+service only if it was running. Add **`--install-local`** to install the native
+runtime to `~/.local/monado-psvr2` and register the rebuilt service with this
+machine's preferred opt-in settings. Preview with
+`python3 scripts/macos/install-local-preferences.py`. See the
+[local profile and audit](macos-service-direct-xpc.md#personal-rebuild-and-install-mode-2026-10-25).
+The LaunchAgent is installed with
 `build/arm64/src/xrt/targets/service/monado-service-xpc-control install`
-(logs in `~/Library/Logs/Monado/`). That writes only lifecycle settings. The
-installed agent then had these added back:
+(logs in `~/Library/Logs/Monado/`). A fresh install writes lifecycle settings;
+since 2026-10-25, reinstalls preserve existing environment preferences. The
+earlier installed agent had these added back:
 
 - `PSVR2_SENSE_6DOF=1`, with the mode-4 calibration and camera streams;
 - `XRT_FLOOR_EYE_HEIGHT_M=1.75`;
 - the PS VR2 and PS Sense timing traces, written to `~/psvr2-trace`.
 
-Rerun `install` after moving the build, then add those settings again.
+Rerun `install` after moving the build. The current local calibration settings
+are `XRT_FLOOR_EYE_HEIGHT_M=1.72`, `XRT_FLOOR_ALIGN=1`,
+`XRT_PSSENSE_STAGE_RECENTER=1` and a 1000 ms hold. See the
+[configuration repair](macos-floor-calibration.md#installed-service-configuration-repair-2026-10-25).
 
 xrizer registration and SteamVR share the prefix's `openvrpaths.vrpath`.
 Valve's loader uses the first runtime entry. `install-xrizer-game.zsh install`
@@ -1208,3 +1231,27 @@ rendering and admits replacement without a restart. Normal-path costs are
 quantified in the [completion report](macos-gpu-sync-completion.md), with every
 M1/M2 criterion and hardware/thermal limitations. Chromium and Wine development
 remain deferred pending separate authorization.
+
+## Guided controller survey (2026-10-25)
+
+`psvr2-openxr-test --controller-survey NEW-DIRECTORY` now guides both hands
+through 28 placement/occlusion trials, recording invalid poses and recovery as
+well as successful tracking. The preparation helper pairs the labels with a
+service CTD recording for calibration/solver replay. Native tests pass; headset
+validation remains pending. See [the protocol and commands](macos-pssense-controller-survey.md).
+
+### Guided survey wearer follow-up (2026-10-25)
+
+The first wearer run reached the right-hand ready screen after collecting the
+left trials. Version 2 adds a fixed blue forward cross, stable target previews
+for glancing, hand selection, and optional passthrough in the preparation helper.
+All ten application test cases pass; wearer validation of the new guidance is
+pending. See [survey evidence and options](macos-pssense-controller-survey.md).
+
+### Guided survey mode-4 camera fix and reset (2026-10-25)
+
+The survey's missing passthrough was a missing mode-4 source delivery path;
+that lower stereo pair now feeds the existing BC4 transport without switching
+away from controller tracking. Solid target boxes and the service's one-second
+Options reset are enabled in the prepared survey profile. Focused tests pass;
+wearer validation remains pending. See [version-3 evidence and limits](macos-pssense-controller-survey.md#version-3-mode-4-passthrough-and-options-reset).

@@ -2015,3 +2015,19 @@ Rosetta. The service and the Wine client must both be rebuilt, because they
 share time over IPC. Hardware validation is pending: a session longer than
 the usual 2–3 minutes to onset should keep both locks, and the
 `remote − local` bins should stay within normal drift.
+
+### Native Alyx occlusion and right-controller loss, 2026-10-25
+
+The [new evidence and implementation note](macos-pssense-occlusion.md) analyses
+native Alyx logs from 24 October. One session has 51 failed right HID writes and
+two disconnect/reconnect cycles; another has long optical losses with no failed
+writes. Live loss diagnostics and an opt-in application-only IMU position horizon
+are prepared without changing solver priors. Hardware validation is pending.
+
+### Guided calibration and awkward-pose evidence (2026-10-25)
+
+The [controller survey](macos-pssense-controller-survey.md) in the existing native
+test app directs both hands through mirrored placements, wrist rotations and
+shoulder/return trials. It labels loss frames and can pair them with the existing
+service CTD recorder. Application tests pass; headset/recording validation and
+any subsequent calibration fitting remain pending.

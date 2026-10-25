@@ -9,6 +9,16 @@ SPDX-License-Identifier: BSL-1.0
 This document is the authoritative design note for foveated rendering in the
 macOS Monado work.
 
+The [2026-10-25 application-owned gaze investigation](macos-app-owned-foveation-investigation.md)
+compares standard gaze input, Valve's FB/META integration and Windows VRS.
+Public gaze already works; an engine can own foveation and reconstruct ordinary
+images before submission. That alternative needs engine performance validation
+and does not replace the compact-image contract described here.
+The native Alyx follow-up in that investigation identifies a separate existing
+Vulkan FDM renderer: replace its private xrizer-to-KK gaze handoff with OpenVR
+foveation centres and application-issued Vulkan density-map offsets. That path
+does not need this Metal companion.
+
 The core rule is:
 
 > **OpenXR owns foveation policy and eye-tracked semantics; graphics-specific

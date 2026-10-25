@@ -7,8 +7,28 @@ cd "${0:A:h:h:h}"
 
 (
   set -eu
+  install_local=0
+  case "${1:-}" in
+    --install-local) install_local=1 ;;
+    --help|-h)
+      print 'Usage: scripts/macos/rebuild-both [--install-local]'
+      print '  --install-local  Install to ~/.local/monado-psvr2 and register personal PS VR2 preferences.'
+      print 'Preview preferences: python3 scripts/macos/install-local-preferences.py'
+      exit 0 ;;
+    '') ;;
+    *) print -u2 "Unknown option: $1"; exit 2 ;;
+  esac
+  if (( $# > 1 )); then
+    print -u2 'Expected at most one option; use --help.'
+    exit 2
+  fi
   arm64=build/arm64
   x64=build/x86_64
+
+  # Validate and prepare the personal profile before spending time building.
+  if (( install_local )); then
+    python3 scripts/macos/install-local-preferences.py
+  fi
 
   # Refresh revision tags while preserving existing build settings.
   cmake -S . -B "$arm64" -U GIT_DESC \
@@ -25,6 +45,15 @@ cd "${0:A:h:h:h}"
   # x86-64 native client used inside Wine.
   cmake --build "$x64" \
     --target openxr_monado --parallel 6
+
+  if (( install_local )); then
+    # A complete native build supplies every target in the prefix install,
+    # including the client runtime and registration helper, at the same tag.
+    cmake --build "$arm64" --parallel 6
+    cmake --install "$arm64" --prefix "$HOME/.local/monado-psvr2"
+    python3 scripts/macos/install-local-preferences.py --install
+    exit 0
+  fi
 
   # Restart the registered service only if it is running, so that it reloads
   # its executable. A kickstart with no client starts a service that never

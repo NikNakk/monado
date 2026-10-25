@@ -251,6 +251,15 @@ for example by `monado-ctl --floor-eye-height`, and cannot move a
 driver-provided STAGE (`PSVR2_STAGE_SPACE`). The result is logged at info
 level. See [floor calibration](macos-floor-calibration.md).
 
+The local installed LaunchAgent explicitly enables this at **1.72 m** and
+enables the one-second right Sense Options hold (2026-10-25). These remain
+opt-in runtime settings. Persistent service reinstall now preserves saved
+environment preferences; see the
+[configuration repair](macos-floor-calibration.md#installed-service-configuration-repair-2026-10-25).
+`scripts/macos/rebuild-both --install-local` explicitly selects the personal
+profile, including Sense 6DoF and GPU priority 0; see the
+[profile audit](macos-service-direct-xpc.md#personal-rebuild-and-install-mode-2026-10-25).
+
 `XRT_FLOOR_ALIGN` (default on) makes the same calibration also centre the
 STAGE under the head and turn it so that its -Z is the way the head faced,
 both averaged over the steady second. Apps on a floor-based space (SteamVR,
@@ -1400,3 +1409,19 @@ then summarizes patterns/blockers after per-compositor startup/end trimming.
 Short startup traces are explicitly unmeasured. Raw captures stay outside Git.
 The UE tracking runner includes this trace and preserves installed GPU priority
 in the hosted client. See [the findings](macos-projection-workload-census.md).
+
+## Sense occlusion diagnostics and fallback (2026-10-25)
+
+Set in the service process, alongside the existing opt-in Sense 6DoF settings:
+
+- `PSSENSE_POSE_DIAG=1` (default off): application pose validity transitions and
+  one-second status, accepted optical/IMU ages and sampled EKF rejection evidence.
+- `PSSENSE_IMU_FALLBACK_MS=600` (default 0): with `PSSENSE_FILTER=1`, extend
+  application position validity during optical occlusion; clamped to 0–1000 ms.
+  Zero retains 300 ms. Tracked status and optical solver prior validity remain
+  at their normal horizons. IMU age above 100 ms expires tracking/velocity.
+
+This is unvalidated on hardware. See [limits, native Alyx evidence and the
+capture protocol](macos-pssense-occlusion.md). `JOINT_LOSS_ACTIVE` is automatic
+and preserves evidence of losses that never recover; it is not an additional
+recovered-loss event when counting totals.

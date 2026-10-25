@@ -245,9 +245,12 @@ set_default_environment_value(NSMutableDictionary *environment, NSString *key, N
 }
 
 static NSDictionary *
-make_launch_environment(bool capture_current_environment)
+make_launch_environment(bool capture_current_environment, NSDictionary *saved_environment)
 {
 	NSMutableDictionary *filtered = [NSMutableDictionary dictionary];
+	if (saved_environment != nil) {
+		[filtered addEntriesFromDictionary:saved_environment];
+	}
 	if (capture_current_environment) {
 		NSDictionary *current = [[NSProcessInfo processInfo] environment];
 		for (NSString *key in current) {
@@ -298,7 +301,18 @@ write_launch_agent_plist(const char *path,
 		                                      : (get_log_paths(stdout_path, stderr_path), true);
 		NSString *stdout_string = have_log_paths ? [NSString stringWithUTF8String:stdout_path] : nil;
 		NSString *stderr_string = have_log_paths ? [NSString stringWithUTF8String:stderr_path] : nil;
-		NSDictionary *launch_environment = make_launch_environment(capture_current_environment);
+		/* Preserve user preferences on reinstall, without capturing shell tuning. */
+		NSDictionary *saved_environment = nil;
+		if (persistent_logs && [[NSFileManager defaultManager] fileExistsAtPath:plist_path]) {
+			NSDictionary *saved = [NSDictionary dictionaryWithContentsOfFile:plist_path];
+			id environment = [saved objectForKey:@"EnvironmentVariables"];
+			if (saved == nil || (environment != nil && ![environment isKindOfClass:[NSDictionary class]])) {
+				fprintf(stderr, "Could not read existing LaunchAgent preferences; leaving plist unchanged\n");
+				return false;
+			}
+			saved_environment = environment;
+		}
+		NSDictionary *launch_environment = make_launch_environment(capture_current_environment, saved_environment);
 
 		if (exe == nil || plist_path == nil || label == nil || mach_service == nil || stdout_string == nil ||
 		    stderr_string == nil || launch_environment == nil) {
@@ -424,12 +438,11 @@ install_service(void)
 	}
 
 	remove_development_registrations(legacy_target, direct_target, legacy_plist_path, plist_path);
-	unlink(persistent_plist_path);
 
 	/*
 	 * Persistent installs intentionally do not snapshot the invoking shell's
 	 * tuning/debug environment. Proven runtime behaviour belongs in source
-	 * defaults; the LaunchAgent only carries lifecycle settings.
+	 * defaults; preserve saved user preferences and supply lifecycle defaults.
 	 */
 	if (!write_launch_agent_plist(persistent_plist_path, service_executable, false, true)) {
 		return 4;
