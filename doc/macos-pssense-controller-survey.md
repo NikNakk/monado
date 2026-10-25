@@ -223,7 +223,7 @@ host. This is a short CPU-only measurement, not a headset latency or loaded
 tracking regression result. Visual confirmation remains pending. The installed
 LaunchAgent and previous capture folders are unchanged.
 
-## Version 4: mode-16 passthrough with detector tracking (untested)
+## Version 4: mode-16 passthrough with detector tracking
 
 Mode 4 is not needed for Sense tracking here. The 6DoF defaults set
 `PSVR2_LED_DETECTOR_BLOBS=1`, so blobs come from the headset's LED detections
@@ -242,3 +242,38 @@ mode 4 and cameras-off have been confirmed), LED lock and tracked fraction
 compared with v2, and passthrough image quality. The detector-to-VTS offset is
 not measured without mode-4 frames and uses `PSVR2_LED_DETECTOR_VTS_OFFSET_US`
 (default 0, as measured on 5 Oct).
+
+### Version 4 wearer result (25 October 2026)
+
+Run by the user on the uncommitted working tree over `0daaffc4a`, both hands,
+folder `20261025-controller-survey-both-mode16-v3`. Mode-16 passthrough was
+visible and both controllers locked; interface 8 is therefore populated in
+mode 16. No pauses, skips or Options resets. Hold-phase grip poses of the
+selected hand (`poses.csv`, 450 frames per trial):
+
+| Measure | Mode 16 + detector, both hands | Mode 4 `controller-survey-ready`, left only |
+| --- | --- | --- |
+| Position tracked, in-view poses | 91.1–100% (left low/side/shoulder lowest) | 98.4–100% |
+| Frame-to-frame step, p95 | 0.35–2.9 mm (wrist roll ~2 mm) | 0.48–1.65 mm (one moving trial 6 mm) |
+| Hold RMS about the mean | 3–12 mm (wrist roll 11–12 mm) | 3–13 mm |
+| Head turn, 68° / 97° yaw | hand drift 0.03 / 0.21 mm per degree, residual 8.4 / 8.6 mm | 0.15 mm per degree, 5.6 mm |
+
+Trial 0 is excluded: the user was repositioning. Shoulder and
+behind-shoulder holds are out of camera view, as before (left shoulder 86%).
+Tracking with mode 16 is equivalent to mode 4.
+
+Untracked controllers report orientation only from the driver (`0x19`), but
+OpenXR receives a valid position at the controller tracking origin, about 6 m
+from the user (`m_space.cpp` upgrades orientation-only relations for 3DoF
+devices). Survey counts of `position_valid_frames` therefore include these
+frames; use `position_tracked_frames`.
+
+The user reports passthrough nearly aligned, but with the hands fixed, they
+appear to move slightly as the head rotates. Tracked controller positions stay
+fixed in the world through head turns (above), so this is the camera image. The
+passthrough mapping is rotation-only at infinity, and the cameras are several
+centimetres ahead of and below the eyes. A geometric model with the installed
+calibration's translations (about 10 cm forward, 2 cm down, which the source
+calibration does not claim as absolute) predicts a few degrees of
+yaw-dependent error at 0.45 m and under about 1° beyond 3 m. See
+[passthrough](macos-psvr2-passthrough.md).

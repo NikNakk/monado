@@ -263,8 +263,8 @@ hardware validation. See [the source diagnosis and limits](macos-pssense-control
 
 With `PSVR2_LED_DETECTOR_BLOBS` (a 6DoF default), Sense tracking does not need
 mode 4, and `PSVR2_CAMERA_MODE=16` gives native passthrough alongside it; the
-detector stream then owns exposure timing. Hardware validation is pending. See
-[version 4](macos-pssense-controller-survey.md#version-4-mode-16-passthrough-with-detector-tracking-untested).
+detector stream then owns exposure timing. The user confirmed this on 25 October. See
+[version 4](macos-pssense-controller-survey.md#version-4-mode-16-passthrough-with-detector-tracking).
 
 ## Near-object swim during head rotation (2026-10-25)
 
@@ -291,3 +291,12 @@ use the headset IPD at map creation. Rays whose point would be level with or
 behind the camera are masked. Built into both the Metal and Vulkan presenters,
 with unit tests; the comparison of infinity, 2 m, 1 m and 0.5 m on the headset
 is prepared in `20261025-depth-hold-v4/commands.txt` and is pending.
+
+### Fixed-depth headset comparison (25 October 2026)
+
+User-operated, working tree over `0daaffc4a`, `20261025-depth-hold-v4`
+(client compositing, mode 16, `--generic-controller --passthrough`): depths 0
+(infinity), 2 m, 1 m and 0.5 m, each confirmed in its client log. Hands swam
+less at the smaller depths, but the room looked worse, most of all at 0.5 m.
+The user prefers infinity overall. The default stays 0 (infinity);
+`XRT_MACOS_PASSTHROUGH_DEPTH_MM` remains an opt-in for close-range work.
