@@ -1,4 +1,5 @@
 // Copyright 2026, Beyley Cardellio
+// Copyright 2026, NVIDIA CORPORATION.
 // SPDX-License-Identifier: BSL-1.0
 /*!
  * @file
@@ -2931,7 +2932,7 @@ SensorFusion::pushImuSample(const xrt_imu_sample &xr_sample)
 	this->device.imu_write_count.store(count + 1, std::memory_order_release);
 
 	/*
-	 * Release, so that the thread gets the timestamp always has the latest written imu write availabile.
+	 * Release, so that the thread gets the timestamp always has the latest written imu write available.
 	 */
 	this->device.latest_imu_ts_ns.store(xr_sample.timestamp_ns, std::memory_order_release);
 
