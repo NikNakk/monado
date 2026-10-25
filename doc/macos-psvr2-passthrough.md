@@ -251,3 +251,12 @@ deferred. Static calibrated passthrough remains the fallback for unavailable
 timing or tracking. The user confirmed camera/virtual alignment during yaw,
 pitch and roll with hosted compositing at `3d6f136e5`, then requested these defaults.
 See the [implementation and launchd check](macos-psvr2-passthrough-calibration.md#opt-in-camera-rotational-reprojection-2026-10-08).
+
+## Simultaneous Sense mode-4 camera delivery (2026-10-25)
+
+A guided-survey wearer run exposed a missing source path: mode-4 frames reached
+the optical tracker but never the passthrough sinks. The driver now converts the
+lower pair into the existing BC4 transport while keeping Sense's mode 4 active.
+The path runs only for an attached passthrough consumer. Pixel/delivery/lifetime
+tests pass; simultaneous camera image, alignment and tracking quality still need
+hardware validation. See [the source diagnosis and limits](macos-pssense-controller-survey.md#version-3-mode-4-passthrough-and-options-reset).

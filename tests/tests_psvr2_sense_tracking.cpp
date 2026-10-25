@@ -304,3 +304,137 @@ TEST_CASE("macOS Sense keeps input alive across output failures and retries")
 	xrt_frame_context_destroy_nodes(&frames);
 }
 #endif
+
+#include "psvr2/psvr2_mode4_passthrough.h"
+#include "util/u_frame.h"
+#include <vector>
+
+namespace {
+uint8_t
+decode_bc4_pixel(const uint8_t *data, uint32_t x, uint32_t y)
+{
+	const uint8_t *block = data + ((y / 4) * 256 + x / 4) * 8;
+	uint64_t bits = 0;
+	for (uint32_t i = 0; i < 6; ++i)
+		bits |= (uint64_t)block[2 + i] << (8 * i);
+	uint32_t index = (bits >> (3 * ((y % 4) * 4 + x % 4))) & 7;
+	if (index < 2)
+		return block[index];
+	if (block[0] > block[1])
+		return ((8 - index) * block[0] + (index - 1) * block[1]) / 7;
+	if (index >= 6)
+		return index == 6 ? 0 : 255;
+	return ((6 - index) * block[0] + (index - 1) * block[1]) / 5;
+}
+struct Mode4Sink
+{
+	xrt_frame_sink base{};
+	xrt_frame *frame = nullptr;
+	Mode4Sink()
+	{
+		base.push_frame = [](xrt_frame_sink *sink, xrt_frame *f) {
+			xrt_frame_reference(&reinterpret_cast<Mode4Sink *>(sink)->frame, f);
+		};
+	}
+	~Mode4Sink()
+	{
+		xrt_frame_reference(&frame, nullptr);
+	}
+};
+} // namespace
+
+TEST_CASE("Mode 4 passthrough retains image contrast, doubles pixels and excludes USB padding")
+{
+	std::vector<uint8_t> source(PSVR2_MODE4_PT_SOURCE_SIZE, 0xff);
+	for (uint32_t y = 0; y < 508; ++y)
+		for (uint32_t x = 0; x < 508; ++x)
+			source[y * 512 + x] = (x + y) % 256;
+	std::vector<uint8_t> output(PSVR2_MODE4_PT_SIZE + 8, 0xa5);
+	REQUIRE(psvr2_mode4_encode_passthrough(source.data(), source.size(), output.data(), PSVR2_MODE4_PT_SIZE));
+	int max_error = 0;
+	for (uint32_t y = 0; y < 1016; ++y) {
+		for (uint32_t x = 0; x < 1024; ++x) {
+			int expected = x / 2 < 508 ? source[(y / 2) * 512 + x / 2] : 0;
+			int got = decode_bc4_pixel(output.data(), x, y);
+			max_error = std::max(max_error, std::abs(got - expected));
+			if (x >= 1016)
+				REQUIRE(got == 0);
+		}
+	}
+	CHECK(max_error <= 19); // BC4 worst-case 255/14 quantisation, including integer rounding.
+	CHECK(output[PSVR2_MODE4_PT_SIZE] == 0xa5);
+	CHECK_FALSE(psvr2_mode4_encode_passthrough(source.data(), source.size() - 1, output.data(), output.size()));
+	CHECK_FALSE(
+	    psvr2_mode4_encode_passthrough(source.data(), source.size(), output.data(), PSVR2_MODE4_PT_SIZE - 1));
+}
+
+TEST_CASE("Mode 4 lower camera delivery reaches both passthrough sinks without switching modes")
+{
+	struct psvr2_hmd hmd{};
+	hmd.camera_mode = PSVR2_CAMERA_MODE_4;
+	os_mutex_init(&hmd.data_lock);
+	Mode4Sink left, right;
+	hmd.passthrough_sinks[0] = &left.base;
+	hmd.passthrough_sinks[1] = &right.base;
+	std::vector<uint8_t> pair(2 * PSVR2_MODE4_PT_SOURCE_SIZE, 41);
+	std::fill(pair.begin() + PSVR2_MODE4_PT_SOURCE_SIZE, pair.end(), 193);
+	psvr2_push_mode4_passthrough(&hmd, 5, pair.data(), pair.size(), 1234, 99, 17);
+	CHECK(left.frame == nullptr);
+	psvr2_push_mode4_passthrough(&hmd, 4, pair.data(), pair.size() - 1, 1234, 99, 17);
+	CHECK(left.frame == nullptr);
+	psvr2_push_mode4_passthrough(&hmd, 4, pair.data(), pair.size(), 1234, 99, 17);
+	REQUIRE(left.frame != nullptr);
+	REQUIRE(right.frame != nullptr);
+	CHECK(left.frame->format == XRT_FORMAT_BC4);
+	CHECK(left.frame->width == 1024);
+	CHECK(left.frame->height == 1016);
+	CHECK(left.frame->timestamp == 1234);
+	CHECK(left.frame->source_timestamp == 99000);
+	CHECK(right.frame->source_id == 1);
+	CHECK(right.frame->source_sequence == 17);
+	CHECK(decode_bc4_pixel(left.frame->data, 10, 10) == 41);
+	CHECK(decode_bc4_pixel(right.frame->data, 10, 10) == 193);
+	CHECK(hmd.camera_mode == PSVR2_CAMERA_MODE_4);
+	CHECK(hmd.mode4_passthrough_pushes_in_flight == 0);
+	os_mutex_destroy(&hmd.data_lock);
+}
+
+TEST_CASE("Mode 4 passthrough detach drains an in-flight sink callback")
+{
+	struct psvr2_hmd hmd{};
+	hmd.base.name = XRT_DEVICE_PSVR2;
+	hmd.camera_streams_enabled = true;
+	hmd.camera_mode = PSVR2_CAMERA_MODE_4;
+	os_mutex_init(&hmd.data_lock);
+	struct BlockingSink
+	{
+		xrt_frame_sink base{};
+		std::promise<void> entered;
+		std::shared_future<void> release;
+		BlockingSink()
+		{
+			base.push_frame = [](xrt_frame_sink *sink, xrt_frame *) {
+				auto *self = reinterpret_cast<BlockingSink *>(sink);
+				self->entered.set_value();
+				self->release.wait();
+			};
+		}
+	} sink;
+	std::promise<void> release;
+	sink.release = release.get_future().share();
+	auto entered = sink.entered.get_future();
+	hmd.passthrough_sinks[0] = &sink.base;
+	std::vector<uint8_t> pair(2 * PSVR2_MODE4_PT_SOURCE_SIZE, 63);
+	auto pushing = std::async(
+	    std::launch::async, [&] { psvr2_push_mode4_passthrough(&hmd, 4, pair.data(), pair.size(), 1234, 99, 17); });
+	CHECK(entered.wait_for(std::chrono::seconds(1)) == std::future_status::ready);
+	auto detach =
+	    std::async(std::launch::async, [&] { return psvr2_set_passthrough_sinks(&hmd.base, nullptr, nullptr); });
+	CHECK(detach.wait_for(std::chrono::milliseconds(10)) == std::future_status::timeout);
+	release.set_value();
+	pushing.get();
+	CHECK(detach.get() == XRT_SUCCESS);
+	CHECK(hmd.passthrough_sinks[0] == nullptr);
+	CHECK(hmd.mode4_passthrough_pushes_in_flight == 0);
+	os_mutex_destroy(&hmd.data_lock);
+}

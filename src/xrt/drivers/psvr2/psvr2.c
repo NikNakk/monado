@@ -31,6 +31,7 @@
 
 #include "tracking/t_dead_reckoning.h"
 #include "psvr2_tracking_share.h"
+#include "psvr2_mode4_passthrough.h"
 
 #include "util/u_misc.h"
 #include "util/u_debug.h"
@@ -1288,6 +1289,51 @@ psvr2_latency_diag_maybe_log_locked(struct psvr2_hmd *hmd, timepoint_ns now_ns)
 	hmd->latency_diag.window_start_ns = now_ns;
 }
 
+void
+psvr2_push_mode4_passthrough(struct psvr2_hmd *hmd,
+                             uint32_t camera_set,
+                             const uint8_t *source,
+                             size_t source_size,
+                             int64_t timestamp_ns,
+                             uint32_t device_us,
+                             uint32_t sequence)
+{
+	if (camera_set != 4 || source == NULL || source_size != 2 * PSVR2_MODE4_PT_SOURCE_SIZE || timestamp_ns <= 0)
+		return;
+	struct xrt_frame_sink *sinks[2] = {0};
+	os_mutex_lock(&hmd->data_lock);
+	if (hmd->camera_mode == PSVR2_CAMERA_MODE_4) {
+		sinks[0] = hmd->passthrough_sinks[0];
+		sinks[1] = hmd->passthrough_sinks[1];
+	}
+	if (sinks[0] == NULL && sinks[1] == NULL) {
+		os_mutex_unlock(&hmd->data_lock);
+		return;
+	}
+	hmd->mode4_passthrough_pushes_in_flight++;
+	os_mutex_unlock(&hmd->data_lock);
+	// Preserve Sense's camera mode and tracking stream. Compression is done
+	// outside data_lock, only when an explicit passthrough consumer is attached.
+	for (uint32_t eye = 0; eye < 2; eye++) {
+		if (sinks[eye] == NULL)
+			continue;
+		struct xrt_frame *frame = NULL;
+		u_frame_create_one_off(XRT_FORMAT_BC4, 1024, 1016, &frame);
+		if (psvr2_mode4_encode_passthrough(source + eye * PSVR2_MODE4_PT_SOURCE_SIZE,
+		                                   PSVR2_MODE4_PT_SOURCE_SIZE, frame->data, frame->size)) {
+			frame->timestamp = timestamp_ns;
+			frame->source_timestamp = (int64_t)device_us * U_TIME_1US_IN_NS;
+			frame->source_sequence = sequence;
+			frame->source_id = eye;
+			xrt_sink_push_frame(sinks[eye], frame);
+		}
+		xrt_frame_reference(&frame, NULL);
+	}
+	os_mutex_lock(&hmd->data_lock);
+	hmd->mode4_passthrough_pushes_in_flight--;
+	os_mutex_unlock(&hmd->data_lock);
+}
+
 static void LIBUSB_CALL
 img_xfer_cb(struct libusb_transfer *xfer)
 {
@@ -1441,6 +1487,12 @@ img_xfer_cb(struct libusb_transfer *xfer)
 			os_mutex_lock(&hmd->data_lock);
 			hmd->camera_frame_pushes_in_flight--;
 			os_mutex_unlock(&hmd->data_lock);
+		}
+
+		if (camera_width == 512 && camera_height == 508 && xfer->actual_length >= USB_CAM_HEADER_SIZE) {
+			psvr2_push_mode4_passthrough(hmd, camera_set, xfer->buffer + USB_CAM_HEADER_SIZE,
+			                             (size_t)xfer->actual_length - USB_CAM_HEADER_SIZE,
+			                             camera_timestamp_ns, camera_vts_us, camera_sequence_id);
 		}
 
 		PSVR2_TRACE(hmd, "Camera frame - %d bytes", xfer->actual_length);
@@ -3013,6 +3065,13 @@ psvr2_set_passthrough_sinks(struct xrt_device *xdev, struct xrt_frame_sink *left
 	}
 
 	os_mutex_lock(&hmd->data_lock);
+	hmd->passthrough_sinks[0] = NULL;
+	hmd->passthrough_sinks[1] = NULL;
+	while (hmd->mode4_passthrough_pushes_in_flight > 0) {
+		os_mutex_unlock(&hmd->data_lock);
+		os_nanosleep(U_TIME_1MS_IN_NS);
+		os_mutex_lock(&hmd->data_lock);
+	}
 	hmd->passthrough_sinks[0] = left;
 	hmd->passthrough_sinks[1] = right;
 	os_mutex_unlock(&hmd->data_lock);

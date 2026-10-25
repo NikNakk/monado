@@ -351,6 +351,8 @@ struct psvr2_hmd
 	/* Optional consumers for the two 640x640 passthrough camera views.
 	 * Lifetime is owned by the caller, following the WMR camera sink pattern. */
 	struct xrt_frame_sink *passthrough_sinks[2];
+	//! Mode-4 conversion/pushes outside data_lock; detach drains these before freeing sinks.
+	uint32_t mode4_passthrough_pushes_in_flight;
 
 	/* USB communication */
 	libusb_context *ctx;
@@ -504,6 +506,16 @@ psvr2_get_face_tracking(struct xrt_device *xdev,
 
 xrt_result_t
 psvr2_set_passthrough_sinks(struct xrt_device *xdev, struct xrt_frame_sink *left, struct xrt_frame_sink *right);
+
+//! Internal camera delivery path, also exercised with synthetic packets by driver tests.
+void
+psvr2_push_mode4_passthrough(struct psvr2_hmd *hmd,
+                             uint32_t camera_set,
+                             const uint8_t *source,
+                             size_t source_size,
+                             int64_t timestamp_ns,
+                             uint32_t device_us,
+                             uint32_t sequence);
 
 #ifdef __cplusplus
 }
