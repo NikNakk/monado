@@ -105,6 +105,17 @@ valid but untracked position. Do not claim shoulder interaction is fixed before
 a user-operated test. Optical solver thresholds, Linux camera-stream defaults
 and normal position horizons remain unchanged.
 
+## Origin jump after loss (25 October 2026)
+
+The mode-16 controller survey shows each optical loss, including 28 gaps of
+about 0.1 s, ending position validity 300 ms after the last accepted pose. The
+driver then reports orientation only, and OpenXR receives the tracking origin,
+about 6 m away, until optics return (up to 10 s behind the shoulder; 19–37 cm
+from the last tracked position after long holds). `PSSENSE_HOLD_POSITION=1`
+(opt-in) holds the last valid position instead, untracked, while orientation
+continues. A headset check with `--generic-controller` is prepared in
+`20261025-depth-hold-v4`.
+
 ## Next user-operated capture
 
 Build the service used by the Alyx launcher from these sources. Its recorded

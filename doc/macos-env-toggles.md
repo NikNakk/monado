@@ -1427,6 +1427,11 @@ Set in the service process, alongside the existing opt-in Sense 6DoF settings:
   application position validity during optical occlusion; clamped to 0–1000 ms.
   Zero retains 300 ms. Tracked status and optical solver prior validity remain
   at their normal horizons. IMU age above 100 ms expires tracking/velocity.
+- `PSSENSE_HOLD_POSITION=1` (default off): once position validity expires,
+  keep reporting the last valid position (valid, untracked, zero linear
+  velocity) while orientation stays valid. Without it OpenXR places the
+  controller at the tracking origin (`m_space.cpp` upgrades orientation-only
+  relations), about 6 m away on the 25 Oct survey. Reset on reconnect.
 
 This is unvalidated on hardware. See [limits, native Alyx evidence and the
 capture protocol](macos-pssense-occlusion.md). `JOINT_LOSS_ACTIVE` is automatic

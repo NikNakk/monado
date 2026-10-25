@@ -451,3 +451,42 @@ TEST_CASE("LED detector owns Sense exposure timing outside mode 4")
 	hmd.led_detector_blobs = false;
 	CHECK_FALSE(psvr2_led_detector_owns_exposure_timing(&hmd));
 }
+
+#include "pssense/pssense_position_hold.h"
+
+TEST_CASE("Sense position hold keeps the last valid position instead of the tracking origin")
+{
+	pssense_position_hold hold{};
+	xrt_space_relation rel{};
+	rel.relation_flags = XRT_SPACE_RELATION_ORIENTATION_VALID_BIT;
+	pssense_position_hold_apply(&hold, &rel);
+	CHECK(rel.relation_flags == XRT_SPACE_RELATION_ORIENTATION_VALID_BIT); // nothing to hold yet
+
+	rel.relation_flags = (xrt_space_relation_flags)(XRT_SPACE_RELATION_BITMASK_ALL);
+	rel.pose.position = {0.2f, -0.3f, -0.4f};
+	pssense_position_hold_apply(&hold, &rel);
+	CHECK(rel.relation_flags == XRT_SPACE_RELATION_BITMASK_ALL);
+
+	rel = {};
+	rel.relation_flags = (xrt_space_relation_flags)(XRT_SPACE_RELATION_ORIENTATION_VALID_BIT |
+	                                                XRT_SPACE_RELATION_ORIENTATION_TRACKED_BIT |
+	                                                XRT_SPACE_RELATION_ANGULAR_VELOCITY_VALID_BIT);
+	rel.linear_velocity = {1, 1, 1};
+	pssense_position_hold_apply(&hold, &rel);
+	CHECK((rel.relation_flags & XRT_SPACE_RELATION_POSITION_VALID_BIT) != 0);
+	CHECK((rel.relation_flags & XRT_SPACE_RELATION_POSITION_TRACKED_BIT) == 0);
+	CHECK((rel.relation_flags & XRT_SPACE_RELATION_LINEAR_VELOCITY_VALID_BIT) == 0);
+	CHECK((rel.relation_flags & XRT_SPACE_RELATION_ORIENTATION_TRACKED_BIT) != 0);
+	CHECK(rel.pose.position.x == 0.2f);
+	CHECK(rel.pose.position.z == -0.4f);
+	CHECK(rel.linear_velocity.x == 0.0f);
+
+	rel = {};
+	pssense_position_hold_apply(&hold, &rel);
+	CHECK(rel.relation_flags == 0); // no orientation: report nothing
+
+	pssense_position_hold_reset(&hold);
+	rel.relation_flags = XRT_SPACE_RELATION_ORIENTATION_VALID_BIT;
+	pssense_position_hold_apply(&hold, &rel);
+	CHECK((rel.relation_flags & XRT_SPACE_RELATION_POSITION_VALID_BIT) == 0);
+}

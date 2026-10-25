@@ -44,6 +44,7 @@
 #include "pssense_protocol.h"
 #include "pssense_led_correction.h"
 #include "pssense_clock.h"
+#include "pssense_position_hold.h"
 
 #include <errno.h>
 #include <inttypes.h>
@@ -148,6 +149,8 @@ DEBUG_GET_ONCE_BOOL_OPTION(pssense_gyro_bias_auto, "PSSENSE_GYRO_BIAS_AUTO", fal
 DEBUG_GET_ONCE_BOOL_OPTION(pssense_filter, "PSSENSE_FILTER", false)
 //! Application-only position validity after optical loss; zero retains the filter's 300 ms default.
 DEBUG_GET_ONCE_NUM_OPTION(pssense_imu_fallback_ms, "PSSENSE_IMU_FALLBACK_MS", 0)
+//! Hold the last valid position (untracked) after position validity expires; see pssense_position_hold.h.
+DEBUG_GET_ONCE_BOOL_OPTION(pssense_hold_position, "PSSENSE_HOLD_POSITION", false)
 //! Application pose state transitions plus one heartbeat per second, under controller_thread lock.
 DEBUG_GET_ONCE_BOOL_OPTION(pssense_pose_diag, "PSSENSE_POSE_DIAG", false)
 DEBUG_GET_ONCE_BOOL_OPTION(pssense_joint, "CONSTELLATION_TRACKER_JOINT", false)
@@ -531,6 +534,7 @@ struct pssense_device
 
 		//! PSSENSE_FILTER: IMU + optical EKF; NULL when off. Locked by controller_thread.
 		struct t_imu_optical_filter *filter;
+		struct pssense_position_hold position_hold;
 		uint64_t filter_last_logged_updates;
 		int64_t pose_diag_last_ns;
 		uint32_t pose_diag_flags;
@@ -1727,6 +1731,7 @@ pssense_reset_connection_locked(struct pssense_device *pssense)
 		t_imu_optical_filter_default_params(&filter_params);
 		t_imu_optical_filter_destroy(&pssense->tracking.filter);
 		pssense->tracking.filter = t_imu_optical_filter_create(&filter_params);
+		pssense_position_hold_reset(&pssense->tracking.position_hold);
 	}
 	pssense->tracking.have_last_fused_pose = false;
 	pssense->tracking.last_optical_timestamp_ns = 0;
@@ -3962,6 +3967,9 @@ pssense_get_tracked_pose(struct xrt_device *xdev,
 		                                                    fallback_ms * U_TIME_1MS_IN_NS, rel);
 		if (!have_fallback) {
 			pssense_get_constellation_pose(pssense, at_timestamp_ns, rel);
+		}
+		if (debug_get_bool_option_pssense_hold_position()) {
+			pssense_position_hold_apply(&pssense->tracking.position_hold, rel);
 		}
 		if (debug_get_bool_option_pssense_pose_diag() && pssense->tracking.filter != NULL) {
 			const int64_t now = os_monotonic_get_ns();
