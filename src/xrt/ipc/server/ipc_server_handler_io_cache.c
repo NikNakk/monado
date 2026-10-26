@@ -16,6 +16,7 @@
 #include "shared/ipc_message_channel.h"
 #include "shared/ipc_protocol.h"
 #include "server/ipc_server.h"
+#include "server/ipc_server_handle_helpers.h"
 #include "server/ipc_server_objects.h"
 
 #include "ipc_server_generated.h"
@@ -152,6 +153,9 @@ ipc_handle_io_cache_read(volatile struct ipc_client_state *ics,
 		return XRT_SUCCESS;
 	}
 
+	ipc_server_client_filter_blocked_inputs(ics, inputs, input_count);
+	ipc_server_client_filter_blocked_outputs(ics, outputs, output_count);
+
 	if (input_count > 0) {
 		xret = ipc_send(imc, inputs, sizeof(struct xrt_input) * input_count);
 		// Connection error, disconnect the client.
@@ -213,6 +217,10 @@ ipc_handle_io_cache_set_output(volatile struct ipc_client_state *ics,
 {
 	struct xrt_io_cache *xic = NULL;
 	GET_XIC_OR_RETURN(ics, id, xic);
+
+	if (ics->client_state.io_blocks.block_outputs) {
+		return XRT_SUCCESS;
+	}
 
 	return xrt_io_cache_set_output(xic, *device_id, name, value);
 }
