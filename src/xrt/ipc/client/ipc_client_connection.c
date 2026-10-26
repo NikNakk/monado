@@ -135,10 +135,18 @@ ipc_connect_pipe(struct ipc_connection *ipc_c, const char *pipe_name)
 		return INVALID_HANDLE_VALUE;
 	}
 
+	/*!
+	 * @todo This tries <module file>\<exe> and then <module dir>\service\<exe>,
+	 * but never <module dir>\<exe>, so a service next to the runtime isn't found.
+	 */
 	char service_path[MAX_PATH] = {0};
 	snprintf(service_path, MAX_PATH, "%s\\%s", current_path, XRT_SERVICE_EXECUTABLE);
 	STARTUPINFOA si = {.cb = sizeof(si)};
 	PROCESS_INFORMATION pi;
+	/*!
+	 * @todo Both CreateProcessA calls get the path as an unquoted command line, which can start the wrong program
+	 * if the path contains spaces. Pass it as lpApplicationName instead.
+	 */
 	if (!CreateProcessA(NULL, service_path, NULL, NULL, false, 0, NULL, NULL, &si, &pi)) {
 		*p = 0;
 		p = strrchr(service_path, '\\');

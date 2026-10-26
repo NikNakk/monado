@@ -105,6 +105,10 @@ find_xdev_index(struct ipc_server *s, struct xrt_device *xdev)
  *
  */
 
+/*!
+ * @todo These banners name the Monado service and its tools, which is wrong for other services built on the IPC
+ * server. The name of the service needs to be passed in.
+ */
 XRT_MAYBE_UNUSED static void
 print_linux_end_user_failed_information(enum u_logging_level log_level)
 {
@@ -328,6 +332,10 @@ init_all(struct ipc_server *s,
 		return XRT_ERROR_SYNC_PRIMITIVE_CREATION_FAILED;
 	}
 
+	/*!
+	 * @todo NULL is also returned when the pidfile can't be created, for example without a runtime dir, which is
+	 * then reported as an already running service.
+	 */
 	s->process = u_process_create_if_not_running();
 	if (!s->process) {
 		IPC_ERROR(s, "monado-service is already running! Use XRT_LOG=trace for more information.");
