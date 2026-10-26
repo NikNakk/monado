@@ -2,6 +2,11 @@
 # SPDX-License-Identifier: BSL-1.0
 
 cmake_minimum_required(VERSION 3.20)
+project(
+	client_only_example
+	VERSION 1.0.0
+	LANGUAGES C CXX
+	)
 
 set(MONADO_ROOT ${CMAKE_CURRENT_SOURCE_DIR}/../..)
 include(${MONADO_ROOT}/cmake/MonadoSetOptions.cmake)
