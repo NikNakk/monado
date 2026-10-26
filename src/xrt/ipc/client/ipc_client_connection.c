@@ -295,7 +295,8 @@ ipc_client_setup_shm(struct ipc_connection *ipc_c)
 	const int flags = MAP_SHARED;
 	const int access = PROT_READ | PROT_WRITE;
 
-	ipc_c->ism = mmap(NULL, size, access, flags, ipc_c->ism_handle, 0);
+	void *ptr = mmap(NULL, size, access, flags, ipc_c->ism_handle, 0);
+	ipc_c->ism = ptr == MAP_FAILED ? NULL : ptr;
 #endif
 
 	if (ipc_c->ism == NULL) {

@@ -149,7 +149,7 @@ ipc_shmem_map(xrt_shmem_handle_t handle, size_t size, void **out_map)
 	const int access = PROT_READ | PROT_WRITE;
 	const int flags = MAP_SHARED;
 	void *ptr = mmap(NULL, size, access, flags, handle, 0);
-	if (ptr == NULL) {
+	if (ptr == MAP_FAILED) {
 		return XRT_ERROR_IPC_FAILURE;
 	}
 	*out_map = ptr;
