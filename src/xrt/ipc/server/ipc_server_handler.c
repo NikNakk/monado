@@ -2267,6 +2267,9 @@ ipc_handle_device_set_haptic_output(volatile struct ipc_client_state *ics,
 	struct xrt_device *xdev = NULL;
 	GET_XDEV_OR_RETURN(ics, device_id, xdev);
 
+	xret = ipc_server_validate_pcm_haptic_buffer(ics, buffer);
+	IPC_CHK_AND_RET(s, xret, "ipc_server_validate_pcm_haptic_buffer");
+
 	float *samples = U_TYPED_ARRAY_CALLOC(float, buffer->num_samples);
 
 	// send the allocation result
