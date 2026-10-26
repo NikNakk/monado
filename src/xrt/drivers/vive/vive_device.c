@@ -751,16 +751,17 @@ static void
 _print_v2_pulse(
     struct vive_device *d, uint8_t sensor_id, uint8_t flag, uint32_t timestamp, uint32_t data, uint32_t mask)
 {
-	char data_str[32];
+	char data_str[33] = {0};
 
 	for (int k = 0; k < 32; k++) {
-		uint8_t idx = 32 - k - 1;
-		bool d = (data >> (idx)) & 1u;
-		bool m = (mask >> (idx)) & 1u;
-		if (m)
-			sprintf(&data_str[k], "%d", d);
-		else
-			sprintf(&data_str[k], "_");
+		const uint8_t idx = 32 - k - 1;
+		const bool m = (mask >> (idx)) & 1u;
+		if (m) {
+			const bool d = (data >> (idx)) & 1u;
+			data_str[k] = (d ? '1' : '0');
+		} else {
+			data_str[k] = '_';
+		}
 	}
 
 	VIVE_TRACE(d,
