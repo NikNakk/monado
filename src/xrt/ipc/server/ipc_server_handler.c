@@ -2232,6 +2232,9 @@ ipc_handle_device_set_output(volatile struct ipc_client_state *ics,
                              enum xrt_output_name name,
                              const struct xrt_output_value *value)
 {
+	xrt_result_t xret = ipc_server_validate_output_value(ics, value);
+	IPC_CHK_AND_RET(ics->server, xret, "ipc_server_validate_output_value");
+
 	if (ics->client_state.io_blocks.block_outputs) {
 		return XRT_SUCCESS;
 	}

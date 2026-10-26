@@ -12,6 +12,7 @@
 
 #include "shared/ipc_protocol.h"
 #include "server/ipc_server.h"
+#include "server/ipc_server_handle_helpers.h"
 #include "server/ipc_server_objects.h"
 
 #include "ipc_server_generated.h"
@@ -145,6 +146,9 @@ ipc_handle_hand_tracker_set_output(volatile struct ipc_client_state *ics,
 {
 	struct xrt_hand_tracker *xht = NULL;
 	GET_XHT_OR_RETURN(ics, id, xht);
+
+	xrt_result_t xret = ipc_server_validate_output_value(ics, value);
+	IPC_CHK_AND_RET(ics->server, xret, "ipc_server_validate_output_value");
 
 	if (ics->client_state.io_blocks.block_outputs) {
 		return XRT_SUCCESS;
