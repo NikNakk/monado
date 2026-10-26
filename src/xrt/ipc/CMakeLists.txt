@@ -140,6 +140,7 @@ add_library(
 	${CMAKE_CURRENT_BINARY_DIR}/ipc_server_generated.c
 	${CMAKE_CURRENT_BINARY_DIR}/ipc_server_generated.h
 	server/ipc_server.h
+	server/ipc_server_handle_helpers.h
 	server/ipc_server_handler.c
 	server/ipc_server_handler_app_policy.c
 	server/ipc_server_handler_body_tracker.c

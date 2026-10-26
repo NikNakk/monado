@@ -17,6 +17,7 @@
 #include "util/u_trace_marker.h"
 
 #include "server/ipc_server.h"
+#include "server/ipc_server_handle_helpers.h"
 #include "server/ipc_server_objects.h"
 #include "ipc_server_generated.h"
 #include "xrt/xrt_defines.h"
@@ -240,38 +241,8 @@ send_device_inputs(volatile struct ipc_client_state *ics, struct xrt_device *xde
 		return XRT_ERROR_IPC_FAILURE;
 	}
 
-	for (uint32_t i = 0; i < xdev->input_count; i++) {
-		struct xrt_input *src = &xdev->inputs[i];
-		struct xrt_input *dst = &filtered[i];
-
-		bool blocked = false;
-		switch (XRT_GET_INPUT_TYPE(src->name)) {
-		case XRT_INPUT_TYPE_POSE: //
-			blocked = iob->block_poses && src->name != XRT_INPUT_GENERIC_HEAD_POSE;
-			break;
-		case XRT_INPUT_TYPE_HAND_TRACKING: //
-			blocked = iob->block_hand_tracking;
-			break;
-		case XRT_INPUT_TYPE_VEC1_ZERO_TO_ONE:
-		case XRT_INPUT_TYPE_VEC1_MINUS_ONE_TO_ONE:
-		case XRT_INPUT_TYPE_VEC2_MINUS_ONE_TO_ONE:
-		case XRT_INPUT_TYPE_VEC3_MINUS_ONE_TO_ONE:
-		case XRT_INPUT_TYPE_BOOLEAN: //
-			blocked = iob->block_inputs;
-			break;
-		// Don't block face or body tracking.
-		case XRT_INPUT_TYPE_BODY_TRACKING:
-		case XRT_INPUT_TYPE_FACE_TRACKING: break;
-		}
-
-		if (blocked) {
-			// Make sure it's zeroed out, and we only zero out what we send.
-			U_ZERO(dst);
-			dst->name = src->name;
-		} else {
-			memcpy(dst, src, sizeof(*dst));
-		}
-	}
+	memcpy(filtered, xdev->inputs, input_size);
+	ipc_server_client_filter_blocked_inputs(ics, filtered, xdev->input_count);
 
 	xret = ipc_send(imc, filtered, input_size);
 	IPC_CHK_ALWAYS_RET(ics->server, xret, "ipc_send(filtered inputs)");
@@ -302,12 +273,8 @@ send_device_outputs(volatile struct ipc_client_state *ics, struct xrt_device *xd
 		return XRT_ERROR_IPC_FAILURE;
 	}
 
-	for (uint32_t i = 0; i < xdev->output_count; i++) {
-		struct xrt_output *dst = &filtered[i];
-		// Make sure it's zeroed out, and we only zero out what we send.
-		U_ZERO(dst);
-		dst->name = xdev->outputs[i].name;
-	}
+	memcpy(filtered, xdev->outputs, output_size);
+	ipc_server_client_filter_blocked_outputs(ics, filtered, xdev->output_count);
 
 	xret = ipc_send(imc, filtered, output_size);
 	IPC_CHK_ALWAYS_RET(ics->server, xret, "ipc_send(filtered outputs)");
