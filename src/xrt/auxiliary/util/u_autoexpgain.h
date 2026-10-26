@@ -16,6 +16,9 @@
 extern "C" {
 #endif
 
+//! Most steps a custom table passed to @ref u_autoexpgain_create_with_steps can have.
+#define U_AEG_MAX_STEPS 16
+
 //! An auto exposure/gain strategy tunes the algorithm for specific objectives.
 enum u_aeg_strategy
 {
@@ -25,6 +28,15 @@ enum u_aeg_strategy
 };
 
 struct u_autoexpgain;
+
+//! These are steps for constructing a piecewise linear function that maps
+//! brightness into (exposure, gain) pairs.
+struct u_aeg_step
+{
+	float brightness; //!< Must be between 0 and 1
+	float exposure;   //!< Must be set such that pixel brightness increases with brightness, ideally linearly
+	float gain;       //!< @copydoc exposure
+};
 
 /*!
  * Create auto exposure and gain (AEG) algorithm object.
@@ -36,6 +48,18 @@ struct u_autoexpgain;
  */
 struct u_autoexpgain *
 u_autoexpgain_create(enum u_aeg_strategy strategy, bool enabled_from_start, int frame_delay);
+
+/*!
+ * @copydoc u_autoexpgain_create
+ * @param steps Brightness ascending, from 0 to 1; copied.
+ * @param step_count Between 2 and @ref U_AEG_MAX_STEPS.
+ */
+struct u_autoexpgain *
+u_autoexpgain_create_with_steps(enum u_aeg_strategy strategy,
+                                bool enabled_from_start,
+                                int frame_delay,
+                                const struct u_aeg_step *steps,
+                                int step_count);
 
 //! Setup UI for the AEG algorithm
 void
@@ -49,7 +73,7 @@ u_autoexpgain_update(struct u_autoexpgain *aeg, struct xrt_frame *xf);
 float
 u_autoexpgain_get_exposure(struct u_autoexpgain *aeg);
 
-//! Get currently computed gain value in the [0, 255] range.
+//! Get currently computed gain value
 float
 u_autoexpgain_get_gain(struct u_autoexpgain *aeg);
 
