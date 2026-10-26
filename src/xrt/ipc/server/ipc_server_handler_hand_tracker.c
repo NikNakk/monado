@@ -127,6 +127,13 @@ ipc_handle_hand_tracker_locate(volatile struct ipc_client_state *ics,
 	xrt_result_t xret = ipc_server_objects_get_xspc_and_validate(ics, base_space_id, &base_space);
 	IPC_CHK_AND_RET(ics->server, xret, "ipc_server_objects_get_xspc_and_validate");
 
+	if (ics->client_state.io_blocks.block_hand_tracking) {
+		*out_location = (struct xrt_hand_tracker_location){
+		    .is_active = false, // Assignment here for clarity.
+		};
+		return XRT_SUCCESS;
+	}
+
 	return xrt_hand_tracker_locate(xht, ics->server->xso, base_space, base_offset, at_timestamp_ns, out_location);
 }
 
@@ -138,6 +145,10 @@ ipc_handle_hand_tracker_set_output(volatile struct ipc_client_state *ics,
 {
 	struct xrt_hand_tracker *xht = NULL;
 	GET_XHT_OR_RETURN(ics, id, xht);
+
+	if (ics->client_state.io_blocks.block_outputs) {
+		return XRT_SUCCESS;
+	}
 
 	return xrt_hand_tracker_set_output(xht, name, value);
 }
