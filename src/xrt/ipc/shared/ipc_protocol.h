@@ -386,6 +386,20 @@ struct ipc_info_get_view_poses_2
 	struct xrt_space_relation head_relation;
 };
 
+/*!
+ * Max number of samples in one @ref ipc_pcm_haptic_buffer.
+ *
+ * @note The value comes from `XR_MAX_HAPTIC_PCM_BUFFER_SIZE_FB` in the
+ * `XR_FB_haptic_pcm` extension.
+ *
+ * @warning The spec defines `XR_MAX_HAPTIC_PCM_BUFFER_SIZE_FB` as the maximum
+ * size of the runtime's internal sample buffer, not as a per-call limit. We
+ * don't keep such a buffer literally, but the only observable effect of one is
+ * that no more than this many samples can be consumed per call, so going above
+ * this value would violate the spec.
+ */
+#define IPC_MAX_PCM_HAPTIC_SAMPLES 4000
+
 struct ipc_pcm_haptic_buffer
 {
 	uint32_t num_samples;

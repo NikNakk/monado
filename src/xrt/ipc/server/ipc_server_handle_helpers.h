@@ -96,6 +96,54 @@ ipc_server_client_filter_blocked_outputs(volatile struct ipc_client_state *ics,
 	}
 }
 
+
+/*
+ *
+ * Validation.
+ *
+ */
+
+/*!
+ * Plain output calls copy the value as is, so reject PCM values: they hold
+ * client pointers and must go through a varlen haptic output call.
+ *
+ * @ingroup ipc_server
+ */
+static inline xrt_result_t
+ipc_server_validate_output_value(volatile struct ipc_client_state *ics, const struct xrt_output_value *value)
+{
+	if (value->type == XRT_OUTPUT_VALUE_TYPE_PCM_VIBRATION) {
+		IPC_ERROR(ics->server, "PCM vibration must use a haptic output call");
+		return XRT_ERROR_INVALID_ARGUMENT;
+	}
+
+	return XRT_SUCCESS;
+}
+
+/*!
+ * Reject haptic output calls with no samples, since the message channel can't
+ * send zero bytes, or with more samples than the service will allocate, see
+ * @ref IPC_MAX_PCM_HAPTIC_SAMPLES.
+ *
+ * @ingroup ipc_server
+ */
+static inline xrt_result_t
+ipc_server_validate_pcm_haptic_buffer(volatile struct ipc_client_state *ics, const struct ipc_pcm_haptic_buffer *buffer)
+{
+	if (buffer->num_samples == 0) {
+		IPC_ERROR(ics->server, "Sample count can't be zero");
+		return XRT_ERROR_INVALID_ARGUMENT;
+	}
+
+	if (buffer->num_samples > IPC_MAX_PCM_HAPTIC_SAMPLES) {
+		IPC_ERROR(ics->server, "Sample count exceeds maximum allowed count (%u > %u)", buffer->num_samples,
+		          IPC_MAX_PCM_HAPTIC_SAMPLES);
+		return XRT_ERROR_INVALID_ARGUMENT;
+	}
+
+	return XRT_SUCCESS;
+}
+
 #ifdef __cplusplus
 }
 #endif

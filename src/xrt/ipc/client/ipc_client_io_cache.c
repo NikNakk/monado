@@ -14,6 +14,8 @@
 
 #include "shared/ipc_message_channel.h"
 
+#include "math/m_api.h"
+
 #include "util/u_misc.h"
 
 
@@ -104,12 +106,55 @@ io_cache_create_space(struct xrt_io_cache *xic,
 }
 
 static xrt_result_t
+set_output_pcm_vibration(struct ipc_client_io_cache *icic,
+                         struct xrt_device_id id_dev,
+                         enum xrt_output_name name,
+                         const struct xrt_output_value_pcm_vibration *pcm)
+{
+	struct ipc_connection *ipc_c = icic->ipc_c;
+	xrt_result_t xret;
+
+	struct ipc_pcm_haptic_buffer samples = {
+	    .num_samples = MIN(pcm->buffer_size, IPC_MAX_PCM_HAPTIC_SAMPLES),
+	    .sample_rate = pcm->sample_rate,
+	    .append = pcm->append,
+	};
+
+	ipc_client_connection_lock(ipc_c);
+
+	xret = ipc_send_io_cache_set_haptic_output_locked(ipc_c, icic->id, &id_dev, name, &samples);
+	IPC_CHK_WITH_GOTO(ipc_c, xret, "ipc_send_io_cache_set_haptic_output_locked", set_output_pcm_vibration_out);
+
+	xrt_result_t alloc_xret = XRT_SUCCESS;
+	xret = ipc_receive(&ipc_c->imc, &alloc_xret, sizeof(alloc_xret));
+	IPC_CHK_WITH_GOTO(ipc_c, xret, "ipc_receive: Receive haptic sample allocation result",
+	                  set_output_pcm_vibration_out);
+
+	xret = alloc_xret;
+	IPC_CHK_WITH_GOTO(ipc_c, xret, "Service allocation of haptic samples", set_output_pcm_vibration_out);
+
+	xret = ipc_send(&ipc_c->imc, pcm->buffer, sizeof(float) * samples.num_samples);
+	IPC_CHK_WITH_GOTO(ipc_c, xret, "ipc_send: Send haptic samples", set_output_pcm_vibration_out);
+
+	xret = ipc_receive_io_cache_set_haptic_output_locked(ipc_c, pcm->samples_consumed);
+	IPC_CHK_WITH_GOTO(ipc_c, xret, "ipc_receive_io_cache_set_haptic_output_locked", set_output_pcm_vibration_out);
+
+set_output_pcm_vibration_out:
+	ipc_client_connection_unlock(ipc_c);
+	return xret;
+}
+
+static xrt_result_t
 io_cache_set_output(struct xrt_io_cache *xic,
                     struct xrt_device_id id_dev,
                     enum xrt_output_name name,
                     const struct xrt_output_value *value)
 {
 	struct ipc_client_io_cache *icic = ipc_client_io_cache(xic);
+
+	if (value->type == XRT_OUTPUT_VALUE_TYPE_PCM_VIBRATION) {
+		return set_output_pcm_vibration(icic, id_dev, name, &value->pcm_vibration);
+	}
 
 	return ipc_call_io_cache_set_output(icic->ipc_c, icic->id, &id_dev, name, value);
 }
