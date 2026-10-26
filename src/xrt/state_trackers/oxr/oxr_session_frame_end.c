@@ -412,6 +412,9 @@ verify_layer_flags(struct oxr_logger *log,
                    uint32_t layer_index,
                    XrCompositionLayerFlags layerFlags)
 {
+	if (sess->sys->inst->quirks.no_layer_flags_bit_validation) {
+		return XR_SUCCESS;
+	}
 
 	// Check if any invalid bits are set
 	if ((layerFlags & ~XR_COMPOSITION_LAYER_FLAGS_ALL_VALID) != 0) {

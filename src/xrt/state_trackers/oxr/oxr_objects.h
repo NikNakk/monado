@@ -1288,6 +1288,13 @@ struct oxr_instance
 		 * calling xrCreateSwapchain.
 		 */
 		bool no_usage_bit_validation_in_create_swapchain;
+
+		/*!
+		 * Don't return XR_ERROR_VALIDATION_FAILURE if an
+		 * application sets unsupported flags in XrCompositionLayer
+		 * when calling xrEndFrame.
+		 */
+		bool no_layer_flags_bit_validation;
 	} quirks;
 
 	//! Debug messengers
