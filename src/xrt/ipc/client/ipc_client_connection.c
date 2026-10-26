@@ -119,11 +119,13 @@ ipc_connect_pipe(struct ipc_connection *ipc_c, const char *pipe_name)
 	HMODULE hmod;
 	if (!GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
 	                        (LPCSTR)ipc_connect_pipe, &hmod)) {
+		err = GetLastError();
 		IPC_ERROR(ipc_c, "GetModuleHandleExA failed: %lu %s", err, ipc_winerror(err));
 		return INVALID_HANDLE_VALUE;
 	}
 	char current_path[MAX_PATH] = {0};
 	if (!GetModuleFileNameA(hmod, current_path, sizeof(current_path))) {
+		err = GetLastError();
 		IPC_ERROR(ipc_c, "GetModuleFileNameA failed: %lu %s", err, ipc_winerror(err));
 		return INVALID_HANDLE_VALUE;
 	}
