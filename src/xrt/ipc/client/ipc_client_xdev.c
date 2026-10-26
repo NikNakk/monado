@@ -229,7 +229,12 @@ ipc_client_xdev_set_output(struct xrt_device *xdev, enum xrt_output_name name, c
 
 		xrt_result_t alloc_xret;
 		xret = ipc_receive(&ipc_c->imc, &alloc_xret, sizeof alloc_xret);
-		if (xret != XRT_SUCCESS || alloc_xret != XRT_SUCCESS) {
+		if (xret != XRT_SUCCESS) {
+			goto send_haptic_output_end;
+		}
+
+		xret = alloc_xret;
+		if (xret != XRT_SUCCESS) {
 			goto send_haptic_output_end;
 		}
 
