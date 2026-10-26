@@ -240,6 +240,11 @@ apply_quirks(struct oxr_logger *log, struct oxr_instance *inst, const XrInstance
 		inst->quirks.no_usage_bit_validation_in_create_swapchain = true;
 	}
 
+	// Microsoft Flight Simulator 2020 writes garbage in layerFlags for xrEndFrame
+	if (strcmp("FS2020", create_info->applicationInfo.applicationName) == 0) {
+		inst->quirks.no_layer_flags_bit_validation = true;
+	}
+
 	// Currently always true.
 	inst->quirks.no_validation_error_in_create_ref_space = true;
 
