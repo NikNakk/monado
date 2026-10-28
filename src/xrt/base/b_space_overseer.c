@@ -1122,7 +1122,7 @@ set_tracking_origin_offset(struct xrt_space_overseer *xso,
 	struct b_space_overseer *uso = b_space_overseer(xso);
 	xrt_result_t xret = XRT_SUCCESS;
 
-	pthread_rwlock_rdlock(&uso->lock);
+	pthread_rwlock_wrlock(&uso->lock);
 
 	struct u_space *us = find_xto_space_read_locked(uso, xto);
 	if (!space_is_offset_compatible(us)) {
