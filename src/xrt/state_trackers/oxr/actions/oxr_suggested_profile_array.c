@@ -87,7 +87,9 @@ oxr_suggested_profile_array_find_by_path(const struct oxr_suggested_profile_arra
 
 bool
 oxr_suggested_profile_array_find_by_device_name(const struct oxr_suggested_profile_array *array,
+                                                const struct oxr_binding_registry *registry,
                                                 enum xrt_device_name name,
+                                                XrPath subaction_path,
                                                 struct oxr_suggested_profile **out_p)
 {
 	if (name == XRT_DEVICE_INVALID) {
@@ -100,10 +102,20 @@ oxr_suggested_profile_array_find_by_device_name(const struct oxr_suggested_profi
 		assert(profile != NULL);
 		assert(profile->templ != NULL);
 
-		if (profile->templ->name == name) {
-			*out_p = profile;
-			return true;
+		if (profile->templ->name != name) {
+			continue;
 		}
+		const struct oxr_binding_profile *binding_profile = NULL;
+		if (!oxr_binding_registry_find_profile(registry, profile->path, &binding_profile)) {
+			continue;
+		}
+		// Profiles for one device can bind to different subaction paths, like /user/head and /user/eyes_ext.
+		if (!oxr_binding_profile_binds_to_subaction(binding_profile, subaction_path)) {
+			continue;
+		}
+
+		*out_p = profile;
+		return true;
 	}
 
 	*out_p = NULL;
@@ -114,6 +126,7 @@ bool
 oxr_suggested_profile_array_find_rebinding_for_device_name(const struct oxr_suggested_profile_array *array,
                                                            const struct oxr_binding_registry *registry,
                                                            enum xrt_device_name target_device_name,
+                                                           XrPath subaction_path,
                                                            struct oxr_suggested_profile **out_p,
                                                            const struct oxr_rebinding_profile **out_rebinding)
 {
@@ -131,6 +144,10 @@ oxr_suggested_profile_array_find_rebinding_for_device_name(const struct oxr_sugg
 			continue;
 		}
 		if (target_profile->device_name != target_device_name) {
+			continue;
+		}
+		// Profiles for one device can bind to different subaction paths, like /user/head and /user/eyes_ext.
+		if (!oxr_binding_profile_binds_to_subaction(target_profile, subaction_path)) {
 			continue;
 		}
 

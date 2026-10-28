@@ -106,7 +106,8 @@ oxr_binding_registry_get_for_source_path(const struct oxr_binding_registry *regi
                                          const struct oxr_binding_point **out_binding_point);
 
 /*!
- * Find a rebinding profile from a source profile to a target device.
+ * Find a rebinding profile from a source profile to a target device, whose
+ * target profile binds to the top-level @p subaction_path.
  *
  * @memberof oxr_binding_registry
  */
@@ -114,6 +115,7 @@ bool
 oxr_binding_registry_find_rebinding_from_source_for_device(const struct oxr_binding_registry *registry,
                                                            XrPath source_profile_path,
                                                            enum xrt_device_name target_device_name,
+                                                           XrPath subaction_path,
                                                            const struct oxr_rebinding_profile **out_rebinding);
 
 

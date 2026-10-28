@@ -77,6 +77,7 @@ try_resolve_with_device_name(struct oxr_sink_logger *slog,
                              const struct oxr_binding_registry *registry,
                              const struct oxr_suggested_profile_array *suggested_profiles,
                              const struct xrt_io_cache_device *dev,
+                             XrPath subaction_path,
                              enum xrt_device_name device_name,
                              struct oxr_profile_resolver_info *info)
 {
@@ -86,7 +87,8 @@ try_resolve_with_device_name(struct oxr_sink_logger *slog,
 	assert(device_name != XRT_DEVICE_INVALID);
 
 	// First can we try to find the profile by the requested device name?
-	bool found = oxr_suggested_profile_array_find_by_device_name(suggested_profiles, device_name, &profile);
+	bool found = oxr_suggested_profile_array_find_by_device_name(suggested_profiles, registry, device_name,
+	                                                             subaction_path, &profile);
 	if (!found) {
 		/*
 		 * The app didn't suggest a profile for this device name, so there
@@ -101,6 +103,7 @@ try_resolve_with_device_name(struct oxr_sink_logger *slog,
 	    registry,                                                       //
 	    profile->path,                                                  //
 	    dev->name,                                                      //
+	    subaction_path,                                                 //
 	    &rebinding_profile);                                            //
 	if (found) {
 		fill_binding_profiles( //
@@ -121,12 +124,14 @@ try_resolve_with_xdev(struct oxr_sink_logger *slog,
                       const struct oxr_binding_registry *registry,
                       const struct oxr_suggested_profile_array *suggested_profiles,
                       const struct xrt_io_cache_device *dev,
+                      XrPath subaction_path,
                       struct oxr_profile_resolver_info *info)
 {
 	struct oxr_suggested_profile *profile = NULL;
 
 	// First can we try to find the profile by the requested dev->name?
-	bool found = oxr_suggested_profile_array_find_by_device_name(suggested_profiles, dev->name, &profile);
+	bool found = oxr_suggested_profile_array_find_by_device_name(suggested_profiles, registry, dev->name,
+	                                                             subaction_path, &profile);
 
 	// If the profile is found and the device name matches, use the profile.
 	if (found) {
@@ -146,6 +151,7 @@ try_resolve_with_xdev(struct oxr_sink_logger *slog,
 	    suggested_profiles,                                             //
 	    registry,                                                       //
 	    dev->name,                                                      //
+	    subaction_path,                                                 //
 	    &profile,                                                       //
 	    &rebinding_profile);                                            //
 	if (found) {
@@ -175,6 +181,7 @@ oxr_resolver_populate_profile(struct oxr_logger *log,
                               const struct oxr_binding_registry *registry,
                               const struct oxr_suggested_profile_array *suggested_profiles,
                               const struct xrt_io_cache_device *dev,
+                              XrPath subaction_path,
                               enum xrt_device_name override_device_name,
                               struct oxr_profile_resolver_info *info)
 {
@@ -190,13 +197,14 @@ oxr_resolver_populate_profile(struct oxr_logger *log,
 	// We are overriding the device name with a different one.
 	if (override_device_name != XRT_DEVICE_INVALID && override_device_name != dev->name) {
 		oxr_slog(slog, "\n\t\t\toverride: %s", u_str_xrt_device_name(override_device_name));
-		if (try_resolve_with_device_name(slog, registry, suggested_profiles, dev, override_device_name, info)) {
+		if (try_resolve_with_device_name(slog, registry, suggested_profiles, dev, subaction_path,
+		                                 override_device_name, info)) {
 			return;
 		}
 		oxr_slog(slog, "\n\t\t\t\tOverride failed");
 	}
 
-	if (try_resolve_with_xdev(slog, registry, suggested_profiles, dev, info)) {
+	if (try_resolve_with_xdev(slog, registry, suggested_profiles, dev, subaction_path, info)) {
 		return;
 	}
 
