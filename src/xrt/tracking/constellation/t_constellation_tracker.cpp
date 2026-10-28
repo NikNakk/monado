@@ -788,11 +788,7 @@ Camera::processSampleFast(CameraSample &sample)
 	// Figure out where all the devices are first, so we can then sort it.
 	for (std::unique_ptr<Device> &device : tracker->devices) {
 		xrt_space_relation device_predicted_relation = XRT_SPACE_RELATION_ZERO; //< AKA "the prior"
-
-		if (device->params.tracking_source != nullptr) {
-			t_constellation_tracker_tracking_source_get_tracked_pose(
-			    device->params.tracking_source, sample.timestamp_ns, &device_predicted_relation);
-		}
+		device->sensor_fusion->getTrackedPose(sample.timestamp_ns, device_predicted_relation);
 
 		bool prior_pose_valid =
 		    (device_predicted_relation.relation_flags &
@@ -1528,18 +1524,7 @@ ConstellationTracker::getTrackedPose(t_constellation_device_id_t device_id,
 			continue;
 		}
 
-		timepoint_ns pose_ts = 0;
-		xrt_space_relation relation;
-		device->sensor_fusion->getTrackedPose(when_ns, pose_ts, relation);
-
-		// No flags just means pass directly
-		if (relation.relation_flags == 0) {
-			out_relation = relation;
-			return;
-		}
-
-		// Predict to the requested time
-		m_predict_relation(&relation, time_ns_to_s(when_ns - pose_ts), &out_relation);
+		device->sensor_fusion->getTrackedPose(when_ns, out_relation);
 
 		return;
 	}

@@ -152,9 +152,6 @@ public: // Methods
 		for (auto &device : this->dataset.devices) {
 			t_constellation_tracker_device_params device_params = {
 			    .led_model = device.led_model,
-			    // @todo support tracking sources in dataset files by interpolating the tracking source pose
-			    //       in the samples.
-			    .tracking_source = nullptr,
 			    .imu_sink = nullptr,
 			};
 

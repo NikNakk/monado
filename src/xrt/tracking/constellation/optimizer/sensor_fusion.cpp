@@ -2980,15 +2980,10 @@ SensorFusion::pushImuSample(const xrt_imu_sample &xr_sample)
 }
 
 void
-SensorFusion::getTrackedPose(timepoint_ns requested_time_ns,
-                             timepoint_ns &out_time_ns,
-                             xrt_space_relation &out_relation)
+SensorFusion::getTrackedPose(timepoint_ns requested_time_ns, xrt_space_relation &out_relation)
 {
 	out_relation = XRT_SPACE_RELATION_ZERO;
-
 	m_relation_history_get(this->device.relation_history, requested_time_ns, &out_relation);
-	out_time_ns = requested_time_ns;
-
 	SF_TRACE(this, "Used relation history for pose at ts %" PRIi64, requested_time_ns);
 
 	// Convert to OpenXR coordinate space before outputting
@@ -2997,11 +2992,11 @@ SensorFusion::getTrackedPose(timepoint_ns requested_time_ns,
 	math_vec3_convert_from_opencv(&out_relation.angular_velocity, &out_relation.angular_velocity);
 
 	SF_TRACE(this,
-	         "Pose get from %" PRIi64 " to %" PRIi64
+	         "Pose get from %" PRIi64
 	         " succeeded.\n"
 	         "Pose: %f,%f,%f\t%f,%f,%f,%f\n"
 	         "Velocity: %f,%f,%f\t%f,%f,%f",
-	         out_time_ns, out_time_ns, out_relation.pose.position.x, out_relation.pose.position.y,
+	         requested_time_ns, out_relation.pose.position.x, out_relation.pose.position.y,
 	         out_relation.pose.position.z, out_relation.pose.orientation.x, out_relation.pose.orientation.y,
 	         out_relation.pose.orientation.z, out_relation.pose.orientation.w, out_relation.linear_velocity.x,
 	         out_relation.linear_velocity.y, out_relation.linear_velocity.z, out_relation.angular_velocity.x,

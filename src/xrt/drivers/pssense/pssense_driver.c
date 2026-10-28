@@ -1,10 +1,12 @@
 // Copyright 2023, Collabora, Ltd.
 // Copyright 2023, Jarett Millard
+// Copyright 2026, Beyley Cardellio
 // SPDX-License-Identifier: BSL-1.0
 /*!
  * @file
  * @brief  PlayStation Sense controller prober and driver code.
  * @author Jarett Millard <jarett.millard@gmail.com>
+ * @author Beyley Cardellio <ep1cm1n10n123@gmail.com>
  * @ingroup drv_pssense
  */
 
@@ -159,7 +161,6 @@ struct pssense_device
 	struct t_timing_event_sink timing_event_sink;
 	struct t_constellation_tracker_led_model led_model;
 	struct t_constellation_tracker_device constellation_device;
-	struct t_constellation_tracker_tracking_source constellation_tracking_source;
 
 	bool usb;
 	struct os_hid_device *hid;
@@ -205,7 +206,6 @@ struct pssense_device
 		struct t_constellation_tracker *constellation_tracker;
 		t_constellation_device_id_t constellation_device_id;
 		struct xrt_imu_sink *constellation_imu_sink;
-		struct m_relation_history *constellation_relation_history;
 
 		struct t_led_sync_refinement led_sync_refinement;
 		uint8_t period_id;
@@ -275,12 +275,6 @@ static struct pssense_device *
 from_constellation_device(struct t_constellation_tracker_device *device)
 {
 	return container_of(device, struct pssense_device, constellation_device);
-}
-
-static struct pssense_device *
-from_constellation_tracking_source(struct t_constellation_tracker_tracking_source *tracking_source)
-{
-	return container_of(tracking_source, struct pssense_device, constellation_tracking_source);
 }
 
 const uint32_t CRC_POLYNOMIAL = 0xedb88320;
@@ -903,16 +897,6 @@ pssense_get_constellation_pose(struct pssense_device *pssense,
 	                                             out_relation) < 0) {
 		(*out_relation) = XRT_C11_COMPOUND(struct xrt_space_relation) XRT_SPACE_RELATION_ZERO;
 	}
-
-	if (out_relation->relation_flags == 0) {
-		timepoint_ns device_ts;
-		if (!pssense_host_ts_to_device(pssense, at_timestamp_ns, &device_ts)) {
-			(*out_relation) = (struct xrt_space_relation){0};
-			return;
-		}
-
-		m_relation_history_get(pssense->tracking.constellation_relation_history, device_ts, out_relation);
-	}
 }
 
 static void
@@ -1108,7 +1092,6 @@ pssense_node_destroy(struct xrt_frame_node *node)
 
 	// Relation histories are used from the frame context lifecycle in the constellation tracker device callbacks.
 	m_relation_history_destroy(&pssense->tracking.imu_relation_history);
-	m_relation_history_destroy(&pssense->tracking.constellation_relation_history);
 
 	// LED sync is used on the frame context lifecycle, so it needs to be destroyed in here.
 	t_led_sync_refinement_destroy(&pssense->tracking.led_sync_refinement);
@@ -1268,46 +1251,8 @@ pssense_push_constellation_tracker_sample(struct t_constellation_tracker_device 
 {
 	struct pssense_device *pssense = from_constellation_device(device);
 
+	// Forward to LED sync
 	t_led_sync_push_constellation_sample(&pssense->tracking.led_sync_refinement, sample);
-
-	// Don't do anything else if the sample doesn't have a world pose
-	if (!sample->has_world_pose) {
-		return;
-	}
-
-	os_thread_helper_lock(&pssense->controller_thread);
-	timepoint_ns device_ts;
-	if (!pssense_host_ts_to_device(pssense, sample->timestamp_ns, &device_ts)) {
-		os_thread_helper_unlock(&pssense->controller_thread);
-		return;
-	}
-	os_thread_helper_unlock(&pssense->controller_thread);
-
-	struct xrt_space_relation relation = {
-	    .pose = sample->world_pose,
-	    .relation_flags = XRT_SPACE_RELATION_ORIENTATION_VALID_BIT | XRT_SPACE_RELATION_ORIENTATION_TRACKED_BIT |
-	                      XRT_SPACE_RELATION_POSITION_VALID_BIT | XRT_SPACE_RELATION_POSITION_TRACKED_BIT,
-	};
-
-	m_relation_history_push(pssense->tracking.constellation_relation_history, &relation, device_ts);
-}
-
-/*
- *
- * Constellation tracking source implementations
- *
- */
-
-static void
-pssense_get_constellation_tracking_source_pose(struct t_constellation_tracker_tracking_source *tracking_source,
-                                               int64_t when_ns,
-                                               struct xrt_space_relation *out_relation)
-{
-	struct pssense_device *pssense = from_constellation_tracking_source(tracking_source);
-
-	os_thread_helper_lock(&pssense->controller_thread);
-	pssense_get_constellation_pose(pssense, when_ns, out_relation);
-	os_thread_helper_unlock(&pssense->controller_thread);
 }
 
 /*
@@ -1648,8 +1593,6 @@ pssense_create(struct xrt_prober *xp,
 
 	pssense->constellation_device.push_constellation_tracker_sample = pssense_push_constellation_tracker_sample;
 
-	pssense->constellation_tracking_source.get_tracked_pose = pssense_get_constellation_tracking_source_pose;
-
 	pssense->base.name = XRT_DEVICE_PSSENSE;
 	snprintf(pssense->base.str, XRT_DEVICE_NAME_LEN, "%s", product_name);
 	pssense->base.update_inputs = pssense_device_update_inputs;
@@ -1671,7 +1614,6 @@ pssense_create(struct xrt_prober *xp,
 	pssense->timing.clock_tracker = m_clock_windowed_skew_tracker_alloc(2048);
 
 	m_relation_history_create(&pssense->tracking.imu_relation_history);
-	m_relation_history_create(&pssense->tracking.constellation_relation_history);
 
 	pssense->log_level = debug_get_log_option_pssense_log();
 	pssense->hid = hid;
@@ -1897,7 +1839,6 @@ pssense_add_to_constellation_tracker(struct xrt_device *xdev, struct t_constella
 
 	struct t_constellation_tracker_device_params params = {
 	    .led_model = pssense->led_model,
-	    .tracking_source = &pssense->constellation_tracking_source,
 	};
 	int ret = t_constellation_tracker_add_device(tracker, &params, &pssense->constellation_device,
 	                                             &pssense->tracking.constellation_device_id);

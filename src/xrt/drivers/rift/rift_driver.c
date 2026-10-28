@@ -267,21 +267,6 @@ rift_sensor_thread_tick(struct rift_hmd *hmd)
 			{
 				// update the IMU for that sample
 				m_imu_3dof_update(&hmd->fusion, sample_local_timestamp_ns, &accel, &gyro);
-
-				// Ensure these are monotonic. Sometimes due to the super fast IMU and clock jitter
-				// we might estimate samples out of order a bit.
-				if (sample_local_timestamp_ns > hmd->last_ff_timestamp_ns) {
-					m_ff_vec3_f32_push(hmd->gyro_ff, &gyro, sample_local_timestamp_ns);
-					m_ff_vec3_f32_push(hmd->accel_ff, &accel, sample_local_timestamp_ns);
-
-					if (!hmd->fusion.grav.is_accel) {
-						double grav_length = m_vec3_len(accel);
-						m_ff_f64_push(hmd->gravity_correction, &grav_length,
-						              sample_local_timestamp_ns);
-					}
-
-					hmd->last_ff_timestamp_ns = sample_local_timestamp_ns;
-				}
 			}
 			os_thread_helper_unlock(&hmd->sensor_thread);
 
@@ -585,6 +570,7 @@ get_raw_pose(struct rift_hmd *hmd, timepoint_ns when_ns, struct xrt_relation_cha
 		}
 	}
 
+	// Fallback to 3dof
 	if (relation.relation_flags == 0) {
 		m_relation_history_get(hmd->relation_hist, when_ns, &relation);
 	}
@@ -878,43 +864,11 @@ rift_hmd_compute_distortion(struct xrt_device *xdev, uint32_t view, float u, flo
 }
 
 static void
-rift_hmd_constellation_tracking_source_get_tracked_pose(struct t_constellation_tracker_tracking_source *tracking_source,
-                                                        timepoint_ns when_ns,
-                                                        struct xrt_space_relation *out_relation)
-{
-	struct rift_hmd *hmd = container_of(tracking_source, struct rift_hmd, constellation_tracking_source);
-
-	struct xrt_relation_chain xrc = {0};
-	get_raw_pose(hmd, when_ns, &xrc);
-	m_relation_chain_resolve(&xrc, out_relation);
-}
-
-static void
 rift_hmd_constellation_device_push_constellation_tracker_sample(struct t_constellation_tracker_device *connection,
                                                                 struct t_constellation_tracker_sample *sample)
 {
-	struct rift_hmd *hmd = container_of(connection, struct rift_hmd, constellation_device);
-
-	if (!sample->has_world_pose) {
-		return;
-	}
-
-	struct xrt_space_relation relation = XRT_SPACE_RELATION_ZERO;
-	relation.pose = sample->world_pose;
-	relation.relation_flags = XRT_SPACE_RELATION_ORIENTATION_TRACKED_BIT |
-	                          XRT_SPACE_RELATION_ORIENTATION_VALID_BIT | XRT_SPACE_RELATION_POSITION_TRACKED_BIT |
-	                          XRT_SPACE_RELATION_POSITION_VALID_BIT;
-
-	struct xrt_space_relation relation_3dof = XRT_SPACE_RELATION_ZERO;
-	m_relation_history_get(hmd->relation_hist, sample->timestamp_ns, &relation_3dof);
-
-	if (relation_3dof.relation_flags & XRT_SPACE_RELATION_ANGULAR_VELOCITY_VALID_BIT) {
-		relation.angular_velocity = relation_3dof.angular_velocity;
-		relation.relation_flags |= XRT_SPACE_RELATION_ANGULAR_VELOCITY_VALID_BIT;
-	}
-
-	m_relation_history_push_with_motion_estimation(hmd->raw_constellation_relation_hist, &relation,
-	                                               sample->timestamp_ns);
+	(void)connection;
+	(void)sample;
 }
 
 static void
@@ -952,11 +906,6 @@ rift_frame_node_destroy(struct xrt_frame_node *node)
 	}
 
 	m_relation_history_destroy(&hmd->relation_hist);
-	m_relation_history_destroy(&hmd->raw_constellation_relation_hist);
-
-	m_ff_vec3_f32_free(&hmd->gyro_ff);
-	m_ff_vec3_f32_free(&hmd->accel_ff);
-	m_ff_f64_free(&hmd->gravity_correction);
 
 	// Only free if we are definitely the ones that allocated it
 	if (hmd->lens_distortions && debug_get_bool_option_rift_use_firmware_distortion())
@@ -1038,11 +987,6 @@ rift_devices_create(struct os_hid_device *hmd_dev,
 	hmd->variant = variant;
 	hmd->hmd_dev = hmd_dev;
 	hmd->radio_dev = radio_dev;
-
-	// 4 seconds of IMU samples at 1000hz, should be more than enough
-	m_ff_vec3_f32_alloc(&hmd->gyro_ff, 4096);
-	m_ff_vec3_f32_alloc(&hmd->accel_ff, 4096);
-	m_ff_f64_alloc(&hmd->gravity_correction, 4096);
 
 	xrt_result_t xret = b_timing_source_create(xfctx, &hmd->timing_event_sink, &hmd->timing_event_source);
 	U_LOG_CHK_ONLY_PRINT(hmd->log_level, xret, "b_timing_source_create");
@@ -1230,7 +1174,6 @@ rift_devices_create(struct os_hid_device *hmd_dev,
 		HMD_INFO(hmd, "Disabled back strap LEDs via custom pattern.");
 	}
 
-	hmd->constellation_tracking_source.get_tracked_pose = rift_hmd_constellation_tracking_source_get_tracked_pose;
 	hmd->constellation_device.push_constellation_tracker_sample =
 	    rift_hmd_constellation_device_push_constellation_tracker_sample;
 
@@ -1261,7 +1204,6 @@ rift_devices_create(struct os_hid_device *hmd_dev,
 	u_truncate_snprintf(hmd->base.serial, XRT_DEVICE_NAME_LEN, "%s", serial_number);
 
 	m_relation_history_create(&hmd->relation_hist);
-	m_relation_history_create(&hmd->raw_constellation_relation_hist);
 
 	// Setup input.
 	hmd->base.name = XRT_DEVICE_GENERIC_HMD;
@@ -1530,7 +1472,6 @@ rift_add_to_constellation_tracker(struct rift_hmd *hmd, struct t_constellation_t
 {
 	struct t_constellation_tracker_device_params params = {
 	    .led_model = hmd->led_model,
-	    .tracking_source = &hmd->constellation_tracking_source,
 	};
 
 	hmd->constellation_tracker = tracker;

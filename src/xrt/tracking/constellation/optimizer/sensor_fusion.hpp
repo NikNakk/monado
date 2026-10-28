@@ -595,9 +595,9 @@ public: // Methods
 	void
 	pushImuSample(const xrt_imu_sample &sample);
 
-	//! Provides the latest unpredicted device pose for the requested timestamp.
+	//! Provides the latest predicted device pose for the requested timestamp.
 	void
-	getTrackedPose(timepoint_ns requested_time_ns, timepoint_ns &out_time_ns, xrt_space_relation &out_relation);
+	getTrackedPose(timepoint_ns requested_time_ns, xrt_space_relation &out_relation);
 
 	/*!
 	 * Folds one queued camera sample into the window, or drops if it's no longer able to be merged in.

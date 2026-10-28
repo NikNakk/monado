@@ -958,15 +958,7 @@ struct rift_hmd
 
 	struct t_constellation_tracker *constellation_tracker;
 	struct t_constellation_tracker_device constellation_device;
-	struct t_constellation_tracker_tracking_source constellation_tracking_source;
 	t_constellation_device_id_t constellation_device_id;
-
-	struct m_ff_vec3_f32 *gyro_ff;
-	struct m_ff_vec3_f32 *accel_ff;
-	struct m_relation_history *raw_constellation_relation_hist;
-	timepoint_ns last_ff_timestamp_ns;
-	struct m_ff_f64 *gravity_correction;
-	timepoint_ns latest_constellation_ts;
 
 	struct xrt_imu_sink *constellation_imu_sink;
 

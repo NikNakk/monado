@@ -80,12 +80,6 @@ struct t_constellation_tracker_device_params
 	//! The constellation pattern for this device.
 	struct t_constellation_tracker_led_model led_model;
 
-	/*
-	 * An optional tracking source to give the constellation tracker extra information to better throw out bad
-	 * guesses when finding the device.
-	 */
-	struct t_constellation_tracker_tracking_source *tracking_source;
-
 	/*!
 	 * The IMU sink for this device. This pointer is filled in by the constellation tracker. After adding the device
 	 * to the constellation tracker, drivers should send IMU samples to this sink.

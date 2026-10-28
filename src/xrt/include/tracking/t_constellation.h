@@ -384,11 +384,13 @@ struct t_constellation_tracker_sample
 struct t_constellation_tracker_device
 {
 	/*!
-	 * A function that the constellation tracker will call to push a new sample of the device's
-	 * pose as it tracks it.
+	 * A function that the constellation tracker will call to push the latest sample.
+	 *
+	 * This isn't intended to be used for tracking, but rather for
+	 * precise feedback about which LEDs are seen for systems like LED sync.
 	 *
 	 * @param connection The device to push the sample to.
-	 * @param sample     The sample containing the current pose of the device and the timestamp of
+	 * @param sample     The sample containing the solved sample of the device and the timestamp of
 	 *                   the original blobservation that led to this pose being computed.
 	 */
 	void (*push_constellation_tracker_sample)(struct t_constellation_tracker_device *connection,
