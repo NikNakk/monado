@@ -4091,6 +4091,26 @@
 			}
 		},
 
+		"/interaction_profiles/mndx/psvr2_eye_gaze_internal_mndx": {
+			"title": "PlayStation VR2",
+			"type": "eye_tracker",
+			"monado_device": "XRT_DEVICE_PSVR2",
+			"extension": "MNDX_internal_rebinding_target",
+			"subaction_paths": [
+				"/user/eyes_ext"
+			],
+			"subpaths": {
+				"/input/gaze_ext": {
+					"type": "pose",
+					"localized_name": "Gaze",
+					"components": ["pose"],
+					"monado_bindings": {
+						"pose": "XRT_INPUT_GENERIC_EYE_GAZE_POSE"
+					}
+				}
+			}
+		},
+
 		"/interaction_profiles/mnd/contactglove2_mnd": {
 			"title": "ContactGlove2",
 			"type": "tracked_controller",
