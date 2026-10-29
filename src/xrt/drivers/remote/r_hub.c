@@ -13,6 +13,7 @@
 #include "util/u_debug.h"
 #include "util/u_system_devices.h"
 
+#include "b_io_cache.h"
 #include "b_body_tracker.h"
 #include "b_hand_tracker.h"
 
@@ -190,7 +191,8 @@ setup_accept_fd(struct r_hub *r)
 	}
 
 	server_address.sin_family = AF_INET;
-	server_address.sin_addr.s_addr = htonl(INADDR_ANY);
+	// Only this machine may drive the devices.
+	server_address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
 	server_address.sin_port = htons(r->port);
 
 	ret = bind(r->accept_fd, (struct sockaddr *)&server_address, sizeof(server_address));
@@ -431,6 +433,7 @@ r_create_devices(uint16_t port,
 	                                            r_hub_system_devices_destroy);
 	r->base.create_body_tracker = b_body_tracker_create;
 	r->base.create_hand_tracker = b_hand_tracker_create;
+	r->base.create_io_cache = b_io_cache_create;
 
 	r->origin.type = XRT_TRACKING_TYPE_RGB;
 	r->origin.initial_offset = (struct xrt_pose)XRT_POSE_IDENTITY;

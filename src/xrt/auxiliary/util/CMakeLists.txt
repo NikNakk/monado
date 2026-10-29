@@ -55,6 +55,8 @@ add_library(
 	u_file.cpp
 	u_file.h
 	u_floor_calibration.c
+	u_session_mark.c
+	u_session_mark.h
 	u_floor_calibration.h
 	u_format.c
 	u_format.h

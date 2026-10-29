@@ -50,6 +50,13 @@ the blocking Metal bridge and its `XRT_MACOS_WSI_PASSTHROUGH_VERIFY` /
 settings; see [the test procedure and default-switch plan](macos-wsi-migration.md#calibrated-wsi-passthrough-prepared-16-october-2026).
 Sleep/disconnect recovery requires restart.
 
+## Private compositor scratch candidate (24 October 2026)
+
+`XRT_MACOS_COMPOSITOR_PRIVATE_SCRATCH=1` (default `0`, macOS only) keeps
+internal scratch images in Vulkan device-local allocations and disables their
+native-handle debug-viewer output. It does not change application swapchains or
+presenter sharing. See [compatibility evidence](macos-kk-compositor-followup.md).
+
 ## Historical audit
 
 Audit of every `DEBUG_GET_ONCE_*` option and raw `getenv()` added on

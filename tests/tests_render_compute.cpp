@@ -3,6 +3,71 @@
 #include "render_compute_test_fixture.h"
 #include "util/comp_projection_fast_path.h"
 
+TEST_CASE("Compute timestamps remain ordered across repeated submissions", "[aux_render][gpu][timestamps]")
+{
+	Fixture f;
+	f.init(67, 39);
+	REQUIRE(f.queries != VK_NULL_HANDLE);
+	f.config(0);
+	auto pipeline = f.pipeline(variants[0], 0, false);
+	for (unsigned round = 0; round < 5; ++round) {
+		const uint64_t before = os_monotonic_get_ns();
+		f.run(pipeline, variants[0], 4, true);
+		const uint64_t after = os_monotonic_get_ns();
+		uint64_t ticks[4]{};
+		REQUIRE(f.vk().vkGetQueryPoolResults(
+		            f.vk().device, f.queries, 0, 2, sizeof(ticks), ticks, 2 * sizeof(uint64_t),
+		            VK_QUERY_RESULT_64_BIT | VK_QUERY_RESULT_WITH_AVAILABILITY_BIT) == VK_SUCCESS);
+		CAPTURE(round, ticks[0], ticks[2]);
+		CHECK(ticks[1] != 0);
+		CHECK(ticks[3] != 0);
+		CHECK(ticks[0] != 0);
+		CHECK(ticks[2] >= ticks[0]);
+		const double duration = double(ticks[2] - ticks[0]) * f.vk().features.timestamp_period;
+		CHECK(duration <= double(after - before));
+	}
+}
+
+TEST_CASE("Adjacent compositor pass timestamps remain valid", "[aux_render][gpu][timestamps]")
+{
+	Fixture f;
+	f.init(67, 39);
+	REQUIRE(f.queries != VK_NULL_HANDLE);
+	f.vk().vkDestroyQueryPool(f.vk().device, f.queries, nullptr);
+	f.queries = VK_NULL_HANDLE;
+	VkQueryPoolCreateInfo info{};
+	info.sType = VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO;
+	info.queryType = VK_QUERY_TYPE_TIMESTAMP;
+	info.queryCount = 6;
+	REQUIRE(f.vk().vkCreateQueryPool(f.vk().device, &info, nullptr, &f.queries) == VK_SUCCESS);
+	f.config(0);
+	auto pipeline = f.pipeline(variants[0], 0, false);
+	for (unsigned round = 0; round < 5; ++round) {
+		auto cmd = f.begin();
+		f.vk().vkCmdResetQueryPool(cmd, f.queries, 0, 6);
+		for (unsigned query : {0u, 2u, 3u, 4u})
+			f.vk().vkCmdWriteTimestamp(cmd, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, f.queries, query);
+		f.vk().vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, pipeline);
+		f.vk().vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, f.layout, 0, 1, &f.set, 0, nullptr);
+		f.vk().vkCmdDispatch(cmd, (f.width + 7) / 8, (f.height + 7) / 8, 2);
+		for (unsigned query : {5u, 1u})
+			f.vk().vkCmdWriteTimestamp(cmd, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, f.queries, query);
+		f.finish(cmd);
+		uint64_t ticks[12]{};
+		REQUIRE(f.vk().vkGetQueryPoolResults(
+		            f.vk().device, f.queries, 0, 6, sizeof(ticks), ticks, 2 * sizeof(uint64_t),
+		            VK_QUERY_RESULT_64_BIT | VK_QUERY_RESULT_WITH_AVAILABILITY_BIT) == VK_SUCCESS);
+		uint64_t previous = 0;
+		for (unsigned query : {0u, 2u, 3u, 4u, 5u, 1u}) {
+			CAPTURE(round, query, ticks[query * 2], previous);
+			CHECK(ticks[query * 2 + 1] != 0);
+			CHECK(ticks[query * 2] != 0);
+			CHECK(ticks[query * 2] >= previous);
+			previous = ticks[query * 2];
+		}
+	}
+}
+
 TEST_CASE("Distortion workgroups preserve stereo pixels and feature paths", "[aux_render][gpu]")
 {
 	Fixture f;

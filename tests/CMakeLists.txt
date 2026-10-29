@@ -239,7 +239,7 @@ if(XRT_HAVE_VULKAN)
 	add_test(NAME tests_render_compute COMMAND tests_render_compute)
 	set_tests_properties(tests_render_compute PROPERTIES TIMEOUT 60 LABELS "gpu")
 	if(APPLE)
-		target_sources(tests_render_compute PRIVATE tests_macos_metal_device.mm)
+		target_sources(tests_render_compute PRIVATE tests_macos_metal_device.mm tests_comp_scratch.cpp)
 		target_link_libraries(tests_render_compute PRIVATE "-framework Metal")
 	endif()
 

@@ -18,6 +18,15 @@ guard and its test are integrated here. The branch's own Vulkan negotiation
 repair (`914b89368`) is not merged, since the main line's `4a873825d` and
 `90a6cdb64` cover it. PS VR2 gameplay and FDM remain unverified.
 
+The [WSI KK follow-up](macos-wsi-kk-followup.md) tests explicit WSI graphics and
+compute paths and removes a service-only dependency on GOOGLE display timing.
+Hosted/adaptive feedback gates and native runtime defaults remain unchanged.
+
+The isolated [KK compositor follow-up](macos-kk-compositor-followup.md) adds an
+opt-in private-scratch path and records timestamp and host-event compatibility
+gates. Desktop Alyx reaches the single-projection fast path; headset acceptance
+and an installed compositor driver change remain outstanding (24 October 2026).
+
 Presenter selection now uses `XRT_MACOS_PRESENTER=wsi|wsi-adaptive|native`
 (default `native`). `wsi` selects calibrated CV WSI; the old WSI selection
 booleans are retired. See [selector migration](macos-wsi-migration.md#unified-presenter-selector-17-october-2026).

@@ -22,7 +22,7 @@ struct MinimalVulkanContext
 	}
 
 	bool
-	init()
+	init(bool metal_objects = false)
 	{
 #ifdef XRT_OS_OSX
 		// Hosted macOS VMs may not expose a Metal GPU. Avoid entering the ICD
@@ -42,9 +42,12 @@ struct MinimalVulkanContext
 #endif
 		};
 		static const char *required_device_extensions[] = {nullptr};
-		static const char *optional_device_extensions[] = {
+		const char *optional_device_extensions[] = {
+		    metal_objects ? VK_KHR_GET_MEMORY_REQUIREMENTS_2_EXTENSION_NAME : nullptr,
+		    metal_objects ? VK_KHR_DEDICATED_ALLOCATION_EXTENSION_NAME : nullptr,
 #ifdef XRT_OS_OSX
 		    "VK_KHR_portability_subset", // May be absent from non-beta Vulkan headers.
+		    metal_objects ? VK_EXT_METAL_OBJECTS_EXTENSION_NAME : nullptr,
 #endif
 		    nullptr,
 		};

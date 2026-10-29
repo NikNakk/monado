@@ -12,6 +12,10 @@
 #include "xrt/xrt_results.h"
 #include "math/m_mathinclude.h"
 #include "main/comp_mirror_to_debug_gui.h"
+#include "util/u_logging.h"
+#include "util/u_session_mark.h"
+
+#include <stdio.h>
 
 #include "cache/render_compute_pipeline_cache.h"
 #include "cache/render_shader_specialization_helpers.h"
@@ -420,6 +424,11 @@ comp_mirror_is_ready_and_active(struct comp_mirror_to_debug_gui *m,
                                 struct comp_compositor *c,
                                 uint64_t predicted_display_time_ns)
 {
+	if (u_session_mark_capture_pending()) {
+		// The fast path skips the scratch image this blit reads.
+		return !c->base.frame_params.one_projection_layer_fast_path;
+	}
+
 	if (!c->mirroring_to_debug_gui || !u_sink_debug_is_active(&m->debug_sink)) {
 		return false;
 	}
@@ -438,6 +447,25 @@ comp_mirror_is_ready_and_active(struct comp_mirror_to_debug_gui *m,
 	m->last_push_ts_ns = predicted_display_time_ns;
 
 	return true;
+}
+
+static void
+write_capture_ppm(const struct xrt_frame *frame, const char *path)
+{
+	FILE *file = fopen(path, "wb");
+	if (file == NULL) {
+		U_LOG_E("Session mark: could not write '%s'", path);
+		return;
+	}
+	fprintf(file, "P6\n%u %u\n255\n", frame->width, frame->height);
+	for (uint32_t y = 0; y < frame->height; y++) {
+		const uint8_t *row = frame->data + (size_t)y * frame->stride;
+		for (uint32_t x = 0; x < frame->width; x++) {
+			fwrite(row + x * 4, 1, 3, file);
+		}
+	}
+	fclose(file);
+	U_LOG_I("Session mark: frame %ux%u written to '%s'", frame->width, frame->height, path);
 }
 
 XRT_CHECK_RESULT xrt_result_t
@@ -674,6 +702,11 @@ comp_mirror_do_blit(struct comp_mirror_to_debug_gui *m,
 
 	struct xrt_frame *frame = &wrap->base_frame;
 	wrap = NULL;
+
+	char capture_path[1024];
+	if (u_session_mark_take_capture(capture_path, sizeof(capture_path))) {
+		write_capture_ppm(frame, capture_path);
+	}
 
 	u_sink_debug_push_frame(&m->debug_sink, frame);
 

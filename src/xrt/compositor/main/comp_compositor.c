@@ -52,6 +52,7 @@
 
 #include "os/os_time.h"
 #ifdef XRT_OS_OSX
+#include "util/u_session_mark.h"
 #include "util/comp_metal_semaphore_probe.h"
 #endif
 
@@ -588,6 +589,7 @@ compositor_layer_commit(struct xrt_compositor *xc, xrt_graphics_sync_handle_t sy
 	    !c->passthrough_active &&                 //
 	    !c->peek &&                               //
 	    !c->mirroring_to_debug_gui &&             //
+	    !u_session_mark_capture_pending() &&      //
 	    !c->debug.disable_fast_path &&            //
 	    can_do_one_projection_layer_fast_path(c); //
 	c->base.frame_params.one_projection_layer_fast_path = fast_path;
