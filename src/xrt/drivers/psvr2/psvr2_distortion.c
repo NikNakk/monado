@@ -10,7 +10,7 @@
  * @ingroup drv_psvr2
  */
 
-#include <xrt/xrt_defines.h>
+#include "psvr2_distortion.h"
 
 #include <stdint.h>
 #include <stdbool.h>

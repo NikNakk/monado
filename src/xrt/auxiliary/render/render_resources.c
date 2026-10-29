@@ -453,6 +453,7 @@ render_resources_init(struct render_resources *r,
 
 	r->vk = vk;
 	r->shaders = shaders;
+	r->gfx_timestamps_disabled = false;
 
 
 	/*
@@ -1221,6 +1222,9 @@ render_resources_fini(struct render_resources *r)
 bool
 render_resources_get_timestamps(struct render_resources *r, uint64_t *out_gpu_start_ns, uint64_t *out_gpu_end_ns)
 {
+	if (r->gfx_timestamps_disabled) {
+		return false;
+	}
 	struct vk_bundle *vk = r->vk;
 	VkResult ret = VK_SUCCESS;
 
@@ -1274,6 +1278,9 @@ render_resources_get_timestamps(struct render_resources *r, uint64_t *out_gpu_st
 bool
 render_resources_get_duration(struct render_resources *r, uint64_t *out_gpu_duration_ns)
 {
+	if (r->gfx_timestamps_disabled) {
+		return false;
+	}
 	struct vk_bundle *vk = r->vk;
 	VkResult ret = VK_SUCCESS;
 

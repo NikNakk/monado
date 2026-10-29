@@ -14,9 +14,14 @@
 
 #include "util/u_handles.h"
 #include "util/u_limited_unique_id.h"
+#include "util/u_debug.h"
 
 #include "vk/vk_mini_helpers.h"
 #include "vk/vk_image_allocator.h"
+
+#ifdef XRT_OS_OSX
+DEBUG_GET_ONCE_BOOL_OPTION(macos_compositor_private_scratch, "XRT_MACOS_COMPOSITOR_PRIVATE_SCRATCH", false)
+#endif
 
 
 /*
@@ -156,12 +161,33 @@ tmp_init_and_create(struct tmp *t,
 		t->handles[i] = XRT_GRAPHICS_BUFFER_HANDLE_INVALID;
 	}
 
-	// Do the allocation.
-	ret = vk_ic_allocate(vk, info, COMP_SCRATCH_NUM_IMAGES, &t->vkic);
-	VK_CHK_WITH_RET(ret, "vk_ic_allocate", false);
+#ifdef XRT_OS_OSX
+	if (debug_get_bool_option_macos_compositor_private_scratch()) {
+		const VkExtent2D extent = {info->width, info->height};
+		const VkImageUsageFlags usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT |
+		                                VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT |
+		                                VK_IMAGE_USAGE_STORAGE_BIT;
+		t->vkic.info = *info;
+		for (uint32_t i = 0; i < COMP_SCRATCH_NUM_IMAGES; i++) {
+			struct vk_image *image = &t->vkic.images[i];
+			ret = srgb_format != VK_FORMAT_UNDEFINED
+			          ? vk_create_image_mutable_rgba(vk, extent, usage, &image->memory, &image->handle)
+			          : vk_create_image_simple(vk, extent, unorm_format, usage, &image->memory,
+			                                   &image->handle);
+			VK_CHK_WITH_GOTO(ret, "private scratch allocation", err_destroy_vkic);
+			t->vkic.image_count++;
+			VK_NAME_IMAGE(vk, image->handle, "comp_scratch_private");
+		}
+	} else
+#endif
+	{
+		// Do the allocation.
+		ret = vk_ic_allocate(vk, info, COMP_SCRATCH_NUM_IMAGES, &t->vkic);
+		VK_CHK_WITH_RET(ret, "vk_ic_allocate", false);
 
-	ret = vk_ic_get_handles(vk, &t->vkic, COMP_SCRATCH_NUM_IMAGES, t->handles);
-	VK_CHK_WITH_GOTO(ret, "vk_ic_get_handles", err_destroy_vkic);
+		ret = vk_ic_get_handles(vk, &t->vkic, COMP_SCRATCH_NUM_IMAGES, t->handles);
+		VK_CHK_WITH_GOTO(ret, "vk_ic_get_handles", err_destroy_vkic);
+	}
 
 
 	/*
@@ -224,6 +250,9 @@ err_destroy_views:
 	}
 
 err_destroy_vkic:
+	for (uint32_t i = 0; i < COMP_SCRATCH_NUM_IMAGES; i++) {
+		u_graphics_buffer_unref(&t->handles[i]);
+	}
 	vk_ic_destroy(vk, &t->vkic);
 
 	return false;
@@ -267,10 +296,12 @@ ensure(struct comp_scratch_single_images *cssi,
        const VkFormat srgb_format,
        const VkFormat unorm_format)
 {
-	if (cssi->info.width == extent.width &&      //
-	    cssi->info.height == extent.height &&    //
-	    cssi->info.formats[0] == unorm_format && //
-	    cssi->info.formats[1] == srgb_format) {  //
+	const bool formats_match = srgb_format == VK_FORMAT_UNDEFINED
+	                               ? cssi->info.format_count == 0
+	                               : cssi->info.format_count == 2 && cssi->info.formats[0] == unorm_format &&
+	                                     cssi->info.formats[1] == srgb_format;
+	if (cssi->info.width == extent.width && cssi->info.height == extent.height &&
+	    cssi->info.format == unorm_format && formats_match) {
 		// Our work here is done!
 		return true;
 	}
@@ -382,6 +413,10 @@ comp_scratch_single_images_done(struct comp_scratch_single_images *cssi)
 
 	assert(cssi->info.width > 0);
 	assert(cssi->info.height > 0);
+	if (!xrt_graphics_buffer_is_valid(cssi->native_images[last].handle)) {
+		u_native_images_debug_clear(&cssi->unid);
+		return;
+	}
 
 	u_native_images_debug_set(   //
 	    &cssi->unid,             //

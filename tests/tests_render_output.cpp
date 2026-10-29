@@ -244,50 +244,17 @@ TEST_CASE("Private output queues independent slots and retains blocked resources
 		of.signal(i);
 	}
 	REQUIRE(vk.vkDeviceWaitIdle(vk.device) == VK_SUCCESS);
-	auto create = reinterpret_cast<PFN_vkCreateEvent>(vk.vkGetDeviceProcAddr(vk.device, "vkCreateEvent"));
-	auto wait = reinterpret_cast<PFN_vkCmdWaitEvents>(vk.vkGetDeviceProcAddr(vk.device, "vkCmdWaitEvents"));
-	auto set = reinterpret_cast<PFN_vkSetEvent>(vk.vkGetDeviceProcAddr(vk.device, "vkSetEvent"));
-	auto destroy = reinterpret_cast<PFN_vkDestroyEvent>(vk.vkGetDeviceProcAddr(vk.device, "vkDestroyEvent"));
-	REQUIRE((create && wait && set && destroy));
-	VkEventCreateInfo info{};
-	info.sType = VK_STRUCTURE_TYPE_EVENT_CREATE_INFO;
-	VkEvent event{};
-	VkResult ret = create(vk.device, &info, nullptr, &event);
-	if (ret == VK_ERROR_FEATURE_NOT_PRESENT)
-		SKIP("Host events unavailable on this portability device");
-	REQUIRE(ret == VK_SUCCESS);
-	struct Gate
-	{
-		vk_bundle &vk;
-		VkEvent event;
-		PFN_vkSetEvent set;
-		PFN_vkDestroyEvent destroy;
-		~Gate()
-		{
-			set(vk.device, event);
-			vk.vkDeviceWaitIdle(vk.device);
-			destroy(vk.device, event, nullptr);
-		}
-	} gate{vk, event, set, destroy};
-	auto cmd = of.f.begin();
-	wait(cmd, 1, &event, VK_PIPELINE_STAGE_HOST_BIT, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, 0, nullptr, 0, nullptr, 0,
-	     nullptr);
-	REQUIRE(vk.vkEndCommandBuffer(cmd) == VK_SUCCESS);
-	VkSubmitInfo submit{};
-	submit.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
-	submit.commandBufferCount = 1;
-	submit.pCommandBuffers = &cmd;
-	vk_queue_lock(vk.main_queue);
-	ret = vk.vkQueueSubmit(vk.main_queue->queue, 1, &submit, VK_NULL_HANDLE);
-	vk_queue_unlock(vk.main_queue);
-	REQUIRE(ret == VK_SUCCESS);
+	HostSubmissionGate gate{vk};
+	if (!vk.features.timeline_semaphore)
+		SKIP("Timeline semaphores unavailable on this device");
+	REQUIRE(gate.init() == VK_SUCCESS);
 	for (unsigned i = 0; i < 3; i++)
 		REQUIRE(render_output_present(of.output, i, of.complete[i]) == VK_SUCCESS);
 	CHECK(render_output_present(of.output, 0, of.complete[0]) == VK_TIMEOUT);
 	auto *retained = of.output;
 	CHECK(render_output_destroy(&of.output) == VK_TIMEOUT);
 	CHECK(of.output == retained);
-	REQUIRE(set(vk.device, event) == VK_SUCCESS);
+	REQUIRE(gate.release() == VK_SUCCESS);
 	for (unsigned i = 0; i < 3; i++) {
 		of.consume(i);
 		auto pixels = of.pixels(of.destinations[i]);

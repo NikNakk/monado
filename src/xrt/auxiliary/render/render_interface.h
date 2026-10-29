@@ -373,6 +373,7 @@ struct render_resources
 	VkCommandPool cmd_pool;
 
 	VkQueryPool query_pool;
+	bool gfx_timestamps_disabled;
 
 	//! Opt-in compute pass queries, read only after the submission fence signals.
 	bool gpu_pass_timing;

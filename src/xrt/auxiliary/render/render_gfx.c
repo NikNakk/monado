@@ -11,6 +11,11 @@
 #include "vk/vk_mini_helpers.h"
 
 #include "render/render_interface.h"
+#include "util/u_debug.h"
+
+#ifdef XRT_OS_OSX
+DEBUG_GET_ONCE_BOOL_OPTION(macos_gfx_gpu_timestamps, "XRT_MACOS_GFX_GPU_TIMESTAMPS", true)
+#endif
 
 #include <stdio.h>
 
@@ -965,6 +970,9 @@ render_gfx_init(struct render_gfx *render, struct render_resources *r)
 {
 	// Init fields.
 	render->r = r;
+#ifdef XRT_OS_OSX
+	r->gfx_timestamps_disabled = !debug_get_bool_option_macos_gfx_gpu_timestamps();
+#endif
 
 	// Used to sub-allocate UBOs from, restart from scratch each frame.
 	render_sub_alloc_tracker_init(&render->ubo_tracker, &r->gfx.shared_ubo);
@@ -992,17 +1000,19 @@ render_gfx_begin(struct render_gfx *render)
 	    &begin_info);               //
 	VK_CHK_WITH_RET(ret, "vkBeginCommandBuffer", false);
 
-	vk->vkCmdResetQueryPool(   //
-	    render->r->cmd,        //
-	    render->r->query_pool, //
-	    0,                     // firstQuery
-	    2);                    // queryCount
+	if (!render->r->gfx_timestamps_disabled) {
+		vk->vkCmdResetQueryPool(   //
+		    render->r->cmd,        //
+		    render->r->query_pool, //
+		    0,                     // firstQuery
+		    2);                    // queryCount
 
-	vk->vkCmdWriteTimestamp(               //
-	    render->r->cmd,                    //
-	    VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, // pipelineStage
-	    render->r->query_pool,             //
-	    0);                                // query
+		vk->vkCmdWriteTimestamp(               //
+		    render->r->cmd,                    //
+		    VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, // pipelineStage
+		    render->r->query_pool,             //
+		    0);                                // query
+	}
 
 	return true;
 }
@@ -1013,11 +1023,13 @@ render_gfx_end(struct render_gfx *render)
 	struct vk_bundle *vk = vk_from_render(render);
 	VkResult ret;
 
-	vk->vkCmdWriteTimestamp(                  //
-	    render->r->cmd,                       //
-	    VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, // pipelineStage
-	    render->r->query_pool,                //
-	    1);                                   // query
+	if (!render->r->gfx_timestamps_disabled) {
+		vk->vkCmdWriteTimestamp(                  //
+		    render->r->cmd,                       //
+		    VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, // pipelineStage
+		    render->r->query_pool,                //
+		    1);                                   // query
+	}
 
 	ret = vk->vkEndCommandBuffer(render->r->cmd);
 	VK_CHK_WITH_RET(ret, "vkEndCommandBuffer", false);

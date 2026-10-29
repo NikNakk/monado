@@ -35,6 +35,44 @@ A mouse wheel also works, scaled from lines to points.
 
 ## Use
 
+The isolated qwerty-script build accepts `QWERTY_HMD_DISPLAY_WIDTH` and
+`QWERTY_HMD_DISPLAY_HEIGHT` for headset-sized desktop performance experiments.
+Defaults remain 1280×720. Width must be even and between 320 and 8192; height
+must be between 240 and 8192. If either is invalid, both defaults are retained.
+For the Alyx fidelity comparison, 4000×2040 with the normal 140% compositor
+scale requests 2800×2856 per eye. This matches the recorded PS VR2 recommendation,
+but does not reproduce its optics, FOV, eye gaze or presentation timing.
+For compositor GPU comparisons, also set
+`XRT_MACOS_DESKTOP_RENDER_WIDTH=4000` and
+`XRT_MACOS_DESKTOP_RENDER_HEIGHT=2040`. These set the actual render target,
+independently of the window's size in points. Both must be valid together;
+invalid values fail display selection. Width must be even and 320–8192; height
+240–8192. The desktop window continues to fit the screen and displays the
+full-resolution result scaled down. Without these overrides, its fitted pixel
+size remains the render extent (3078×1568 in the recorded Alyx tests).
+
+`QWERTY_HMD_PSVR2_DISTORTION=1` opts into the PS VR2 driver's existing nonlinear,
+chromatic distortion function with nominal offsets and unit rotation/scale.
+It uses the normal `XRT_MESH_SIZE` (64 by default: 8450 vertices across both
+views), instead of identity distortion's 8 vertices. This is a reference GPU
+workload, not a replacement for the individual headset's USB calibration.
+Qwerty's 85-degree FOV and application recommendations remain unchanged, so
+compositor comparisons can keep the application workload fixed. Defaults still
+use identity distortion. Set these variables in the service environment and,
+when using client composition, in the client's environment too.
+
+For query-overhead diagnosis only, `XRT_MACOS_GFX_GPU_TIMESTAMPS=0` omits the
+graphics compositor's query reset and timestamp writes. It also suppresses reads
+and GPU pacing feedback, returning no duration rather than fabricated zeroes.
+Compute composition is unaffected, and the default remains enabled. Use
+independent Metal command-buffer completion timing for this control; its missing
+query duration must not be treated as a measured rendering improvement.
+
+Bounded Alyx runs on 23 October verified 1344×1344 and 1056×1056 targets at
+fidelity levels 5 and 3 and completed three menu cycles at each level. The
+fixed-camera comparison showed little steady-cadence improvement; evidence is
+retained in the parent Alyx workspace's `runs/fidelity-qwerty-results.md`.
+
 Set the variable in the service's environment. For client compositing
 (`XRT_MACOS_CLIENT_COMPOSITOR=1`), set it in the client's environment as well, so
 both size the layer the same way. Both presenters work:
@@ -101,18 +139,19 @@ are applied once and do not have this problem.
 ## What it covers
 
 - The window keeps the simulated HMD's panel aspect (16:9) at up to 90% of the
-  visible screen. Its size in pixels becomes the compositor target, so nothing is
-  stretched. It is fixed-size. Its close button stops the service: each connected
+  visible screen. Its size in pixels becomes the compositor target unless the
+  explicit render extent above is set. It is fixed-size. Its close button stops the service: each connected
   application is asked to exit its session (as if it had called
   `xrRequestExitSession`), and the service stops once they have disconnected, or
   after 3 seconds if one does not respond.
 - Presentation, pacing (from the built-in display's link), the compute/graphics
   compositors, timewarp and the WSI fragment output pass all run as with the
-  headset. The simulated HMD has no lens distortion.
+  headset. The simulated HMD uses identity distortion by default; the opt-in
+  PS VR2 reference above adds nonlinear chromatic distortion.
 - Refresh rates: the built-in display offers only its current rate, and Monado never
   changes its mode. App refresh requests for other rates fail.
 - Not covered: anything that needs PS VR2 hardware, including camera passthrough,
-  eye gaze and the PS VR2 distortion and panel timing. The window is
+  eye gaze, the individual PS VR2 distortion calibration and panel timing. The window is
   WindowServer-composited, so direct-scanout questions still need the headset.
 
 ## Simulated passthrough room

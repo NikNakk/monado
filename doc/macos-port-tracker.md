@@ -7,6 +7,27 @@ SPDX-License-Identifier: BSL-1.0
 
 # macOS Port Tracker
 
+The latest [WSI timestamp/replay candidate](macos-wsi-kk-followup.md#timestamp-and-replay-candidate--24-october-2026)
+retains GPU feedback and reduces desktop compositor GPU/CPU costs by about
+0.05/0.10 ms. It is prepared as a service-only headset experiment, not installed
+or hardware-validated.
+
+Desktop compositor comparisons now have an opt-in [PS VR2 reference distortion
+and full render extent](macos-desktop-simulation.md#use). Earlier Qwerty captures
+used identity distortion and a 3078×1568 output despite headset-sized application
+recommendations; they understate the panel workload. The new mode uses nominal
+calibration, keeps Qwerty FOV, and still needs hardware acceptance.
+
+The [WSI KK follow-up](macos-wsi-kk-followup.md) tests explicit WSI graphics and
+compute paths and removes a service-only dependency on GOOGLE display timing.
+Hosted/adaptive feedback gates and native runtime defaults remain unchanged.
+
+The isolated [KK compositor follow-up](macos-kk-compositor-followup.md) adds an
+opt-in private-scratch path and records timestamp compatibility checks. The
+follow-up corrects invalid host-event test gates using timeline semaphores; all
+20 desktop offscreen cases pass on KK and MVK. Desktop Alyx reaches the single-projection fast path; headset acceptance
+and an installed compositor driver change remain outstanding (24 October 2026).
+
 The [native Alyx launch correction](macos-alyx-open-file-limit.md) raises the
 client's inherited file budget and restores desktop Qwerty controllers. The
 user reaches the usual level with the clean KK driver and custom resolve off.

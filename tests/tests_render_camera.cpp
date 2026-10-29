@@ -414,43 +414,11 @@ TEST_CASE("Camera submissions return before GPU readiness and retain pending sto
 	for (unsigned slot = 0; slot < 3; slot++)
 		cf.signal(slot);
 	REQUIRE(vk.vkDeviceWaitIdle(vk.device) == VK_SUCCESS);
-	auto create = reinterpret_cast<PFN_vkCreateEvent>(vk.vkGetDeviceProcAddr(vk.device, "vkCreateEvent"));
-	auto wait = reinterpret_cast<PFN_vkCmdWaitEvents>(vk.vkGetDeviceProcAddr(vk.device, "vkCmdWaitEvents"));
-	auto set = reinterpret_cast<PFN_vkSetEvent>(vk.vkGetDeviceProcAddr(vk.device, "vkSetEvent"));
-	auto destroy = reinterpret_cast<PFN_vkDestroyEvent>(vk.vkGetDeviceProcAddr(vk.device, "vkDestroyEvent"));
-	REQUIRE((create && wait && set && destroy));
-	VkEventCreateInfo info{};
-	info.sType = VK_STRUCTURE_TYPE_EVENT_CREATE_INFO;
-	VkEvent event{};
-	VkResult created = create(vk.device, &info, nullptr, &event);
-	if (created == VK_ERROR_FEATURE_NOT_PRESENT)
-		SKIP("Host events unsupported on this portability device");
-	REQUIRE(created == VK_SUCCESS);
-	struct Gate
-	{
-		vk_bundle &vk;
-		VkEvent event;
-		PFN_vkSetEvent set;
-		PFN_vkDestroyEvent destroy;
-		~Gate()
-		{
-			set(vk.device, event);
-			vk.vkDeviceWaitIdle(vk.device);
-			destroy(vk.device, event, nullptr);
-		}
-	} gate{vk, event, set, destroy};
-	auto cmd = cf.f.begin();
-	wait(cmd, 1, &event, VK_PIPELINE_STAGE_HOST_BIT, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, 0, nullptr, 0, nullptr, 0,
-	     nullptr);
-	REQUIRE(vk.vkEndCommandBuffer(cmd) == VK_SUCCESS);
-	VkSubmitInfo submit{};
-	submit.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
-	submit.commandBufferCount = 1;
-	submit.pCommandBuffers = &cmd;
-	vk_queue_lock(vk.main_queue);
-	VkResult ret = vk.vkQueueSubmit(vk.main_queue->queue, 1, &submit, VK_NULL_HANDLE);
-	vk_queue_unlock(vk.main_queue);
-	REQUIRE(ret == VK_SUCCESS);
+	HostSubmissionGate gate{vk};
+	if (!vk.features.timeline_semaphore)
+		SKIP("Timeline semaphores unavailable on this device");
+	REQUIRE(gate.init() == VK_SUCCESS);
+
 	for (unsigned slot = 0; slot < 3; slot++) {
 		auto data = bc4(slot % 2, slot);
 		xrt_frame frame{};
@@ -491,7 +459,7 @@ TEST_CASE("Camera submissions return before GPU readiness and retain pending sto
 	auto *pending = cf.renderer;
 	CHECK(render_camera_destroy(&cf.renderer) == VK_TIMEOUT);
 	REQUIRE(cf.renderer == pending);
-	REQUIRE(set(vk.device, event) == VK_SUCCESS);
+	REQUIRE(gate.release() == VK_SUCCESS);
 	for (unsigned slot = 0; slot < 3; slot++) {
 		cf.consume(slot);
 		auto pixels = cf.pixels(slot);

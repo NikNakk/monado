@@ -86,6 +86,11 @@ if(XRT_BUILD_DRIVER_TWRAP)
 	target_link_libraries(drv_twrap PRIVATE xrt-interfaces aux_util)
 endif()
 
+if(XRT_BUILD_DRIVER_QWERTY OR XRT_BUILD_DRIVER_PSVR2)
+	add_library(drv_psvr2_distortion STATIC psvr2/psvr2_distortion.c psvr2/psvr2_distortion.h)
+	target_link_libraries(drv_psvr2_distortion PRIVATE xrt-interfaces)
+endif()
+
 if(XRT_BUILD_DRIVER_QWERTY)
 	add_library(
 		drv_qwerty STATIC
@@ -96,7 +101,7 @@ if(XRT_BUILD_DRIVER_QWERTY)
 		qwerty/qwerty_prober.c
 		qwerty/qwerty_sdl.c
 		)
-	target_link_libraries(drv_qwerty PRIVATE xrt-interfaces aux_util SDL2::SDL2)
+	target_link_libraries(drv_qwerty PRIVATE xrt-interfaces aux_util drv_psvr2_distortion SDL2::SDL2)
 	list(APPEND ENABLED_DRIVERS qwerty)
 
 	add_library(drv_qwerty_includes INTERFACE)
@@ -253,13 +258,13 @@ if(XRT_BUILD_DRIVER_PSVR2)
 		psvr2/psvr2_interface.h
 		psvr2/psvr2_prober.c
 		psvr2/psvr2_protocol.h
-		psvr2/psvr2_distortion.c
 		psvr2/psvr2_eye.c
 		)
 	target_link_libraries(
 		drv_psvr2
 		PRIVATE
 			xrt-interfaces
+			drv_psvr2_distortion
 			aux_os
 			aux_util
 			aux_tracking

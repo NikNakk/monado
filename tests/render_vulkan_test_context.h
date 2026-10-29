@@ -22,7 +22,7 @@ struct MinimalVulkanContext
 	}
 
 	bool
-	init()
+	init(bool metal_objects = false)
 	{
 #ifdef XRT_OS_OSX
 		// Hosted macOS VMs may not expose a Metal GPU. Avoid entering the ICD
@@ -42,9 +42,13 @@ struct MinimalVulkanContext
 #endif
 		};
 		static const char *required_device_extensions[] = {nullptr};
-		static const char *optional_device_extensions[] = {
+		const char *optional_device_extensions[] = {
+		    VK_KHR_TIMELINE_SEMAPHORE_EXTENSION_NAME,
+		    metal_objects ? VK_KHR_GET_MEMORY_REQUIREMENTS_2_EXTENSION_NAME : nullptr,
+		    metal_objects ? VK_KHR_DEDICATED_ALLOCATION_EXTENSION_NAME : nullptr,
 #ifdef XRT_OS_OSX
 		    "VK_KHR_portability_subset", // May be absent from non-beta Vulkan headers.
+		    metal_objects ? VK_EXT_METAL_OBJECTS_EXTENSION_NAME : nullptr,
 #endif
 		    nullptr,
 		};
@@ -67,7 +71,7 @@ struct MinimalVulkanContext
 		    .optional_device_extensions = optional_device_ext_list,
 		    .log_level = U_LOGGING_WARN,
 		    .only_compute_queue = false,
-		    .timeline_semaphore = false,
+		    .timeline_semaphore = true,
 		    .selected_gpu_index = -1,
 		    .lookup_with_uuid = false,
 		    .selected_gpu_uuid = {},
@@ -97,5 +101,69 @@ struct MinimalVulkanContext
 			vk.vkDestroyInstance(vk.instance, nullptr);
 		}
 		vk = {};
+	}
+};
+
+struct HostSubmissionGate
+{
+	vk_bundle &vk;
+	VkSemaphore semaphore{};
+	PFN_vkSignalSemaphoreKHR signal{};
+	bool released = false;
+
+	VkResult
+	init()
+	{
+		signal = reinterpret_cast<PFN_vkSignalSemaphoreKHR>(vk.vkGetDeviceProcAddr(vk.device, "vkSignalSemaphoreKHR"));
+		if (!vk.features.timeline_semaphore || !signal)
+			return VK_ERROR_FEATURE_NOT_PRESENT;
+		VkSemaphoreTypeCreateInfo type{};
+		type.sType = VK_STRUCTURE_TYPE_SEMAPHORE_TYPE_CREATE_INFO;
+		type.semaphoreType = VK_SEMAPHORE_TYPE_TIMELINE;
+		VkSemaphoreCreateInfo info{};
+		info.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
+		info.pNext = &type;
+		VkResult ret = vk.vkCreateSemaphore(vk.device, &info, nullptr, &semaphore);
+		if (ret != VK_SUCCESS)
+			return ret;
+		uint64_t value = 1;
+		VkTimelineSemaphoreSubmitInfo timeline{};
+		timeline.sType = VK_STRUCTURE_TYPE_TIMELINE_SEMAPHORE_SUBMIT_INFO;
+		timeline.waitSemaphoreValueCount = 1;
+		timeline.pWaitSemaphoreValues = &value;
+		VkPipelineStageFlags stage = VK_PIPELINE_STAGE_ALL_COMMANDS_BIT;
+		VkSubmitInfo submit{};
+		submit.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+		submit.pNext = &timeline;
+		submit.waitSemaphoreCount = 1;
+		submit.pWaitSemaphores = &semaphore;
+		submit.pWaitDstStageMask = &stage;
+		vk_queue_lock(vk.main_queue);
+		ret = vk.vkQueueSubmit(vk.main_queue->queue, 1, &submit, VK_NULL_HANDLE);
+		vk_queue_unlock(vk.main_queue);
+		return ret;
+	}
+
+	VkResult
+	release()
+	{
+		if (released || semaphore == VK_NULL_HANDLE)
+			return VK_SUCCESS;
+		VkSemaphoreSignalInfo info{};
+		info.sType = VK_STRUCTURE_TYPE_SEMAPHORE_SIGNAL_INFO;
+		info.semaphore = semaphore;
+		info.value = 1;
+		VkResult ret = signal(vk.device, &info);
+		released = ret == VK_SUCCESS;
+		return ret;
+	}
+
+	~HostSubmissionGate()
+	{
+		if (semaphore != VK_NULL_HANDLE) {
+			release();
+			vk.vkDeviceWaitIdle(vk.device);
+			vk.vkDestroySemaphore(vk.device, semaphore, nullptr);
+		}
 	}
 };

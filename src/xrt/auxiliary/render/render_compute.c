@@ -673,6 +673,7 @@ render_compute_init(struct render_compute *render, struct render_resources *r)
 
 	struct vk_bundle *vk = r->vk;
 	render->r = r;
+	r->gfx_timestamps_disabled = false;
 
 	for (uint32_t i = 0; i < RENDER_MAX_LAYER_RUNS_COUNT(r); i++) {
 		ret = vk_create_descriptor_set(             //
