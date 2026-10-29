@@ -884,7 +884,6 @@ struct rift_exposure_event
  *
  * @implements xrt_device
  * @implements t_constellation_tracker_device
- * @implements t_constellation_tracker_tracking_source
  */
 struct rift_hmd
 {
