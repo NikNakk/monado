@@ -480,9 +480,7 @@ enum psvr2_hmd_input_name
 	PSVR2_HMD_INPUT_COUNT,
 };
 
-void
-psvr2_compute_distortion_asymmetric(
-    float *calibration, struct xrt_uv_triplet *distCoords, int eEye, float fU, float fV);
+#include "psvr2_distortion.h"
 
 bool
 psvr2_usb_xfer_continue(struct libusb_transfer *xfer, const char *type);

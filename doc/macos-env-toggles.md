@@ -18,6 +18,9 @@ validation and limitations.
 | `XRT_MACOS_WSI_GENERIC_LATCH_US` | `0` | With `wsi-adaptive`, how long after the desired present time GPU work may finish. |
 | `XRT_MACOS_WSI_PASSTHROUGH` | `0` | Enable GPU-ordered Vulkan camera composition with the compute compositor. |
 | `SIMULATED_DESKTOP` | `0` | Run the simulated HMD in a window on the built-in display, steered with the trackpad. Implies `SIMULATED_ENABLE`. With `QWERTY_ENABLE=1`, the window drives qwerty's HMD and controllers instead. See [the desktop simulation note](macos-desktop-simulation.md). |
+| `QWERTY_HMD_PSVR2_DISTORTION` | `0` | Qwerty reference workload using the PS VR2 nonlinear chromatic distortion function with nominal calibration; keeps Qwerty FOV. Uses `XRT_MESH_SIZE` (default 64). |
+| `XRT_MACOS_DESKTOP_RENDER_WIDTH`, `XRT_MACOS_DESKTOP_RENDER_HEIGHT` | `0`, `0` | Override the simulated desktop compositor render extent independently of the fitted window. Set both, e.g. 4000×2040; invalid nonzero pairs fail display selection. |
+| `XRT_MACOS_GFX_GPU_TIMESTAMPS` | `1` | Diagnostic control for graphics composition: `0` omits query reset/writes and returns no GPU timing feedback. Compute is unchanged. Use independent Metal completion timing to measure query overhead; this is not a normal pacing recommendation. |
 
 Presenter selection is read once per process. Unset selects `native`; an empty
 or unknown value logs a warning and falls back to native. Set it in the service
@@ -48,6 +51,13 @@ the blocking Metal bridge and its `XRT_MACOS_WSI_PASSTHROUGH_VERIFY` /
 `--verify-passthrough` controls. WSI now uses the native per-headset calibration and rotation
 settings; see [the test procedure and default-switch plan](macos-wsi-migration.md#calibrated-wsi-passthrough-prepared-16-october-2026).
 Sleep/disconnect recovery requires restart.
+
+## Private compositor scratch candidate (24 October 2026)
+
+`XRT_MACOS_COMPOSITOR_PRIVATE_SCRATCH=1` (default `0`, macOS only) keeps
+internal scratch images in Vulkan device-local allocations and disables their
+native-handle debug-viewer output. It does not change application swapchains or
+presenter sharing. See [compatibility evidence](macos-kk-compositor-followup.md).
 
 ## Historical audit
 

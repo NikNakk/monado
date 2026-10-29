@@ -9,6 +9,7 @@
 #include "util/u_macos_display_host.h"
 #include "util/u_macos_hosted_client.h"
 #include "util/u_misc.h"
+#include "util/u_debug.h"
 
 #import <QuartzCore/QuartzCore.h>
 #import <Metal/Metal.h>
@@ -45,6 +46,7 @@ struct comp_macos_frontend
 	CGDirectDisplayID display_id;
 	/* Simulated HMD in a desktop window (SIMULATED_DESKTOP=1), not full screen. */
 	bool desktop;
+	bool desktop_render_extent_override;
 	/* Layer size in points: the screen, or the desktop window's content. */
 	NSSize size;
 	char display_name[128];
@@ -480,10 +482,25 @@ macos_frontend_select_display(struct comp_macos_frontend *cwm)
 		cwm->display_id = display_id;
 		cwm->pixel_width = (uint32_t)lround(size.width * scale);
 		cwm->pixel_height = (uint32_t)lround(size.height * scale);
+		int64_t render_width = debug_get_num_option("XRT_MACOS_DESKTOP_RENDER_WIDTH", 0);
+		int64_t render_height = debug_get_num_option("XRT_MACOS_DESKTOP_RENDER_HEIGHT", 0);
+		if (render_width != 0 || render_height != 0) {
+			if (render_width < 320 || render_width > 8192 || render_width % 2 != 0 ||
+			    render_height < 240 || render_height > 8192) {
+				COMP_ERROR(c, "Invalid desktop render extent: %lld x %lld", (long long)render_width,
+				           (long long)render_height);
+				return nil;
+			}
+			cwm->desktop_render_extent_override = true;
+			cwm->pixel_width = (uint32_t)render_width;
+			cwm->pixel_height = (uint32_t)render_height;
+		}
+
 		snprintf(cwm->display_name, sizeof(cwm->display_name), "%s (simulated HMD window)",
 		         [[screen localizedName] UTF8String]);
-		COMP_INFO(c, "SIMULATED_DESKTOP: %ux%u pixel window on '%s'", cwm->pixel_width, cwm->pixel_height,
-		          [[screen localizedName] UTF8String]);
+		COMP_INFO(c, "SIMULATED_DESKTOP: %ux%u render target on '%s', distortion mesh %u vertices, %u indices",
+		          cwm->pixel_width, cwm->pixel_height, [[screen localizedName] UTF8String],
+		          c->xdev->hmd->distortion.mesh.vertex_count, c->xdev->hmd->distortion.mesh.index_count_total);
 		return screen;
 	}
 	NSScreen *screen = find_psvr2_screen(c);
@@ -524,6 +541,13 @@ macos_frontend_create_metal_layer(struct comp_macos_frontend *cwm, NSScreen *scr
 	[layer setAnchorPoint:CGPointZero];
 	[layer setFrame:CGRectMake(0, 0, size.width, size.height)];
 	[layer setAutoresizingMask:kCALayerWidthSizable | kCALayerHeightSizable];
+	if (cwm->desktop_render_extent_override) {
+		[layer setAutoresizingMask:0];
+		[layer setContentsScale:1.0];
+		[layer setBounds:CGRectMake(0, 0, cwm->pixel_width, cwm->pixel_height)];
+		[layer setTransform:CATransform3DMakeScale(size.width / cwm->pixel_width,
+		                                         size.height / cwm->pixel_height, 1.0)];
+	}
 	return layer;
 }
 

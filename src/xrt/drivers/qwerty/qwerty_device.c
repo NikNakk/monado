@@ -19,11 +19,13 @@
 #include "util/u_logging.h"
 #include "util/u_time.h"
 #include "util/u_misc.h"
+#include "util/u_debug.h"
 #include "util/u_desktop_input.h"
 #include "util/u_desktop_pose.h"
 #include "os/os_time.h"
 
 #include "qwerty_device.h"
+#include "../psvr2/psvr2_distortion.h"
 
 #include <stdio.h>
 #include <assert.h>
@@ -311,6 +313,22 @@ qwerty_hmd_set_passthrough_sinks(struct xrt_device *xd, struct xrt_frame_sink *l
 	return XRT_SUCCESS;
 }
 
+static xrt_result_t
+qwerty_compute_psvr2_reference_distortion(struct xrt_device *xd,
+                                        uint32_t view,
+                                        float u,
+                                        float v,
+                                        struct xrt_uv_triplet *result)
+{
+	(void)xd;
+	if (view >= 2) {
+		return XRT_ERROR_INVALID_ARGUMENT;
+	}
+	float calibration[8] = {-0.09919293f, 0.0f, 0.09919293f, 0.0f, 1.0f, 0.0f, 1.0f, 0.0f};
+	psvr2_compute_distortion_asymmetric(calibration, result, (int)view, u, v);
+	return XRT_SUCCESS;
+}
+
 struct qwerty_hmd *
 qwerty_hmd_create(void)
 {
@@ -337,6 +355,13 @@ qwerty_hmd_create(void)
 	struct u_device_simple_info info;
 	info.display.w_pixels = 1280;
 	info.display.h_pixels = 720;
+	int64_t display_width = debug_get_num_option("QWERTY_HMD_DISPLAY_WIDTH", 1280);
+	int64_t display_height = debug_get_num_option("QWERTY_HMD_DISPLAY_HEIGHT", 720);
+	if (display_width >= 320 && display_width <= 8192 && display_width % 2 == 0 &&
+	    display_height >= 240 && display_height <= 8192) {
+		info.display.w_pixels = (uint32_t)display_width;
+		info.display.h_pixels = (uint32_t)display_height;
+	}
 	info.display.w_meters = 0.13f;
 	info.display.h_meters = 0.07f;
 	info.lens_horizontal_separation_meters = 0.13f / 2.0f;
@@ -363,7 +388,16 @@ qwerty_hmd_create(void)
 	if (u_desktop_pose_enabled()) {
 		xd->set_passthrough_sinks = qwerty_hmd_set_passthrough_sinks;
 	}
-	u_distortion_mesh_set_none(xd); // Fill in xd->compute_distortion()
+	if (debug_get_bool_option("QWERTY_HMD_PSVR2_DISTORTION", false)) {
+		xd->compute_distortion = qwerty_compute_psvr2_reference_distortion;
+		xd->hmd->distortion.models = XRT_DISTORTION_MODEL_COMPUTE;
+		xd->hmd->distortion.preferred = XRT_DISTORTION_MODEL_MESHUV;
+		u_distortion_mesh_fill_in_compute(xd);
+		U_LOG_IFL_I(U_LOGGING_INFO, "PS VR2 reference distortion: nominal calibration, %u vertices, %u indices",
+		            xd->hmd->distortion.mesh.vertex_count, xd->hmd->distortion.mesh.index_count_total);
+	} else {
+		u_distortion_mesh_set_none(xd);
+	}
 
 	return qh;
 }
