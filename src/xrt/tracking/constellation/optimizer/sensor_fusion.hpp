@@ -388,9 +388,6 @@ struct SnapshotDevice
 
 /*!
  * One solve, whole: what went in, what came out, and how the solver got there.
- *
- * Filled in two halves. @ref SensorFusion::buildFusionLocked copies the window in as the problem is built, and
- * @ref SensorFusion::runFusionLocked fills the solved values and solver statistics once Ceres has returned.
  */
 struct SolveSnapshot
 {
@@ -430,11 +427,15 @@ public: // Fields
 	u_logging_level log_level;
 
 	/*!
-	 * The fusion thread, and the one lock in this file, guarding data handoff only, not heavy operations. The IMU
-	 * or camera push functions should not hold a lock that will be held during an expensive operation (such as a
-	 * Ceres solve).
+	 * The fusion thread, lock does not protect fusion operations, only threading operations like
+	 * wakeup and inter-thread sample transfer.
+	 *
+	 * See @ref SensorFusion::lock for fusion operations.
 	 */
 	os_thread_helper thread{};
+
+	//! Locks heavy fusion operations, but no threading operations (such as wakeup/sleep).
+	os::Mutex lock;
 
 	/*!
 	 * Backing store for the keyframe ring. The keyframe with absolute index `n` lives in slot
@@ -487,15 +488,21 @@ public: // Fields
 #endif
 
 	/*!
-	 * The window as it stood for the most recent solve, kept alive between the build and the solve.
+	 * The window and its solved states as of the most recent solve, filled by @ref runFusionLocked once Ceres has
+	 * returned. Kept between solves since dead reckoning integrates with the solved gravity it holds.
 	 *
 	 * This is owned in full by the fusion thread, don't touch it outside of that.
 	 */
 	SolveSnapshot snapshot;
 
 private: // Methods
+	//! Marks the fusion dirty, call with the fusion lock held.
 	void
-	markDirtyLocked();
+	markDirtyFusionLocked();
+
+	//! Wakes the fusion thread, call with the thread lock held.
+	void
+	wakeThreadLocked();
 
 	/*!
 	 * Retires the keyframe falling out of the window and opens a fresh one at the head of the ring.
@@ -543,7 +550,7 @@ public: // Methods
 	~SensorFusion();
 
 	//! Returns the index of the keyframe in the ring buffer.
-	size_t
+	uint32_t
 	keyframeIdxLocked(uint32_t age) const;
 
 	/*!
@@ -574,6 +581,8 @@ public: // Methods
 	/*!
 	 * Hands a device the IMU intrinsics a rig calibration solved for. This is used as a better seed start than
 	 * assuming an identity calibration.
+	 *
+	 * Blocks until the current solve is complete.
 	 */
 	void
 	setDeviceImuCalibration(const DeviceImuCalibration &calibration);
@@ -591,6 +600,10 @@ public: // Methods
 	/*!
 	 * Pushes an IMU sample for this particular device, IMU samples should be in OpenXR coordinate space. IMU biases
 	 * found during rig calibration should not be applied to these samples.
+	 *
+	 * May wait on large data copies during inter-thread transfer.
+	 * If your thread timing is thrown off calling this, put it behind a threaded queue,
+	 * but this should be fine without, the copies are fast.
 	 */
 	void
 	pushImuSample(const xrt_imu_sample &sample);
@@ -623,9 +636,6 @@ public: // Methods
 
 	/*!
 	 * Solves the problem `tickLocked` built and publishes what came out of it.
-	 *
-	 * Releases the lock while the expensive part (running the solve) executes to let the lock be held by other
-	 * things when it's safe.
 	 */
 	void
 	runFusionLocked();

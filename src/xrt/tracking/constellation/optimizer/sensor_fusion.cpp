@@ -1184,7 +1184,7 @@ reckonToLatestImu(SensorFusion *fusion, DeviceSolveState &inout_solve)
 }
 
 static void
-updateDeviceRelationHistory(SensorFusion *fusion)
+updateDeviceRelationHistoryLocked(SensorFusion *fusion)
 {
 	auto &device = fusion->device;
 
@@ -1213,9 +1213,6 @@ thread_runner(void *ptr)
 	os_thread_helper_lock(&fusion->thread);
 	while (os_thread_helper_is_running_locked(&fusion->thread)) {
 		timepoint_ns now_ns = os_monotonic_get_ns();
-
-		// Update the latest device relation history
-		updateDeviceRelationHistory(fusion);
 
 		auto &queue = fusion->sample_queue;
 		auto is_ready = [](timepoint_ns now_ns, timepoint_ns latest_imu_ts_ns) {
@@ -1248,24 +1245,38 @@ thread_runner(void *ptr)
 		pending.insert(pending.end(), queue.begin(), ready_end);
 		queue.erase(queue.begin(), ready_end);
 
-		// Fold in timestamp order, so a late arrival doesn't miss its keyframe.
-		std::stable_sort(pending.begin(), pending.end(),
-		                 [](const auto &a, const auto &b) { return a.timestamp_ns < b.timestamp_ns; });
+		// Unlock for costly operations (sorting and fusion). We touch nothing that needs the thread lock.
+		os_thread_helper_unlock(&fusion->thread);
+		{
+			// Fold in timestamp order, so a late arrival doesn't miss its keyframe.
+			std::stable_sort(pending.begin(), pending.end(),
+			                 [](const auto &a, const auto &b) { return a.timestamp_ns < b.timestamp_ns; });
 
-		// Camera samples are the only thing a solve is worth running for.
-		const bool have_new_input = !pending.empty();
+			// Camera samples are the only thing a solve is worth running for.
+			const bool have_new_input = !pending.empty();
 
-		for (const auto &sample : pending) {
-			fusion->processCameraSampleLocked(sample);
+			/*
+			 * Hold fusion lock since we're doing fusion work now and don't want to have our work
+			 * overwritten by a reset.
+			 */
+			std::lock_guard<os::Mutex> lock{fusion->lock};
+
+			// Update the latest device relation history
+			updateDeviceRelationHistoryLocked(fusion);
+
+			for (const auto &sample : pending) {
+				fusion->processCameraSampleLocked(sample);
+			}
+
+			if (have_new_input) {
+				fusion->dirty = true;
+			}
+
+			if (fusion->tickLocked(have_new_input)) {
+				fusion->runFusionLocked();
+			}
 		}
-
-		if (have_new_input) {
-			fusion->dirty = true;
-		}
-
-		if (fusion->tickLocked(have_new_input)) {
-			fusion->runFusionLocked();
-		}
+		os_thread_helper_lock(&fusion->thread);
 	}
 	os_thread_helper_unlock(&fusion->thread);
 
@@ -1297,12 +1308,6 @@ struct SensorFusionProblem
 	QuaternionManifold quaternion_manifold;
 	PoseWithVelocityManifold pose_with_velocity_manifold;
 
-	/*!
-	 * The ring slot each keyframe age mapped to when the snapshot was taken, so that the solved blocks can be
-	 * found again after the lock has been dropped. Only meaningful for ages below `snapshot.keyframes.size()`.
-	 */
-	std::array<uint32_t, kSlidingWindowSize> snapshot_block_idx{};
-
 	//! The marginalization prior for the device.
 	MarginalizationPrior prior{};
 
@@ -1313,13 +1318,10 @@ struct SensorFusionProblem
 	uint64_t build_generation{0};
 
 	/*!
-	 * Counts the times the calibration seeds have been thrown away, see @ref resetDeviceCalibrationSeedsLocked.
-	 *
-	 * The calibration can be replaced from another thread while a solve runs with the lock dropped, unseeding the
-	 * blocks that solve is still writing into. A solve that sees this change across it knows its result belongs to
-	 * a calibration that no longer applies.
+	 * A bit per keyframe age the current build holds a state for the device at, so that @ref fillSnapshotLocked
+	 * can read the solved states back out once Ceres has returned.
 	 */
-	uint64_t calibration_generation{0};
+	uint32_t device_keyframe_mask{0};
 
 	/*!
 	 * Set once an eviction has marginalized against the current problem, and cleared by the next build.
@@ -1960,50 +1962,47 @@ struct SensorFusionProblem
 			}
 		}
 
-		/*
-		 * Last thing the build does, so the snapshot describes the problem exactly as it is about to be handed
-		 * to the solver.
-		 */
-		this->captureSnapshotLocked(fusion, keyframe_mask);
+		this->device_keyframe_mask = keyframe_mask;
 
 		return this->problem.NumResidualBlocks() > 0;
 	}
 
 	/*!
-	 * Copies the window out for the logger while the fusion lock is still held.
-	 *
-	 * The solved half of the snapshot is left alone here, there is nothing solved yet. That part is filled by @ref
-	 * fillSolvedSnapshot once Ceres has returned. What this does have to record is the ring slot each keyframe age
-	 * maps to, because recovering that later would mean reading `keyframe_head` without the lock.
+	 * Copies the window and the solved parameter blocks out into the snapshot, once Ceres has returned.
 	 */
 	void
-	captureSnapshotLocked(SensorFusion &fusion, uint32_t device_keyframe_mask)
+	fillSnapshotLocked(SensorFusion &fusion)
 	{
+		const ParameterBlocks &blocks = this->parameter_blocks;
+		const Device &device = fusion.device;
 		SolveSnapshot &snapshot = fusion.snapshot;
 
 		snapshot.num_late_samples_dropped = fusion.num_late_samples_dropped;
 
-		const Device &device = fusion.device;
-		SnapshotDevice &out = snapshot.device;
+		snapshot.world_gravity_mag =
+		    blocks.world_gravity.seeded ? WorldGravity<double>(blocks.world_gravity.vec).gravity_mag : 0.0;
 
-		out.keyframe_mask = device_keyframe_mask;
-		out.id = device.id;
-		// Overwritten from the solved extrinsics block, and left identity for a device the solve
-		// skipped.
-		out.Qcv_model_imu = XRT_QUAT_IDENTITY;
-		out.calibrated_Qcv_model_imu = device.stored_imu_calibration.Qcv_model_imu;
+		SnapshotDevice &out_device = snapshot.device;
+
+		out_device.keyframe_mask = this->device_keyframe_mask;
+		out_device.id = device.id;
+		out_device.calibrated_Qcv_model_imu = device.stored_imu_calibration.Qcv_model_imu;
+
+		// Left identity for a device the solve skipped.
+		out_device.Qcv_model_imu = XRT_QUAT_IDENTITY;
+		if (blocks.imu_extrinsics.seeded) {
+			map_quat(out_device.Qcv_model_imu) =
+			    ImuExtrinsics<double>(blocks.imu_extrinsics.vec).Q_model_imu.coeffs().cast<float>();
+		}
 
 		snapshot.num_keyframes = fusion.num_keyframes;
 		for (uint32_t age = 0; age < fusion.num_keyframes; age++) {
 			const Keyframe &keyframe = fusion.keyframeLocked(age);
 			SnapshotKeyframe &out = snapshot.keyframes[age];
 
-			this->snapshot_block_idx[age] = static_cast<uint32_t>(fusion.keyframeIdxLocked(age));
-
 			out.timestamp_ns = keyframe.timestamp_ns;
 			out.mosaic_idx = keyframe.mosaic_idx;
 			out.sealed = keyframe.sealed;
-			out.device = {};
 
 			out.num_observations = keyframe.num_observations;
 			for (uint32_t i = 0; i < keyframe.num_observations; i++) {
@@ -2023,39 +2022,14 @@ struct SensorFusionProblem
 
 				out.observations[i] = snapshot_observation;
 			}
-		}
-	}
 
-	/*!
-	 * Reads the solved parameter blocks back into the snapshot.
-	 *
-	 * Takes no lock and needs none: the blocks belong to this problem, and the ring indices they are reached
-	 * through were recorded by @ref captureSnapshotLocked while the lock was held.
-	 */
-	void
-	fillSolvedSnapshot(SolveSnapshot &snapshot)
-	{
-		const ParameterBlocks &blocks = this->parameter_blocks;
+			out.device = {};
 
-		snapshot.world_gravity_mag =
-		    blocks.world_gravity.seeded ? WorldGravity<double>(blocks.world_gravity.vec).gravity_mag : 0.0;
-
-		SnapshotDevice &device = snapshot.device;
-
-		const auto &extrinsics_block = blocks.imu_extrinsics;
-		if (extrinsics_block.seeded) {
-			map_quat(device.Qcv_model_imu) =
-			    ImuExtrinsics<double>(extrinsics_block.vec).Q_model_imu.coeffs().cast<float>();
-		}
-
-		for (uint32_t age = 0; age < snapshot.keyframes.size(); age++) {
-			SolvedDeviceKeyframe &out = snapshot.keyframes[age].device;
-
-			if ((device.keyframe_mask & (1u << age)) == 0) {
+			if ((out_device.keyframe_mask & (1u << age)) == 0) {
 				continue;
 			}
 
-			const uint32_t block_idx = this->snapshot_block_idx[age];
+			const uint32_t block_idx = fusion.keyframeIdxLocked(age);
 			const auto &pose_block = blocks.keyframes[block_idx];
 			const auto &bias_block = blocks.keyframe_imu_biases[block_idx];
 
@@ -2070,11 +2044,12 @@ struct SensorFusionProblem
 			const PoseWithVelocity<double> pose{pose_block.vec};
 			const ImuBias<double> bias{bias_block.vec};
 
-			out.Tcv_world_device = pose.toXrtPose();
-			map_vec3_f64(out.velocity) = pose.velocity;
-			map_vec3_f64(out.accel_bias) = bias.accel_bias;
-			map_vec3_f64(out.gyro_bias) = bias.gyro_bias;
-			map_vec3_f64(out.accel_scale) = bias.accel_scale;
+			SolvedDeviceKeyframe &solved = out.device;
+			solved.Tcv_world_device = pose.toXrtPose();
+			map_vec3_f64(solved.velocity) = pose.velocity;
+			map_vec3_f64(solved.accel_bias) = bias.accel_bias;
+			map_vec3_f64(solved.gyro_bias) = bias.gyro_bias;
+			map_vec3_f64(solved.accel_scale) = bias.accel_scale;
 		}
 	}
 
@@ -2099,12 +2074,10 @@ struct SensorFusionProblem
 		for (auto &bias : this->parameter_blocks.keyframe_imu_biases) {
 			bias.unseed();
 		}
-
-		this->calibration_generation += 1;
 	}
 
 	void
-	reset()
+	resetLocked()
 	{
 		// The marginalization lists describe that same window, so the next eviction has to rebuild before it
 		// folds any.
@@ -2391,7 +2364,7 @@ Device::resetLocked()
  *
  */
 
-size_t
+uint32_t
 SensorFusion::keyframeIdxLocked(uint32_t age) const
 {
 	return (this->keyframe_head - 1 - age) % kSlidingWindowSize;
@@ -2505,9 +2478,14 @@ SensorFusion::sealAgedKeyframesLocked()
 }
 
 void
-SensorFusion::markDirtyLocked()
+SensorFusion::markDirtyFusionLocked()
 {
 	this->dirty = true;
+}
+
+void
+SensorFusion::wakeThreadLocked()
+{
 	os_thread_helper_signal_locked(&this->thread);
 }
 
@@ -2562,10 +2540,12 @@ SensorFusion::runFusionLocked()
 	options.minimizer_progress_to_stdout = false;
 	options.logging_type = ceres::LoggingType::PER_MINIMIZER_ITERATION;
 
-	/*
+	/*!
 	 * Leave two threads for other work/games, but take as much as we can for latency. Every solver shares a context
 	 * so solvers will fight over the same thread pool for their work, being ((hardware_concurrency - 2) - 1) extra
 	 * threads being used in the ceres::Context (this thread also works hence the -1).
+	 *
+	 * @todo This math fails when multiple fusion instances are running, fix that.
 	 */
 	options.num_threads = MAX(1, static_cast<int>(std::thread::hardware_concurrency()) - 2);
 
@@ -2584,43 +2564,20 @@ SensorFusion::runFusionLocked()
 	}
 
 	ceres::Solver::Summary summary;
-
-	/*
-	 * Replacing the calibration is the one thing that reaches into the problem while the lock is dropped, and it
-	 * leaves whatever this solve produces describing a calibration that no longer applies.
-	 */
-	const uint64_t calibration_generation = this->problem->calibration_generation;
-
-	/*
-	 * Unlock the fusion thread, since we've built our Ceres problem and nothing else will touch it or the parameter
-	 * pointers.
-	 */
-	os_thread_helper_unlock(&this->thread);
 	ceres::Solve(options, &problem, &summary);
-	os_thread_helper_lock(&this->thread);
 
-	/*
-	 * Reading the result back would find the blocks the new calibration unseeded empty. Replacing it also marked
-	 * the fusion dirty, so the next tick rebuilds from the new seeds and solves again.
-	 */
-	if (this->problem->calibration_generation != calibration_generation) {
-		SF_DEBUG(this, "IMU calibration for device %d changed during the solve, discarding it.",
-		         this->device.id);
+	// Check for invalid solve.
+	if (!summary.IsSolutionUsable()) {
+		SF_ERROR(this, "Fusion solve is not usable. Reason: %s", summary.message.c_str());
+		this->resetLocked();
 		return;
 	}
 
+	this->problem->fillSnapshotLocked(*this);
 	SolveSnapshot &snapshot = this->snapshot;
-	this->problem->fillSolvedSnapshot(snapshot);
 
 #ifdef XRT_FEATURE_RERUN
 	if (this->rerun_context) {
-		/*
-		 * Logging a solve means serializing the whole window out to the stream, which is far too long to
-		 * hold the queue shut for. Nothing here is reachable from another thread, so it does not need to be
-		 * held for.
-		 */
-		os_thread_helper_unlock(&this->thread);
-
 		snapshot.num_residuals = num_residuals;
 		snapshot.num_parameter_blocks = problem.NumParameterBlocks();
 		snapshot.num_iterations = static_cast<uint32_t>(summary.iterations.size());
@@ -2636,18 +2593,6 @@ SensorFusion::runFusionLocked()
 		 * how many solves have actually been logged.
 		 */
 		snapshot.solve_index += 1;
-
-		os_thread_helper_lock(&this->thread);
-
-		/*
-		 * The snapshot itself is still good, but committing it would put the old calibration's biases and
-		 * extrinsics back over the new ones, and the next build would seed from those.
-		 */
-		if (this->problem->calibration_generation != calibration_generation) {
-			SF_DEBUG(this, "IMU calibration for device %d changed while logging the solve, discarding it.",
-			         this->device.id);
-			return;
-		}
 	}
 #endif
 
@@ -2757,18 +2702,16 @@ SensorFusion::~SensorFusion()
 void
 SensorFusion::addCamera(const CameraDescription &camera_description)
 {
-	os_thread_helper_lock(&this->thread);
+	std::lock_guard<os::Mutex> lock{this->lock};
 
 	// Copy the camera description in
 	this->cameras[camera_description.mosaic_idx][camera_description.camera_idx] = camera_description;
-
-	os_thread_helper_unlock(&this->thread);
 }
 
 void
 SensorFusion::setDeviceImuCalibration(const DeviceImuCalibration &calibration)
 {
-	os_thread_helper_lock(&this->thread);
+	std::lock_guard<os::Mutex> lock{this->lock};
 
 	this->device.stored_imu_calibration = calibration;
 
@@ -2798,9 +2741,8 @@ SensorFusion::setDeviceImuCalibration(const DeviceImuCalibration &calibration)
 	        calibration.gyro_bias.x, calibration.gyro_bias.y, calibration.gyro_bias.z,        //
 	        calibration.accel_scale.x, calibration.accel_scale.y, calibration.accel_scale.z); //
 
-	this->markDirtyLocked();
-
-	os_thread_helper_unlock(&this->thread);
+	// We mark the solve as dirty, but don't need to wake it here.
+	this->markDirtyFusionLocked();
 }
 
 void
@@ -2838,7 +2780,8 @@ SensorFusion::pushCameraSample(constellation::ConstellationTracker *tracker, con
 
 	this->sample_queue.push_back(sample);
 
-	this->markDirtyLocked();
+	// Adding samples automatically marks dirty, we don't do it in here. Just wake.
+	this->wakeThreadLocked();
 
 	os_thread_helper_unlock(&this->thread);
 }
@@ -2955,12 +2898,7 @@ SensorFusion::processCameraSampleLocked(const constellation::CameraSample &sampl
 void
 SensorFusion::pushImuSample(const xrt_imu_sample &xr_sample)
 {
-	/*
-	 * @note This deliberately runs without taking `this->thread`. We *really* do not want a heavy lock on the IMU
-	 *       path, so the ring is a single-producer/single-consumer structure instead: we fill the slot first and
-	 *       then publish it by bumping the count, and the fusion thread reads in the mirrored order. See
-	 *       `imu_write_count` for more details.
-	 */
+	//! @note: Never hold this->lock in this function! That lock does heavy work.
 
 	SF_TRACE(this, "IMU sample %" PRIi64 " for %d pushed.", xr_sample.timestamp_ns, this->device.id);
 
@@ -2992,11 +2930,10 @@ SensorFusion::pushImuSample(const xrt_imu_sample &xr_sample)
 	 */
 	this->device.latest_imu_ts_ns.store(xr_sample.timestamp_ns, std::memory_order_release);
 
-	/*
-	 * This technically races, but the timing of the race is rare and just means we have to
-	 * wait until the next IMU or camera sample to dead reckon the next pose.
-	 */
-	os_thread_helper_signal_locked(&this->thread);
+	// Lock the thread to make sure it's woken.
+	os_thread_helper_lock(&this->thread);
+	this->wakeThreadLocked();
+	os_thread_helper_unlock(&this->thread);
 
 	return;
 }
@@ -3031,7 +2968,7 @@ void
 SensorFusion::resetLocked()
 {
 	// Reset the active sensor fusion problem
-	this->problem->reset();
+	this->problem->resetLocked();
 
 	/*
 	 * Dropping the window is a counter reset. Nothing reads a slot beyond `num_keyframes`, so the stale
