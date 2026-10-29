@@ -2546,8 +2546,15 @@ SensorFusion::runFusionLocked()
 	options.sparse_linear_algebra_library_type = ceres::SparseLinearAlgebraLibraryType::EIGEN_SPARSE;
 	options.minimizer_progress_to_stdout = false;
 	options.logging_type = ceres::LoggingType::PER_MINIMIZER_ITERATION;
-	options.num_threads = static_cast<int>(std::thread::hardware_concurrency());
-	// @todo Tune the tolerances to actual numbers.
+
+	/*
+	 * Leave two threads for other work/games, but take as much as we can for latency. Every solver shares a context
+	 * so solvers will fight over the same thread pool for their work, being ((hardware_concurrency - 2) - 1) extra
+	 * threads being used in the ceres::Context (this thread also works hence the -1).
+	 */
+	options.num_threads = MAX(1, static_cast<int>(std::thread::hardware_concurrency()) - 2);
+
+	// @todo Tune the solve exit tolerances to actual numbers.
 
 	// Ceres does not take ownership, and the callback only has to outlive the `Solve` below.
 	ResidualRmsTargetCallback rms_target{num_residuals, kTargetResidualRmsSigma};
