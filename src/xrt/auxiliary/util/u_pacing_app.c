@@ -456,11 +456,15 @@ predict_display_time(const struct pacing_app *pa, int64_t now_ns, int64_t displa
 	// Start from the last time that the driver displayed something.
 	int64_t val = last_sample_displayed(pa);
 
-	// Return a time after the last returned display time. Add half the
-	// display period to the comparison for robustness when the last display
-	// time shifts slightly with respect to the last sample.
-	while (val <= last_return_predicted_display(pa) + (app_period_ns / 2)) {
-		val += app_period_ns;
+	// Return a display slot at least one app period after the last returned
+	// display time. Step on the display grid: stepping by the app period from
+	// the compositor's latest sample skips an extra display period whenever
+	// that sample and the last returned time are an odd number of display
+	// periods apart (for example 2/3 refresh alternation at 120 Hz). Half a
+	// display period absorbs small shifts of the sample.
+	int64_t earliest_ns = last_return_predicted_display(pa) + app_period_ns - (display_period_ns / 2);
+	while (val <= earliest_ns) {
+		val += display_period_ns;
 	}
 
 	int64_t period_ns;
