@@ -1675,12 +1675,14 @@ struct SensorFusionProblem
 				}
 
 				// IMU bias for this keyframe
-				this->addParameterBlockLocked(                 //
-				    imu_bias_block.data(),                     //
-				    ImuBias<double>::kNumParameters,           //
-				    nullptr,                                   //
-				    {ParameterBlockRef::Kind::KeyframeImuBias, //
-				     static_cast<uint32_t>(keyframe_idx)});    //
+				this->addParameterBlockLocked(       //
+				    imu_bias_block.data(),           //
+				    ImuBias<double>::kNumParameters, //
+				    nullptr,                         //
+				    {
+				        ParameterBlockRef::Kind::KeyframeImuBias, //
+				        static_cast<uint32_t>(keyframe_idx),
+				    });
 				blocks.per_keyframe_marginalization_parameters[keyframe_idx].push_back(
 				    imu_bias_block.data());
 
@@ -1723,8 +1725,10 @@ struct SensorFusionProblem
 				    keyframe_block.data(),                    //
 				    PoseWithVelocity<double>::kNumParameters, //
 				    &this->pose_with_velocity_manifold,       //
-				    {ParameterBlockRef::Kind::DeviceKeyframe, //
-				     static_cast<uint32_t>(keyframe_idx)});   //
+				    {
+				        ParameterBlockRef::Kind::DeviceKeyframe, //
+				        static_cast<uint32_t>(keyframe_idx),
+				    });
 				blocks.per_keyframe_marginalization_parameters[keyframe_idx].push_back(
 				    keyframe_block.data());
 			}
@@ -1847,8 +1851,11 @@ struct SensorFusionProblem
 				        anchorJacobians(                             //
 				            new StaticCameraObservationCostFunction( //
 				                new StaticCameraObservationCostFunctor{
-				                    camera.params, observation, isometryFromPose(Tcv_cam_world)}, //
-				                num_residuals),                                                   //
+				                    camera.params,
+				                    observation,
+				                    isometryFromPose(Tcv_cam_world),
+				                },              //
+				                num_residuals), //
 				            {{keyframe_block.anchorData(), &this->pose_with_velocity_manifold}}),
 				        &camera_loss,            //
 				        keyframe_block.data())); //
@@ -1893,11 +1900,13 @@ struct SensorFusionProblem
 				        anchorJacobians( //
 				            new ImuCostFunction(
 				                new ImuCostFunctor({preintegration.imu_preintegration})), //
-				            {{blocks.world_gravity.anchorData(), nullptr},
-				             {start_imu_bias_block.anchorData(), nullptr},
-				             {blocks.imu_extrinsics.anchorData(), &this->quaternion_manifold},
-				             {start_keyframe_block.anchorData(), &this->pose_with_velocity_manifold},
-				             {end_keyframe_block.anchorData(), &this->pose_with_velocity_manifold}}),
+				            {
+				                {blocks.world_gravity.anchorData(), nullptr},
+				                {start_imu_bias_block.anchorData(), nullptr},
+				                {blocks.imu_extrinsics.anchorData(), &this->quaternion_manifold},
+				                {start_keyframe_block.anchorData(), &this->pose_with_velocity_manifold},
+				                {end_keyframe_block.anchorData(), &this->pose_with_velocity_manifold},
+				            }),
 				        nullptr,
 				        blocks.world_gravity.data(), //
 				        // Preintegrate with the IMU bias of the *start* keyframe
@@ -1912,8 +1921,10 @@ struct SensorFusionProblem
 				        anchorJacobians(
 				            new ImuBiasRandomWalkCostFunction(new ImuBiasRandomWalkCostFunctor(
 				                {preintegration.imu_preintegration.dt})), //
-				            {{start_imu_bias_block.anchorData(), nullptr},
-				             {end_imu_bias_block.anchorData(), nullptr}}),
+				            {
+				                {start_imu_bias_block.anchorData(), nullptr},
+				                {end_imu_bias_block.anchorData(), nullptr},
+				            }),
 				        nullptr,                     //
 				        start_imu_bias_block.data(), //
 				        end_imu_bias_block.data())); //
@@ -1937,10 +1948,11 @@ struct SensorFusionProblem
 					blocks.keyframe_marginalization_residuals[keyframe_idx].push_back(
 					    problem.AddResidualBlock(
 					        anchorJacobians(
-					            new ImuBiasAnchorCostFunction(new ImuBiasAnchorCostFunctor(
-					                {ImuBias<double>(map_vec3_f64(latest_imu_calib.accel_bias),
-					                                 map_vec3_f64(latest_imu_calib.gyro_bias),
-					                                 map_vec3_f64(latest_imu_calib.accel_scale))})),
+					            new ImuBiasAnchorCostFunction(new ImuBiasAnchorCostFunctor({
+					                ImuBias<double>(map_vec3_f64(latest_imu_calib.accel_bias),
+					                                map_vec3_f64(latest_imu_calib.gyro_bias),
+					                                map_vec3_f64(latest_imu_calib.accel_scale)),
+					            })),
 					            {{oldest_bias.anchorData(), nullptr}}), //
 					        nullptr,                                    //
 					        oldest_bias.data()));                       //
@@ -2265,10 +2277,13 @@ struct SensorFusionProblem
 					const double *linearization_point =
 					    anchored != nullptr ? anchored : connected_parameter;
 
-					this->prior.blocks.push_back(
-					    {ref,
-					     {linearization_point,
-					      linearization_point + ambientSizeForKind(ref.kind)}});
+					this->prior.blocks.push_back({
+					    ref,
+					    {
+					        linearization_point,
+					        linearization_point + ambientSizeForKind(ref.kind),
+					    },
+					});
 				}
 
 				if (!blocks_resolved) {
