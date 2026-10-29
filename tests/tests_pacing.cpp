@@ -494,3 +494,147 @@ TEST_CASE("Refresh period updates preserve budget, offset and phase")
 		u_pc_destroy(&pc);
 	}
 }
+
+namespace {
+
+struct AppCadenceResult
+{
+	int frames{0};
+	int off_cadence{0};
+	int64_t min_step{INT64_MAX};
+	int64_t max_step{0};
+};
+
+/*
+ * Deterministic model of a GPU-bound application under the multi compositor:
+ * the compositor samples every display period, the app's CPU work does not
+ * wait for its own GPU work, and GPU work is serialized on one queue.
+ */
+AppCadenceResult
+run_app_cadence(int64_t period_ns,
+                int64_t extra_ns,
+                int64_t cpu_ns,
+                int64_t draw_ns,
+                int64_t gpu_ns,
+                int64_t post_ns,
+                int64_t expected_periods,
+                int64_t jitter_ns = 0)
+{
+	uint32_t lcg = 12345;
+	auto jitter = [&]() -> int64_t {
+		if (jitter_ns == 0) {
+			return 0;
+		}
+		lcg = lcg * 1664525u + 1013904223u;
+		return (int64_t)(lcg >> 8) % jitter_ns;
+	};
+	struct u_pacing_app *upa = nullptr;
+	struct u_pacing_app_factory *upaf = nullptr;
+	REQUIRE(u_pa_factory_create(&upaf) == XRT_SUCCESS);
+	u_paf_create(upaf, &upa);
+	REQUIRE(upa != nullptr);
+
+	const int64_t origin_ns = 1000000000;
+	int64_t now_ns = origin_ns;
+	int64_t gpu_free_ns = 0;
+	int64_t last_info_k = -1;
+	std::queue<std::pair<int64_t, int64_t>> gpu_done; // (when, frame id)
+
+	auto feed = [&](int64_t until_ns) {
+		// Compositor wakes at k * period - extra and predicts display at k * period.
+		int64_t k = (until_ns + extra_ns) / period_ns;
+		while (!gpu_done.empty() && gpu_done.front().first <= until_ns) {
+			u_pa_mark_gpu_done(upa, gpu_done.front().second, gpu_done.front().first);
+			gpu_done.pop();
+		}
+		if (k != last_info_k) {
+			u_pa_info(upa, k * period_ns, period_ns, extra_ns);
+			last_info_k = k;
+		}
+	};
+
+	AppCadenceResult r;
+	int64_t last_display_ns = 0;
+	for (int i = 0; i < 400; i++) {
+		feed(now_ns);
+		int64_t frame_id, wake_ns, display_ns, app_period_ns;
+		u_pa_predict(upa, now_ns, &frame_id, &wake_ns, &display_ns, &app_period_ns);
+		if (wake_ns > now_ns) {
+			now_ns = wake_ns;
+		}
+		feed(now_ns);
+		u_pa_mark_point(upa, frame_id, U_TIMING_POINT_WAKE_UP, now_ns);
+		now_ns += cpu_ns + jitter();
+		u_pa_mark_point(upa, frame_id, U_TIMING_POINT_BEGIN, now_ns);
+		now_ns += draw_ns;
+		u_pa_mark_delivered(upa, frame_id, now_ns, display_ns);
+		gpu_free_ns = std::max(gpu_free_ns, now_ns) + gpu_ns + jitter();
+		gpu_done.push({gpu_free_ns, frame_id});
+		now_ns += post_ns + jitter();
+
+		if (i >= 100) {
+			int64_t step = display_ns - last_display_ns;
+			r.frames++;
+			r.min_step = std::min(r.min_step, step);
+			r.max_step = std::max(r.max_step, step);
+			int64_t periods = (step + period_ns / 2) / period_ns;
+			if (periods != expected_periods) {
+				r.off_cadence++;
+			}
+		}
+		last_display_ns = display_ns;
+	}
+
+	u_pa_destroy(&upa);
+	u_paf_destroy(&upaf);
+	return r;
+}
+
+} // namespace
+
+TEST_CASE("u_pacing_app keeps a steady divisor for GPU-bound apps")
+{
+	const int64_t period_ns = 8333333; // 120 Hz
+	const int64_t ms = 1000000;
+
+	struct Case
+	{
+		int64_t gpu_ns;
+		int64_t expected_periods;
+	} cases[] = {
+	    {6 * ms, 1},  // fits a single refresh
+	    {10 * ms, 2}, // Alyx-like heavy scene: should hold 60 fps
+	    {12 * ms, 2},
+	    {15 * ms, 2},
+	    {18 * ms, 3},
+	};
+
+	for (const Case &c : cases) {
+		for (int64_t extra_ms : {2, 4, 5, 7}) {
+			for (int64_t post_us : {300, 1000, 2500, 4000}) {
+				AppCadenceResult r = run_app_cadence(period_ns, extra_ms * ms, 3 * ms, ms / 2, c.gpu_ns,
+				                                     post_us * 1000, c.expected_periods);
+				INFO("gpu " << c.gpu_ns / ms << " ms, compositor extra " << extra_ms << " ms, post "
+				            << post_us << " us: " << r.off_cadence << "/" << r.frames
+				            << " frames off cadence, steps " << r.min_step << ".." << r.max_step);
+				CHECK(r.off_cadence == 0);
+			}
+		}
+	}
+}
+
+TEST_CASE("u_pacing_app holds 60 Hz on a 120 Hz display with jittery GPU-bound frames")
+{
+	const int64_t period_ns = 8333333;
+	const int64_t ms = 1000000;
+	for (int64_t gpu_ms : {10, 11, 12}) {
+		for (int64_t post_ms : {1, 2, 3, 4}) {
+			// Up to 1.5 ms of extra CPU, GPU and post-frame time per frame.
+			AppCadenceResult r =
+			    run_app_cadence(period_ns, 5 * ms, 3 * ms, ms / 2, gpu_ms * ms, post_ms * ms, 2, 3 * ms / 2);
+			INFO("gpu " << gpu_ms << " ms, post " << post_ms << " ms: " << r.off_cadence << "/" << r.frames
+			            << " frames off cadence, steps " << r.min_step << ".." << r.max_step);
+			CHECK(r.off_cadence <= r.frames / 20);
+		}
+	}
+}

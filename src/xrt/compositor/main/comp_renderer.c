@@ -18,6 +18,7 @@
 #include "xrt/xrt_results.h"
 
 #include "os/os_time.h"
+#include "util/u_session_mark.h"
 #include "util/u_time.h"
 
 #include "math/m_api.h"
@@ -2080,7 +2081,8 @@ comp_renderer_draw(struct comp_renderer *r)
 		    frame_id,                  //
 		    predicted_display_time_ns, //
 		    rsci->image,               //
-		    rsci->srgb_view,           //
+		    // A mark capture keeps the stored (sRGB-encoded) bytes.
+		    u_session_mark_capture_pending() ? rsci->unorm_view : rsci->srgb_view, //
 		    clamp_to_edge,             //
 		    extent,                    //
 		    rect);                     //
