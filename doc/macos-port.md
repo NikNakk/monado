@@ -6,6 +6,15 @@ SPDX-License-Identifier: BSL-1.0
 
 # macOS / PS VR2 Port Status
 
+The [WSI KK follow-up](macos-wsi-kk-followup.md) tests explicit WSI graphics and
+compute paths and removes a service-only dependency on GOOGLE display timing.
+Hosted/adaptive feedback gates and native runtime defaults remain unchanged.
+
+The isolated [KK compositor follow-up](macos-kk-compositor-followup.md) adds an
+opt-in private-scratch path and records timestamp and host-event compatibility
+gates. Desktop Alyx reaches the single-projection fast path; headset acceptance
+and an installed compositor driver change remain outstanding (24 October 2026).
+
 The [native Alyx launch correction](macos-alyx-open-file-limit.md) raises the
 client's inherited file budget and restores desktop Qwerty controllers. The
 user reaches the usual level with the clean KK driver and custom resolve off.

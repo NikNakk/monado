@@ -354,8 +354,16 @@ init_surface(struct comp_target *ct, uint32_t width, uint32_t height)
 	struct comp_window_macos_wsi *w = from_target(ct);
 	struct vk_bundle *vk = &ct->c->base.vk;
 	if (!vk->has_GOOGLE_display_timing) {
-		COMP_ERROR(ct->c, "Generic WSI comparison requires GOOGLE display timing");
-		return false;
+		if (w->hosted_client != NULL || w->adaptive) {
+			COMP_ERROR(
+			    ct->c,
+			    "Hosted or adaptive WSI requires presentation feedback; GOOGLE display timing unavailable");
+			return false;
+		}
+		w->calibrate = false;
+		COMP_WARN(
+		    ct->c,
+		    "WSI presentation feedback unavailable: retaining CVDisplayLink pacing without offset calibration");
 	}
 	// Same XRT_MACOS_GPU_QUEUE_PRIORITY handling as the native target; MoltenVK presents on this queue.
 	comp_metal_gpu_priority_apply(vk, NULL);
@@ -577,7 +585,9 @@ create_images(struct comp_target *ct, const struct comp_target_create_images_inf
 	struct vk_bundle *vk = &ct->c->base.vk;
 	VkRefreshCycleDurationGOOGLE duration = {0};
 	PFN_vkGetRefreshCycleDurationGOOGLE get_refresh =
-	    (PFN_vkGetRefreshCycleDurationGOOGLE)vk->vkGetDeviceProcAddr(vk->device, "vkGetRefreshCycleDurationGOOGLE");
+	    vk->has_GOOGLE_display_timing ? (PFN_vkGetRefreshCycleDurationGOOGLE)vk->vkGetDeviceProcAddr(
+	                                        vk->device, "vkGetRefreshCycleDurationGOOGLE")
+	                                  : NULL;
 	VkResult ret = get_refresh != NULL ? get_refresh(vk->device, w->base.swapchain.handle, &duration)
 	                                   : VK_ERROR_EXTENSION_NOT_PRESENT;
 	if (ret == VK_SUCCESS && w->refresh != NULL) {
