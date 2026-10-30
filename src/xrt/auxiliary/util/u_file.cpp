@@ -142,4 +142,11 @@ u_file_open_file_in_config_dir(const char *filename, const char *mode)
 	return nullptr;
 }
 
+FILE *
+u_file_open_file_in_config_dir_subpath(const char *subpath, const char *filename, const char *mode)
+{
+	auto path_string = (fs::path(subpath) / filename).string();
+	return u_file_open_file_in_config_dir(path_string.c_str(), mode);
+}
+
 #endif // !XRT_OS_LINUX
