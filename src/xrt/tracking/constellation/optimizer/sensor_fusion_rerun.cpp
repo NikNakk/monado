@@ -40,6 +40,7 @@ constexpr std::string kSummaryEntityName = "summary";
 constexpr std::string kSolverMetricsEntityName = "metrics/solver";
 constexpr std::string kSolveTimelineName = "solves";
 constexpr std::string kTimeTimelineName = "fusion_time";
+constexpr std::string kDeviceMetricsEntityName = "metrics/device";
 
 std::string
 getCameraObservationEntityName(size_t mosaic_idx, size_t camera_idx)
@@ -75,15 +76,9 @@ getDeviceImuEntityName()
 }
 
 std::string
-getDeviceMetricsEntityName(t_constellation_device_id_t device_id)
+getCameraMetricsEntityName(size_t mosaic_idx, size_t camera_idx)
 {
-	return std::format("metrics/devices/{}", device_id);
-}
-
-std::string
-getCameraMetricsEntityName(size_t mosaic_idx, size_t camera_idx, t_constellation_device_id_t device_id)
-{
-	return std::format("metrics/cameras/{}/{}/{}", mosaic_idx, camera_idx, device_id);
+	return std::format("metrics/cameras/{}/{}", mosaic_idx, camera_idx);
 }
 
 
@@ -332,7 +327,7 @@ RerunContext::logDeviceMetrics(const SolveSnapshot &snapshot)
 		return;
 	}
 
-	const std::string metrics = getDeviceMetricsEntityName(device.id);
+	const std::string metrics = kDeviceMetricsEntityName;
 
 	this->stream->log(metrics + "/states_in_solve",
 	                  rerun::Scalars(static_cast<double>(std::popcount(device.keyframe_mask))));
@@ -419,7 +414,6 @@ RerunContext::logObservations(const SolveSnapshot &snapshot)
 
 	for (uint32_t i = 0; i < keyframe.num_observations; i++) {
 		const SnapshotObservation &observation = keyframe.observations[i];
-		const SnapshotDevice &device = snapshot.device;
 
 		const std::string observation_entity =
 		    getCameraObservationEntityName(observation.mosaic_idx, observation.camera_idx);
@@ -456,7 +450,7 @@ RerunContext::logObservations(const SolveSnapshot &snapshot)
 		);                                                                                        //
 
 		const std::string camera_metrics =
-		    getCameraMetricsEntityName(observation.mosaic_idx, observation.camera_idx, device.id);
+		    getCameraMetricsEntityName(observation.mosaic_idx, observation.camera_idx);
 
 		const t_camera_model_params &dist =
 		    kOptimizeUndistortedPoints ? observation.params.calib_pinhole : observation.params.calib_true;
