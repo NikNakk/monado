@@ -2434,10 +2434,12 @@ SensorFusion::pullReadyCameraSamplesLocked(timepoint_ns now_ns, std::vector<cons
  */
 
 SensorFusion::SensorFusion(ceres::Context *context,
+                           bool deterministic,
                            t_constellation_device_id_t id,
                            const t_constellation_tracker_led_model *led_model)
     : context(context),                                    //
       log_level(debug_get_log_option_sensor_fusion_log()), //
+      deterministic(deterministic),                        //
       device(id, led_model),                               //
       sample_queue()                                       //
 {
@@ -2460,7 +2462,9 @@ SensorFusion::SensorFusion(ceres::Context *context,
 
 	// Everything the fusion thread touches has to exist before it is let loose on it.
 	os_thread_helper_init(&this->thread);
-	os_thread_helper_start(&this->thread, thread_runner, this);
+	if (!deterministic) {
+		os_thread_helper_start(&this->thread, thread_runner, this);
+	}
 }
 
 SensorFusion::~SensorFusion()
@@ -2533,6 +2537,14 @@ SensorFusion::pushCameraSample(constellation::ConstellationTracker *tracker, con
 
 	SF_TRACE(this, "Camera sample %u/%u at %" PRIi64 " pushed.", sample.mosaic_index, sample.camera_index,
 	         sample.timestamp_ns);
+
+	if (this->deterministic) {
+		// Mirror the fusion thread's pass, which dead reckons to the newest IMU before folding samples in.
+		this->updateDeviceRelationHistoryLocked();
+		this->processCameraSampleLocked(sample);
+		this->tickLocked(true);
+		return;
+	}
 
 	os_thread_helper_lock(&this->thread);
 
@@ -2724,6 +2736,13 @@ SensorFusion::pushImuSample(const xrt_imu_sample &xr_sample)
 	 */
 	this->device.latest_imu_ts_ns.store(xr_sample.timestamp_ns, std::memory_order_release);
 
+	if (this->deterministic) {
+		// Dead reckon on IMU samples
+		this->updateDeviceRelationHistoryLocked();
+		this->tickLocked(false);
+		return;
+	}
+
 	// Lock the thread to make sure it's woken.
 	os_thread_helper_lock(&this->thread);
 	this->wakeThreadLocked();
@@ -2776,7 +2795,7 @@ SensorFusion::resetLocked()
 	this->device.resetLocked();
 }
 
-void
+bool
 SensorFusion::preintegrateDeviceLocked(bool &work_remaining)
 {
 	const auto &imu_calibration = this->device.getLatestImuCalibration();
@@ -2785,6 +2804,8 @@ SensorFusion::preintegrateDeviceLocked(bool &work_remaining)
 	                                           map_vec3_f64(imu_calibration.gyro_bias),   //
 	                                           map_vec3_f64(imu_calibration.accel_scale)) //
 	                               .seed();
+
+	bool interval_closed = false;
 
 	/*
 	 * `age` names the keyframe an interval *ends* at, so the oldest keyframe in the window is skipped:
@@ -2889,10 +2910,13 @@ SensorFusion::preintegrateDeviceLocked(bool &work_remaining)
 		                                                 end_keyframe.timestamp_ns);                   //
 
 		preintegration.state = DevicePreintegrationState::Integrated;
+		interval_closed = true;
 
 		SF_TRACE(this, "Preintegrated IMU between %" PRIi64 " and %" PRIi64 ". (dt %lf)",
 		         start_keyframe->timestamp_ns, end_keyframe.timestamp_ns, preintegration.imu_preintegration.dt);
 	}
+
+	return interval_closed;
 }
 
 bool
@@ -2970,7 +2994,10 @@ SensorFusion::tickLocked(bool have_new_input)
 	 */
 	bool work_remaining = false;
 
-	this->preintegrateDeviceLocked(work_remaining);
+	// If preintegration closed an interval, we need to do a solve.
+	if (this->preintegrateDeviceLocked(work_remaining)) {
+		have_new_input = true;
+	}
 
 	/*
 	 * Deliberately not gated on `work_remaining`. buildLocked() already leaves an interval that has not integrated
@@ -3016,7 +3043,8 @@ SensorFusion::tickLocked(bool have_new_input)
 	 *
 	 * @todo This math fails when multiple fusion instances are running, fix that.
 	 */
-	options.num_threads = MAX(1, static_cast<int>(std::thread::hardware_concurrency()) - 2);
+	options.num_threads =
+	    this->deterministic ? 1 : MAX(1, static_cast<int>(std::thread::hardware_concurrency()) - 2);
 
 	// @todo Tune the solve exit tolerances to actual numbers.
 

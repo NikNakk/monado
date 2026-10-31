@@ -426,6 +426,9 @@ public: // Fields
 
 	u_logging_level log_level;
 
+	//! Whether we're in single threaded mode
+	bool deterministic;
+
 	/*!
 	 * The fusion thread, lock does not protect fusion operations, only threading operations like
 	 * wakeup and inter-thread sample transfer.
@@ -534,8 +537,10 @@ private: // Methods
 	 * Integrates every dirty IMU interval of the device.
 	 *
 	 * @param[in,out] work_remaining Set when an interval could not be integrated yet and has to be retried.
+	 *
+	 * @returns When an interval was closed and it's worth a fusion run.
 	 */
-	void
+	bool
 	preintegrateDeviceLocked(bool &work_remaining);
 
 	//! Triggers the sensor fusion to reset it's state
@@ -543,7 +548,17 @@ private: // Methods
 	resetLocked();
 
 public: // Methods
+	/*!
+	 * Constructs a new constellation tracker.
+	 *
+	 * @param context       The Ceres context to use
+	 * @param deterministic Whether to not startup a separate thread, and run the fusion on the same
+	 *                      thread as the callee's push functions.
+	 * @param id            The ID of the constellation device
+	 * @param led_model     The LED model of the device
+	 */
 	SensorFusion(ceres::Context *context,
+	             bool deterministic,
 	             t_constellation_device_id_t id,
 	             const t_constellation_tracker_led_model *led_model);
 

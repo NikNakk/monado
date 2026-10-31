@@ -459,7 +459,6 @@ public: // Fields
 
 	t_constellation_tracker_params params;
 
-	bool single_threaded{false};
 	bool deterministic{false};
 
 	std::vector<std::shared_ptr<CameraMosaic>> mosaics;

@@ -298,7 +298,7 @@ Camera::Camera(ConstellationTracker *tracker,
 	this->slow_processing_thread_data.cs = correspondence_search_new(log_level_ptr, &this->model);
 	this->fast_processing_thread_data.cs = correspondence_search_new(log_level_ptr, &this->model);
 
-	if (!this->tracker->single_threaded) {
+	if (!this->tracker->deterministic) {
 		if (os_thread_helper_init(&this->slow_processing_thread) < 0) {
 			throw std::runtime_error("Slow processing thread failed to init");
 		}
@@ -1271,7 +1271,6 @@ ConstellationTracker::ConstellationTracker(t_constellation_tracker_params *param
 
 	// If the deterministic flag is set, we enable single-threaded processing, and mark it as deterministic.
 	if ((params->flags & T_CONSTELLATION_TRACKER_FLAGS_DETERMINISTIC) != 0) {
-		this->single_threaded = true;
 		this->deterministic = true;
 	}
 
@@ -1507,6 +1506,7 @@ ConstellationTracker::addDevice(t_constellation_tracker_device_params *params, t
 
 	new_device->sensor_fusion = std::make_unique<sensor_fusion::SensorFusion>( //
 	    this->ceres_context.get(),                                             //
+	    this->deterministic,                                                   //
 	    id,                                                                    //
 	    new_device->search_model->led_model);                                  //
 
@@ -1650,7 +1650,7 @@ constellation_tracker_camera_push_blobs(t_blob_sink *tbs, t_blob_observation *tb
 		return;
 	}
 
-	if (tracker->single_threaded) {
+	if (tracker->deterministic) {
 		auto sample = CameraSample(*tbo, camera);
 
 		// If we're in single-threaded mode, just process the sample immediately on the fast thread
