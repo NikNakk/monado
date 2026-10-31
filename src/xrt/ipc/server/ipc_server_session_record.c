@@ -197,6 +197,13 @@ write_sample(struct ipc_server_session_record *rec)
 	int64_t now_ns = os_monotonic_get_ns();
 	FILE *f = rec->file;
 	fprintf(f, "{\"t\":%.4f", time_ns_to_s(now_ns - rec->start_ns));
+	if (s->xso->semantic.stage != NULL) {
+		struct xrt_space_relation stage = XRT_SPACE_RELATION_ZERO;
+		xrt_space_overseer_locate_space(s->xso, s->xso->semantic.root, &(struct xrt_pose)XRT_POSE_IDENTITY,
+		                                now_ns, s->xso->semantic.stage, &(struct xrt_pose)XRT_POSE_IDENTITY, &stage);
+		fprintf(f, ",\"stage\":");
+		write_pose(f, &stage);
+	}
 
 	struct xrt_device *head = xsysd->static_roles.head;
 	if (head != NULL && rec->head_space != NULL) {
@@ -325,7 +332,7 @@ ipc_server_session_record_start(struct ipc_server *s)
 	localtime_r(&wall.tv_sec, &tm_local);
 	char stamp[64];
 	strftime(stamp, sizeof(stamp), "%Y-%m-%dT%H:%M:%S", &tm_local);
-	fprintf(rec->file, "{\"format\":\"monado-session-record\",\"version\":1,\"start_wall\":\"%s.%03ld\",\"head\":\"%s\"}\n",
+	fprintf(rec->file, "{\"format\":\"monado-session-record\",\"version\":2,\"pose_space\":\"root\",\"start_wall\":\"%s.%03ld\",\"head\":\"%s\"}\n",
 	        stamp, wall.tv_nsec / 1000000, head != NULL ? head->str : "");
 
 	if (os_thread_helper_init(&rec->oth) != 0 || os_thread_helper_start(&rec->oth, run_session_record, rec) != 0) {
