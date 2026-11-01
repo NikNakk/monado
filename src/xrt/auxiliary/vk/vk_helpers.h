@@ -796,7 +796,7 @@ XRT_CHECK_RESULT VkResult
 vk_create_device(struct vk_bundle *vk,
                  int forced_index,
                  bool only_compute,
-                 VkQueueGlobalPriorityEXT global_priority,
+                 bool realtime_priority,
                  struct u_extension_list *required_device_ext_list,
                  struct u_extension_list *optional_device_ext_list,
                  const struct vk_device_features *optional_device_features);

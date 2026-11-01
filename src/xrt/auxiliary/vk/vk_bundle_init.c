@@ -874,6 +874,34 @@ vk_insert_get_queue(struct vk_bundle *vk, const struct vk_queue_pair *new_queue)
 	return NULL;
 }
 
+static void
+select_queue_priorities(struct vk_bundle *vk,
+                        bool realtime_priority,
+                        const VkQueueGlobalPriorityEXT **out_prios,
+                        uint32_t *out_prio_count)
+{
+	static const VkQueueGlobalPriorityEXT realtime_prios[] = {
+	    VK_QUEUE_GLOBAL_PRIORITY_REALTIME_EXT, // This is the one we really want.
+	    VK_QUEUE_GLOBAL_PRIORITY_HIGH_EXT,     // Probably not as good but something.
+	    VK_QUEUE_GLOBAL_PRIORITY_MEDIUM_EXT,   // Default fallback.
+	};
+
+	static const VkQueueGlobalPriorityEXT medium_prios[] = {
+	    VK_QUEUE_GLOBAL_PRIORITY_MEDIUM_EXT,
+	};
+
+	// If we don't have global priority, only allow medium priority queues.
+	bool try_realtime = realtime_priority && (vk->has_EXT_global_priority || vk->has_KHR_global_priority);
+
+	if (try_realtime) {
+		*out_prios = realtime_prios;
+		*out_prio_count = ARRAY_SIZE(realtime_prios);
+	} else {
+		*out_prios = medium_prios;
+		*out_prio_count = ARRAY_SIZE(medium_prios);
+	}
+}
+
 
 /*
  *
@@ -891,7 +919,7 @@ XRT_CHECK_RESULT VkResult
 vk_create_device(struct vk_bundle *vk,
                  int forced_index,
                  bool only_compute,
-                 VkQueueGlobalPriorityEXT global_priority,
+                 bool realtime_priority,
                  struct u_extension_list *required_device_ext_list,
                  struct u_extension_list *optional_device_ext_list,
                  const struct vk_device_features *optional_device_features)
@@ -935,14 +963,6 @@ vk_create_device(struct vk_bundle *vk,
 	 * Queue
 	 */
 
-	// If we don't have global priority, only allow medium priority queues.
-	if (!vk->has_EXT_global_priority && //
-	    !vk->has_KHR_global_priority && //
-	    global_priority != VK_QUEUE_GLOBAL_PRIORITY_MEDIUM_EXT) {
-		ret = VK_ERROR_NOT_PERMITTED_EXT;
-		goto err_destroy;
-	}
-
 	vk_reset_queues(vk);
 
 	// To builde the queue create
@@ -984,7 +1004,6 @@ vk_create_device(struct vk_bundle *vk,
 	VkDeviceQueueGlobalPriorityCreateInfoEXT priority_info = {
 	    .sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_GLOBAL_PRIORITY_CREATE_INFO_EXT,
 	    .pNext = NULL,
-	    .globalPriority = global_priority,
 	};
 
 #ifdef VK_KHR_video_encode_queue
@@ -1189,17 +1208,30 @@ vk_create_device(struct vk_bundle *vk,
 	}
 #endif
 
-	ret = vk->vkCreateDevice(vk->physical_device, &device_create_info, NULL, &vk->device);
+	const VkQueueGlobalPriorityEXT *prios = NULL;
+	uint32_t prio_count = 0;
+	select_queue_priorities(vk, realtime_priority, &prios, &prio_count);
+
+	// No other way then to try to see if realtime is available.
+	for (uint32_t i = 0; i < prio_count; i++) {
+		priority_info.globalPriority = prios[i];
+
+		ret = vk->vkCreateDevice(vk->physical_device, &device_create_info, NULL, &vk->device);
+		if (ret != VK_ERROR_NOT_PERMITTED_EXT) {
+			break;
+		}
+
+		// Don't spam the not permitted returns as we try all of the different priorities.
+		VK_DEBUG(vk, "Is CAP_SYS_NICE set? Try: sudo setcap cap_sys_nice+ep monado-service");
+	}
 
 	// Destroy the list now.
 	u_extension_list_destroy(&device_ext_list);
 
-	if (ret == VK_ERROR_NOT_PERMITTED_EXT) {
-		// Don't spam the not permitted returns as we try all of the different priorities.
-		VK_DEBUG(vk, "Is CAP_SYS_NICE set? Try: sudo setcap cap_sys_nice+ep monado-service");
-		goto err_destroy;
-	}
 	VK_CHK_WITH_GOTO(ret, "vkCreateDevice", err_destroy);
+
+	VK_INFO(vk, "Created device and %s queue with %s.", only_compute ? "COMPUTE" : "GRAPHICS",
+	        vk_queue_priority_string(priority_info.globalPriority));
 
 	// Fill in the device features we are interested in.
 	fill_in_device_features(vk, main_queue.family_index);
