@@ -16,7 +16,13 @@
  * @ingroup aux_vk
  */
 
+#include "xrt/xrt_config_os.h"
+
 #include "util/u_pretty_print.h"
+
+#ifdef XRT_OS_WINDOWS
+#include "util/u_windows.h"
+#endif
 
 #include "vk/vk_compositor_flags.h"
 #include "vk/vk_helpers.h"
@@ -892,6 +898,10 @@ select_queue_priorities(struct vk_bundle *vk,
 
 	// If we don't have global priority, only allow medium priority queues.
 	bool try_realtime = realtime_priority && (vk->has_EXT_global_priority || vk->has_KHR_global_priority);
+#ifdef XRT_OS_WINDOWS
+	// NVIDIA needs SeIncreaseBasePriorityPrivilege for HIGH and REALTIME queues.
+	try_realtime = try_realtime && u_win_grant_inc_base_priorty_base_privileges(vk->log_level);
+#endif
 
 	if (try_realtime) {
 		*out_prios = realtime_prios;
