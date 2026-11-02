@@ -69,7 +69,8 @@ The contribution workflow pins clang-format 23.1.1, cmakelang 0.6.13, codespell
 
 ```sh
 python scripts/check-contribution-style.py
-reuse lint
+python -m unittest discover -s tests -p test_contribution_licenses.py
+python scripts/check-contribution-licenses.py
 ```
 
 The style check covers files changed relative to the sync base, including
@@ -79,6 +80,56 @@ Linux and macOS; Windows runs native tests, including synchronous pipe shutdown.
 Wine bridge owns and tests its authenticated loopback handshake separately.
 Android API 26/NDK r26d builds cover
 `armeabi-v7a` and `arm64-v8a`, matching upstream's native configurations.
+
+### Historical evidence and external patches
+
+Source files, tools and explanatory documents carry their real copyright and
+license information. The source-license checker runs every standard REUSE lint
+criterion on a temporary view of tracked files and non-ignored new files. It
+retains the existing `LICENSES/` and `.reuse/dep5` metadata and excludes only the
+six historical archive directories named in
+[`ARCHIVE_DIRECTORIES`](../scripts/check-contribution-licenses.py): the five
+`doc/alyx-*-results/` archives listed there and
+`experiments/alyx-vulkan/patches/`. This is an explicit directory list, not a
+wildcard exclusion of logs, JSON, patches, tests or source directories. An
+unlicensed file elsewhere continues to fail CI, including a new test fixture
+or ordinary log. Scope regressions exercise these failures using actual REUSE.
+
+Archived captures may contain third-party diagnostic output; external patches
+may contain MIT, GPL or other source and context. Preserve their bytes and
+provenance rather than applying a blanket Monado license or public-domain
+dedication to make a scanner pass. Existing archive contents remain tracked
+and are not rewritten by the checker. Future generated captures should normally
+stay in ignored result directories or be published separately with stable
+references and provenance; keep human-authored explanations in licensed docs.
+Any expansion of the archive list requires an explicit review of its scope.
+
+The checker validates this source scope only. A plain `reuse lint` at the
+repository root remains the stricter whole-repository archival audit and can
+still report missing archive metadata or license texts referenced inside
+external patches. Passing source CI does not claim full-repository REUSE
+compliance or resolve the archives' licensing. A separate evidence repository
+or versioned artifact archive is the long-term destination for material not
+intended for submission; do not rewrite history or break existing evidence
+links merely to remove it from this fork. The upstream submission series is
+still prepared independently in `~/Code/monado-upstreaming` and does not include
+these historical archives.
+
+### Formatting and metadata cleanup, 2026-11-02
+
+The 17 previously flagged source/experiment files now match clang-format
+23.1.1. Comparing Clang's raw tokens before and after, ignoring comments and
+whitespace and joining adjacent string literals, confirms equivalent tokens
+in all 17 files. In particular, the Sense/constellation formatting does not
+change tracking behaviour. Three Monado Markdown documents now have separate,
+recognised SPDX copyright/license lines, and the benchmark `.gitignore` has
+its own header. Historical logs, results and third-party patches are unchanged.
+
+The complete fork formatting/spelling/whitespace check passes, the six
+source-scope regression tests pass, and source-scope REUSE validation passes.
+The native rebuild succeeds and all 94 macOS tests pass (41.16 s), including
+the isolated service tests. Installed runtimes and registered services are
+unchanged; no headset run or push is part of this cleanup.
 
 The macOS context/host smoke test checks runtime compatibility on CI macOS
 versions and skips when the private interfaces are absent. It does not establish
