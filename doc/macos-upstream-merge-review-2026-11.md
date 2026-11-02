@@ -130,9 +130,12 @@ and REUSE 6.2.0. The contribution-check base is updated to `db1903bd4`.
 Formatting/spelling for merge-changed files passes. The full fork-wide check
 still reports pre-existing formatting in unchanged experiment, compositor,
 tracking and QWERTY files; retained tracking source is not reformatted during
-this sync. REUSE reports 154 pre-existing files without metadata and a missing
-GPL-3.0-or-later license for an existing xrizer patch. All 154 files are
-byte-identical to the integration parent; none is introduced by this merge.
+this sync. REUSE reports 153 pre-existing files with incomplete metadata:
+147 lack both copyright and license information, three patches lack copyright
+information, and three Markdown files have unrecognised license headers.
+One additional xrizer patch references GPL-3.0-or-later without the matching
+license text in `LICENSES/`. All 154 flagged files are byte-identical to the
+integration parent; none is introduced by this merge.
 These existing contribution-check failures are not claimed as passing.
 
 No runtime is installed to the user's prefix, no registered service is
