@@ -307,12 +307,14 @@ write_launch_agent_plist(const char *path,
 			NSDictionary *saved = [NSDictionary dictionaryWithContentsOfFile:plist_path];
 			id environment = [saved objectForKey:@"EnvironmentVariables"];
 			if (saved == nil || (environment != nil && ![environment isKindOfClass:[NSDictionary class]])) {
-				fprintf(stderr, "Could not read existing LaunchAgent preferences; leaving plist unchanged\n");
+				fprintf(stderr,
+				        "Could not read existing LaunchAgent preferences; leaving plist unchanged\n");
 				return false;
 			}
 			saved_environment = environment;
 		}
-		NSDictionary *launch_environment = make_launch_environment(capture_current_environment, saved_environment);
+		NSDictionary *launch_environment =
+		    make_launch_environment(capture_current_environment, saved_environment);
 
 		if (exe == nil || plist_path == nil || label == nil || mach_service == nil || stdout_string == nil ||
 		    stderr_string == nil || launch_environment == nil) {

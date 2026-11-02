@@ -1,4 +1,7 @@
-<!-- Copyright 2026, Nick Kennedy; SPDX-License-Identifier: BSL-1.0 -->
+<!--
+SPDX-FileCopyrightText: 2026 Nick Kennedy
+SPDX-License-Identifier: BSL-1.0
+-->
 # Native ARM64 Alyx: first headset checkpoint — 20 October 2026
 
 Actual Valve Lua tests, engine/module constructor probes and a bounded headless

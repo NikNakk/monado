@@ -184,9 +184,9 @@ psvr2_passthrough_create_uv_maps(struct comp_psvr2_passthrough *pt)
 				map[index + 3] = tan_y_down;
 				if (calibrated) {
 					/* PS VR2 view orientations are identity relative to the head. At infinity,
-					 * eye/camera translations do not affect the ray; at a fixed depth the stored ray
-					 * becomes the camera-centred direction to that point, which GPU rotation then
-					 * uses unchanged (its translation is taken at the display pose). */
+					 * eye/camera translations do not affect the ray; at a fixed depth the stored
+					 * ray becomes the camera-centred direction to that point, which GPU rotation
+					 * then uses unchanged (its translation is taken at the display pose). */
 					struct xrt_vec3 eye_ray = {tan_x, -tan_y_down, -1.0f};
 					struct xrt_vec3 head_ray;
 					struct xrt_vec2 uv;
