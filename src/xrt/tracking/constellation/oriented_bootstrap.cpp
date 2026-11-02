@@ -166,8 +166,7 @@ prior_reacquire(const std::vector<JointSolveCamera> &cameras,
 	                        Tcv_world_orientation.z);
 	q_wd.normalize();
 	const Eigen::Matrix3d R_wd = q_wd.toRotationMatrix();
-	const Eigen::Vector3d prior(Tcv_world_position_prior.x, Tcv_world_position_prior.y,
-	                            Tcv_world_position_prior.z);
+	const Eigen::Vector3d prior(Tcv_world_position_prior.x, Tcv_world_position_prior.y, Tcv_world_position_prior.z);
 	const double margin = params.facing_margin_deg * M_PI / 180.0;
 
 	struct Candidate

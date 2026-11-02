@@ -2653,12 +2653,12 @@ append_controller_input_panels(application &app, const XrPosef &head_pose)
 		const bool have_pose = (flags & valid) == valid;
 		const bool tracking = have_pose && (flags & tracked) == tracked;
 		text(x, -0.33f, 0.80f, 0.0045f,
-		               tracking    ? "TRACKED"
-		               : have_pose ? "POSE ONLY"
-		                           : "NO POSE",
-		               tracking    ? on
-		               : have_pose ? off
-		                           : inactive);
+		     tracking    ? "TRACKED"
+		     : have_pose ? "POSE ONLY"
+		                 : "NO POSE",
+		     tracking    ? on
+		     : have_pose ? off
+		                 : inactive);
 	}
 	app.frame_instances.insert(app.frame_instances.end(), panel.world_instances.begin(),
 	                           panel.world_instances.end());
@@ -3430,7 +3430,10 @@ poll_terminal_controls(application &app)
 				}
 				app.controller_panel_scale = sizes[next];
 				fprintf(stderr, "psvr2-openxr-test: input panels %s\n",
-				        sizes[next] == 0.0f ? "hidden" : sizes[next] == 1.0f ? "100%" : sizes[next] == 0.5f ? "50%" : "30%");
+				        sizes[next] == 0.0f   ? "hidden"
+				        : sizes[next] == 1.0f ? "100%"
+				        : sizes[next] == 0.5f ? "50%"
+				                              : "30%");
 				continue;
 			}
 			if (!app.gaze_foveation) {
@@ -3602,8 +3605,8 @@ run(int argc, char **argv)
 			test_generic_controller = true;
 		} else if (strcmp(argv[i], "--panel-scale") == 0) {
 			char *end = nullptr;
-			if (i + 1 >= argc || (panel_scale = strtof(argv[++i], &end), *end != '\0') || !(panel_scale >= 0) ||
-			    panel_scale > 1)
+			if (i + 1 >= argc || (panel_scale = strtof(argv[++i], &end), *end != '\0') ||
+			    !(panel_scale >= 0) || panel_scale > 1)
 				fatal("--panel-scale requires a size from 0 (hidden) to 1 (full)");
 		} else if (strcmp(argv[i], "--animate") == 0) {
 			animate = true;
@@ -3636,7 +3639,8 @@ run(int argc, char **argv)
 			    stderr,
 			    "Usage: %s [--loader /path/to/libopenxr_loader.1.dylib] [--blendmode Opaque|AlphaBlend] "
 			    "[--depth-layer] "
-			    "[--passthrough|--passthrough-only] [--generic-controller [--panel-scale S]] [--controller-survey "
+			    "[--passthrough|--passthrough-only] [--generic-controller [--panel-scale S]] "
+			    "[--controller-survey "
 			    "NEW-DIRECTORY] [--animate] "
 			    "[--gaze|--gaze-calibrate|--gaze-foveation] "
 			    "[--fb-foveation|--fb-eye-foveation] [--fb-foveation-sparse-check] "
@@ -3650,7 +3654,8 @@ run(int argc, char **argv)
 			    "  --generic-controller validates XR_KHR_generic_controller on both hands and logs action "
 			    "state, draws controller poses and head-relative input panels (green pressed, red "
 			    "inactive).\n"
-			    "  --panel-scale S sizes those panels from 0 (hidden) to 1 (full, default); smaller panels sit "
+			    "  --panel-scale S sizes those panels from 0 (hidden) to 1 (full, default); smaller panels "
+			    "sit "
 			    "lower and further out. In a terminal, p cycles 100%%, 50%%, 30%% and hidden.\n"
 			    "  --controller-survey NEW-DIRECTORY guides both hands through 28 placement/occlusion "
 			    "trials, "

@@ -206,7 +206,7 @@ rift_sensor_thread_tick(struct rift_hmd *hmd)
 				        .sequence_id = hmd->exposure_counter,
 				        .timestamp_ns = local_exposure_time_ns,
 				        .recv_timestamp_ns = recv_time_ns,
-				    };
+				};
 				hmd->exposure_history_pushed++;
 			}
 			os_thread_helper_unlock(&hmd->sensor_thread);
