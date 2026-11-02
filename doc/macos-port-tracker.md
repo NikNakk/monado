@@ -170,7 +170,10 @@ Production Sense joint/EKF tracking is unchanged: the coupled upstream tracker
 migration and legacy-table removal are explicitly deferred. Upstream shutdown,
 IPC, generated-binding, manifest and Vulkan improvements are included. Native
 and x86-64 client builds pass; macOS passes 94/94 tests and Linux 58/58. See the
-review for validation details and existing contribution-check failures. Nothing is installed or
+review for validation details. The subsequent
+[source-check cleanup](macos-upstream-contribution.md#formatting-and-metadata-cleanup-2026-11-02)
+passes local formatting and source-license checks while preserving historical archives.
+Nothing is installed or
 pushed; headset validation and matching protocol rebuilds precede deployment.
 
 

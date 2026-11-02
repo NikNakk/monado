@@ -899,8 +899,10 @@ manifest and Vulkan improvements while deliberately deferring the coupled
 constellation fusion/API migration and legacy-table removal. Production Sense
 joint/EKF tracking, calibration, illumination and settings are unchanged.
 The native and x86-64 client builds pass; macOS passes 94/94 tests including
-isolated GPU service recovery, and Linux passes 58/58. The review records the
-pre-existing contribution-check failures. Nothing is installed or pushed;
+isolated GPU service recovery, and Linux passes 58/58. The subsequent
+[source-check cleanup](macos-upstream-contribution.md#formatting-and-metadata-cleanup-2026-11-02)
+fixes formatting and Monado metadata; CI uses an explicit license scope that
+preserves historical archives unchanged. Nothing is installed or pushed;
 matching service/client/proxy rebuilds and a user-operated headset check are
 required before deploying this source.
 

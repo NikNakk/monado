@@ -6,6 +6,12 @@ SPDX-License-Identifier: BSL-1.0
 
 # Upstream merge review and integration — 2026-11-02
 
+The subsequent [formatting and source-license cleanup](macos-upstream-contribution.md#formatting-and-metadata-cleanup-2026-11-02)
+resolves the source contribution-check failures described below. It preserves
+the archived evidence and external patches under an explicitly documented
+source-license scope. The raw whole-repository REUSE archival audit remains
+separate; passing source CI does not claim that every archive is licensed.
+
 ## Integration implementation
 
 The user authorised the merge with preservation of the proven Sense tracker.
