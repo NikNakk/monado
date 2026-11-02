@@ -16,6 +16,7 @@
 #include "shared/ipc_message_channel.h"
 #include "shared/ipc_protocol.h"
 #include "server/ipc_server.h"
+#include "server/ipc_server_handle_helpers.h"
 #include "server/ipc_server_objects.h"
 
 #include "ipc_server_generated.h"
@@ -152,6 +153,9 @@ ipc_handle_io_cache_read(volatile struct ipc_client_state *ics,
 		return XRT_SUCCESS;
 	}
 
+	ipc_server_client_filter_blocked_inputs(ics, inputs, input_count);
+	ipc_server_client_filter_blocked_outputs(ics, outputs, output_count);
+
 	if (input_count > 0) {
 		xret = ipc_send(imc, inputs, sizeof(struct xrt_input) * input_count);
 		// Connection error, disconnect the client.
@@ -214,7 +218,88 @@ ipc_handle_io_cache_set_output(volatile struct ipc_client_state *ics,
 	struct xrt_io_cache *xic = NULL;
 	GET_XIC_OR_RETURN(ics, id, xic);
 
+	xrt_result_t xret = ipc_server_validate_output_value(ics, value);
+	IPC_CHK_AND_RET(ics->server, xret, "ipc_server_validate_output_value");
+
+	if (ics->client_state.io_blocks.block_outputs) {
+		return XRT_SUCCESS;
+	}
+
 	return xrt_io_cache_set_output(xic, *device_id, name, value);
+}
+
+/*
+ * Exchanges several messages with the client, so only hold the global state
+ * lock around the cache call, never across the client socket I/O.
+ */
+xrt_result_t
+ipc_handle_io_cache_set_haptic_output(volatile struct ipc_client_state *ics,
+                                      uint32_t id,
+                                      const struct xrt_device_id *device_id,
+                                      enum xrt_output_name name,
+                                      const struct ipc_pcm_haptic_buffer *buffer)
+{
+	struct ipc_message_channel *imc = (struct ipc_message_channel *)&ics->imc;
+	struct ipc_io_cache_set_haptic_output_reply reply = XRT_STRUCT_INIT;
+	xrt_result_t xret = XRT_SUCCESS;
+	uint32_t samples_consumed = 0;
+	float *samples = NULL;
+
+	// Basic validation, failure will disconnect the client.
+	struct xrt_io_cache *xic = NULL;
+	GET_XIC_OR_RETURN(ics, id, xic);
+
+	xret = ipc_server_validate_pcm_haptic_buffer(ics, buffer);
+	IPC_CHK_AND_RET(ics->server, xret, "ipc_server_validate_pcm_haptic_buffer");
+
+	samples = U_TYPED_ARRAY_CALLOC(float, buffer->num_samples);
+	xrt_result_t alloc_xret = samples != NULL ? XRT_SUCCESS : XRT_ERROR_ALLOCATION;
+
+	// The client only sends the samples if the allocation succeeded.
+	xret = ipc_send(imc, &alloc_xret, sizeof(alloc_xret));
+	// Connection error, disconnect the client.
+	IPC_CHK_WITH_GOTO(ics->server, xret, "ipc_send(alloc_xret)", out);
+
+	if (samples == NULL) {
+		// Server error, the client has been told about it.
+		IPC_ERROR(ics->server, "Failed to allocate samples");
+		goto out;
+	}
+
+	xret = ipc_receive(imc, samples, sizeof(float) * buffer->num_samples);
+	// Connection error, disconnect the client.
+	IPC_CHK_WITH_GOTO(ics->server, xret, "ipc_receive(samples)", out);
+
+	// Serializes PCM output across clients. No client socket I/O while holding the global state lock.
+	os_mutex_lock(&ics->server->global_state.lock);
+
+	// Blocked outputs still take the PCM. The device is not asked to play it.
+	if (!ics->client_state.io_blocks.block_outputs) {
+		struct xrt_output_value value = {
+		    .type = XRT_OUTPUT_VALUE_TYPE_PCM_VIBRATION,
+		    .pcm_vibration =
+		        {
+		            .append = buffer->append,
+		            .buffer_size = buffer->num_samples,
+		            .sample_rate = buffer->sample_rate,
+		            .samples_consumed = &samples_consumed,
+		            .buffer = samples,
+		        },
+		};
+
+		reply.result = xrt_io_cache_set_output(xic, *device_id, name, &value);
+	}
+
+	os_mutex_unlock(&ics->server->global_state.lock);
+
+	reply.samples_consumed = samples_consumed;
+	xret = ipc_send(imc, &reply, sizeof(reply));
+	// Connection error, disconnect the client.
+	IPC_CHK_WITH_GOTO(ics->server, xret, "ipc_send(reply)", out);
+
+out:
+	FREE_AND_ZERO_MEMORY(samples);
+	return xret;
 }
 
 xrt_result_t

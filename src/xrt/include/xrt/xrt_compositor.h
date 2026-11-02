@@ -579,6 +579,14 @@ enum xrt_swapchain_create_flags
 	 * Not an OpenXR create flag or an advertised extension.
 	 */
 	XRT_SWAPCHAIN_CREATE_MACOS_THREE_IMAGES = (1u << 3u),
+	/*!
+	 * Signals that the allocator should prefer maximum performance when choosing the tiling
+	 * layout of the image.
+	 *
+	 * This flag must be mirrored when importing the image, either explicitly by specifying
+	 * the flag or implicitly by providing the drm format modifier to the receiving API.
+	 */
+	XRT_SWAPCHAIN_CREATE_TILING_MAX_PERFORMANCE = (1u << 4u),
 };
 
 /*!

@@ -41,6 +41,14 @@ struct b_app_instance
 	} app_systems;
 };
 
+struct b_app_system_event
+{
+	//! This event
+	struct xrt_app_system_event base;
+	//! The next event, or NULL if no event.
+	struct b_app_system_event *next;
+};
+
 /*!
  * @implements xrt_app_system
  */
@@ -54,8 +62,9 @@ struct b_app_system
 	//! The @ref xrt_system this is wrapping
 	struct xrt_system *xsys;
 
-	struct os_mutex view_config_mutex;
+	struct os_mutex mutex;
 	struct xrt_recommended_view_config view_configs[XRT_VIEW_TYPE_MAX];
+	struct b_app_system_event *events;
 };
 
 

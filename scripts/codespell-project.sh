@@ -1,5 +1,6 @@
 #!/bin/sh
 # Copyright 2019-2024, Collabora, Ltd.
+# Copyright 2026, NVIDIA CORPORATION.
 # SPDX-License-Identifier: BSL-1.0
 # Author: Rylie Pavlik <rylie.pavlik@collabora.com>
 
@@ -29,6 +30,7 @@ SCRIPTDIR=$(cd "$(dirname "$0")" && pwd)
         find \
                 ./*.md \
                 doc \
+                examples \
                 scripts/format-*.sh \
                 src/xrt \
                 \( -name "*.c" \
@@ -43,6 +45,9 @@ SCRIPTDIR=$(cd "$(dirname "$0")" && pwd)
                 -o -name "*.kt" \
                 -o -name "*.gradle" \
                 -o -name "CMakeLists.txt" \) \
+                -and -not \( -ipath \*/build/\* \) \
+                -and -not \( -ipath \*/.venv/\* \) \
+                -and -not \( -ipath \*/.cxx/\* \) \
                 -exec codespell \
                     "--exclude-file=${SCRIPTDIR}/monado-codespell.exclude" \
                     "--ignore-regex=${IGNORE_REGEX}" \

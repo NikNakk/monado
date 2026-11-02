@@ -74,3 +74,17 @@ TEST_CASE("ordinary shared memory keeps writable producer and consumer mappings"
 	static_cast<char *>(share.consumer)[0] = 0x42;
 	CHECK(static_cast<char *>(share.producer)[0] == 0x42);
 }
+
+TEST_CASE("ordinary shared memory allocations do not alias while both remain live")
+{
+	Share first;
+	Share second;
+	REQUIRE(ipc_shmem_create(first.size, &first.handle, &first.producer) == XRT_SUCCESS);
+	static_cast<char *>(first.producer)[0] = 0x42;
+	REQUIRE(ipc_shmem_create(second.size, &second.handle, &second.producer) == XRT_SUCCESS);
+	static_cast<char *>(second.producer)[0] = 0x21;
+	REQUIRE(ipc_shmem_map(first.handle, first.size, &first.consumer) == XRT_SUCCESS);
+	REQUIRE(ipc_shmem_map(second.handle, second.size, &second.consumer) == XRT_SUCCESS);
+	CHECK(static_cast<char *>(first.consumer)[0] == 0x42);
+	CHECK(static_cast<char *>(second.consumer)[0] == 0x21);
+}

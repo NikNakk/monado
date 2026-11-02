@@ -63,6 +63,7 @@ struct oxr_profile_resolver_info
  * @param registry             Binding registry, must not be NULL.
  * @param suggested_profiles   Suggested profiles, must not be NULL.
  * @param dev                  Cache device to resolve for, must not be NULL.
+ * @param subaction_path       Top-level path being resolved.
  * @param override_device_name Profile name to prefer before @p dev->name, can be XRT_DEVICE_INVALID.
  * @param info                 Binding information, must not be NULL.
  */
@@ -73,6 +74,7 @@ oxr_resolver_populate_profile(struct oxr_logger *log,
                               const struct oxr_suggested_profile_array *suggested_profiles,
                               const struct oxr_io_cache *cache,
                               const struct xrt_io_cache_device *dev,
+                              XrPath subaction_path,
                               enum xrt_device_name override_device_name,
                               struct oxr_profile_resolver_info *info);
 

@@ -532,9 +532,28 @@ ipc_client_hmd_get_visibility_mask(struct xrt_device *xdev,
 	xret = ipc_receive_device_get_visibility_mask_locked(ipc_c, &mask_size);
 	IPC_CHK_WITH_GOTO(ipc_c, xret, "ipc_receive_device_get_visibility_mask_locked", err_mask_unlock);
 
+	if (mask_size < sizeof(struct xrt_visibility_mask)) {
+		if (mask_size != 0) {
+			uint8_t discard[sizeof(struct xrt_visibility_mask)];
+
+			// The server sent these bytes. Read them before returning.
+			xret = ipc_receive(&ipc_c->imc, discard, mask_size);
+			IPC_CHK_WITH_GOTO(ipc_c, xret, "ipc_receive(discard visibility mask)", err_mask_unlock);
+		}
+
+		IPC_ERROR(ich->ipc_c, "visibility mask size %u is too small (need at least %zu)", mask_size,
+		          sizeof(struct xrt_visibility_mask));
+		// Error path. Something has clearly gone wrong if we end up here.
+		// This function should not be called when the device does not support visibility masks.
+		xret = XRT_ERROR_ALLOCATION;
+		goto err_mask_unlock;
+	}
+
 	mask = U_CALLOC_WITH_CAST(struct xrt_visibility_mask, mask_size);
 	if (mask == NULL) {
+		// Okay to return without reading the payload. A failure to allocate should just crash the client.
 		IPC_ERROR(ich->ipc_c, "failed to allocate xrt_visibility_mask");
+		xret = XRT_ERROR_ALLOCATION;
 		goto err_mask_unlock;
 	}
 
@@ -550,7 +569,7 @@ err_mask_free:
 	free(mask);
 err_mask_unlock:
 	ipc_client_connection_unlock(ipc_c);
-	return XRT_ERROR_IPC_FAILURE;
+	return xret;
 }
 
 static void

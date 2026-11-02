@@ -92,24 +92,30 @@ oxr_suggested_profile_array_find_by_path(const struct oxr_suggested_profile_arra
                                          struct oxr_suggested_profile **out_p);
 
 /*!
- * Find a suggested profile by the XRT device name stored on its profile template.
+ * Find a suggested profile whose profile template has @p name and binds to the
+ * top-level @p subaction_path.
  *
  * This directly compares @p name against each suggested profile's generated
  * template.
  *
  * @param      array               Suggested profile array to search, must not be NULL
+ * @param      registry            Binding registry the suggested profiles are looked up in, must not be NULL
  * @param      name                XRT device name stored on the profile template
+ * @param      subaction_path      Top-level path the profile must bind to
  * @param[out] out_p               Found suggested profile; NULL if not found. Must not be NULL.
  * @return                         true if a matching profile was found, false otherwise
  */
 XRT_NONNULL_ALL bool
 oxr_suggested_profile_array_find_by_device_name(const struct oxr_suggested_profile_array *array,
+                                                const struct oxr_binding_registry *registry,
                                                 enum xrt_device_name name,
+                                                XrPath subaction_path,
                                                 struct oxr_suggested_profile **out_p);
 
 /*!
- * Find the first rebinding profile that targets @p target_device_name and has a
- * suggested source profile in @p array.
+ * Find the first rebinding profile that targets @p target_device_name, whose
+ * target profile binds to the top-level @p subaction_path, and has a suggested
+ * source profile in @p array.
  *
  * The helper walks the registry's generated rebinding profiles in registry
  * order. This lets template generation decide priority: higher-priority
@@ -120,6 +126,7 @@ oxr_suggested_profile_array_find_by_device_name(const struct oxr_suggested_profi
  * @param      array               Suggested profile array to search, must not be NULL
  * @param      registry            Binding registry whose rebinding profiles are walked, must not be NULL
  * @param      target_device_name  Device name the rebinding profile must target
+ * @param      subaction_path      Top-level path the rebinding target profile must bind to
  * @param[out] out_p               Suggested source profile, or NULL if not found
  * @param[out] out_rebinding       Matching rebinding profile, or NULL if not found
  * @return                         true if a matching rebinding and suggested profile were found
@@ -128,6 +135,7 @@ XRT_NONNULL_ALL bool
 oxr_suggested_profile_array_find_rebinding_for_device_name(const struct oxr_suggested_profile_array *array,
                                                            const struct oxr_binding_registry *registry,
                                                            enum xrt_device_name target_device_name,
+                                                           XrPath subaction_path,
                                                            struct oxr_suggested_profile **out_p,
                                                            const struct oxr_rebinding_profile **out_rebinding);
 

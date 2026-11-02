@@ -38,7 +38,9 @@ upstream's IMU-space model migration requires a separate replay/calibration
 comparison. The subsequent I/O-cache merge carries the service-selected compatibility
 mappings to clients, preserving optional Sense-to-Index bindings without client
 access to driver tables. The solver and EKF sources are unchanged by that
-follow-up. This review branch has not replaced `macos-upstream-clean`.
+follow-up. That review is now integrated via `b3ad95b0b`. The November upstream
+sync explicitly retains this production tracking implementation; see its
+[merge decisions](macos-upstream-merge-review-2026-11.md#tracking-and-compatibility-decisions).
 
 ## Sources reviewed
 

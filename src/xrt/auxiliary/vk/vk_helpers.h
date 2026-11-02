@@ -222,6 +222,9 @@ struct vk_bundle
 
 		//! Was KHR_video_maintenance1 requested, available, and enabled?
 		bool video_maintenance_1;
+
+		//! Was EXT_image_tiling_control requested, available, and enabled?
+		bool image_tiling_control;
 	} features;
 
 	struct
@@ -787,6 +790,7 @@ struct vk_device_features
 	bool present_wait;
 	bool present_wait2;
 	bool video_maintenance_1;
+	bool image_tiling_control;
 };
 
 /*!
@@ -801,7 +805,7 @@ XRT_CHECK_RESULT VkResult
 vk_create_device(struct vk_bundle *vk,
                  int forced_index,
                  bool only_compute,
-                 VkQueueGlobalPriorityEXT global_priority,
+                 bool realtime_priority,
                  struct u_extension_list *required_device_ext_list,
                  struct u_extension_list *optional_device_ext_list,
                  const struct vk_device_features *optional_device_features);

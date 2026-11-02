@@ -82,7 +82,7 @@ typedef enum xrt_result
 	XRT_ERROR_SWAPCHAIN_FLAG_VALID_BUT_UNSUPPORTED = -6,
 
 	/*!
-	 * Could not allocate native image buffer(s).
+	 * Could not allocate memory or native image buffer.
 	 */
 	XRT_ERROR_ALLOCATION = -7,
 

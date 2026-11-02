@@ -845,6 +845,12 @@ HmdDevice::get_brightness(float *out_brightness)
 		this->brightness = vp2_get_brightness(vp2.hid);
 	}
 
+#ifdef XRT_BUILD_DRIVER_PIMAX_P2
+	if (variant == VIVE_VARIANT_PIMAX_P2 && pimax.dev != nullptr) {
+		pimax_p2_get_brightness(pimax.dev, &this->brightness);
+	}
+#endif
+
 	*out_brightness = this->brightness;
 	return XRT_SUCCESS;
 }
@@ -866,6 +872,13 @@ HmdDevice::set_brightness(float brightness, bool relative)
 
 		return XRT_SUCCESS;
 	}
+
+#ifdef XRT_BUILD_DRIVER_PIMAX_P2
+	if (variant == VIVE_VARIANT_PIMAX_P2 && pimax.dev != nullptr) {
+		this->brightness = brightness;
+		return pimax_p2_set_brightness(pimax.dev, brightness, relative);
+	}
+#endif
 
 	constexpr auto min_brightness = 0.2f;
 	constexpr auto max_brightness = 1.5f;
@@ -1101,6 +1114,12 @@ HmdDevice::get_view_poses(const xrt_vec3 *default_eye_relation,
 	out_poses[1].position.z = this->eye[1].position.z;
 	out_poses[1].position.y = this->eye[1].position.y;
 
+#ifdef XRT_BUILD_DRIVER_PIMAX_P2
+	if (variant == VIVE_VARIANT_PIMAX_P2 && pimax.dev != nullptr) {
+		return pimax_p2_get_view_poses(pimax.dev, default_eye_relation, hmd, view_count, out_fovs, out_poses);
+	}
+#endif
+
 	return XRT_SUCCESS;
 }
 
@@ -1123,6 +1142,13 @@ HmdDevice::compute_distortion(uint32_t view, float u, float v, xrt_uv_triplet *o
 	if (this->variant == VIVE_VARIANT_PRO2) {
 		v = 1.0f - v;
 	}
+
+	// Pimax P2 distortion
+#ifdef XRT_BUILD_DRIVER_PIMAX_P2
+	if (this->variant == VIVE_VARIANT_PIMAX_P2 && this->pimax.dev != nullptr) {
+		return pimax_p2_compute_distortion_from_mesh(pimax.dev, view, u, v, out_result);
+	}
+#endif
 
 	vr::EVREye eye = (view == 0) ? vr::Eye_Left : vr::Eye_Right;
 	vr::DistortionCoordinates_t coords = this->hmd_parts->display->ComputeDistortion(eye, u, v);
@@ -1535,6 +1561,27 @@ HmdDevice::init_vive_pro_2(struct xrt_prober *xp)
 
 	return ret == 0;
 }
+
+#ifdef XRT_BUILD_DRIVER_PIMAX_P2
+bool
+HmdDevice::init_pimax(pimax_p2_device *pdev)
+{
+	if (pdev == nullptr) {
+		return false;
+	}
+
+	pimax.dev = pdev;
+
+	bool bret = pimax_p2_setup_hmd(pimax.dev, &hmd_parts->base);
+	if (bret) {
+		std::strncpy(this->str, pimax.dev->display_name, sizeof(this->str));
+	}
+	this->supported.brightness_control = true;
+	return bret;
+	DEV_ERR("Pimax P2 device found, but driver is not built (requires HIDAPI)");
+	return false;
+}
+#endif
 
 vr::ETrackedPropertyError
 HmdDevice::handle_property_write(const vr::PropertyWrite_t &prop)

@@ -1192,7 +1192,7 @@
 					"localized_name": "Thumb",
 					"components": ["proximity"],
 					"monado_bindings": {
-						"force": "XRT_INPUT_TOUCH_THUMB_PROXIMITY"
+						"proximity": "XRT_INPUT_TOUCH_THUMB_PROXIMITY"
 					}
 				},
 				"/input/grip": {
@@ -1334,7 +1334,7 @@
 					"localized_name": "Thumb",
 					"components": ["proximity"],
 					"monado_bindings": {
-						"force": "XRT_INPUT_TOUCH_THUMB_PROXIMITY"
+						"proximity": "XRT_INPUT_TOUCH_THUMB_PROXIMITY"
 					}
 				},
 				"/input/grip": {
@@ -1484,7 +1484,7 @@
 					"localized_name": "Thumb",
 					"components": ["proximity"],
 					"monado_bindings": {
-						"force": "XRT_INPUT_TOUCH_THUMB_PROXIMITY"
+						"proximity": "XRT_INPUT_TOUCH_THUMB_PROXIMITY"
 					}
 				},
 				"/input/grip": {
@@ -3341,9 +3341,9 @@
 					"monado_bindings": {
 						"touch": "XRT_INPUT_TOUCH_PRO_TRIGGER_TOUCH",
 						"value": "XRT_INPUT_TOUCH_PRO_TRIGGER_VALUE",
-						"curl": "XRT_INPUT_TOUCH_PRO_TRIGGER_CURL",
-						"slide": "XRT_INPUT_TOUCH_PRO_TRIGGER_SLIDE",
-						"proximity": "XRT_INPUT_TOUCH_PRO_TRIGGER_PROXIMITY"
+						"curl_fb": "XRT_INPUT_TOUCH_PRO_TRIGGER_CURL",
+						"slide_fb": "XRT_INPUT_TOUCH_PRO_TRIGGER_SLIDE",
+						"proximity_fb": "XRT_INPUT_TOUCH_PRO_TRIGGER_PROXIMITY"
 					}
 				},
 				"/input/thumbstick": {
@@ -3382,7 +3382,7 @@
 					"localized_name": "Thumb",
 					"components": ["proximity_fb"],
 					"monado_bindings": {
-						"force": "XRT_INPUT_TOUCH_PRO_THUMB_PROXIMITY"
+						"proximity_fb": "XRT_INPUT_TOUCH_PRO_THUMB_PROXIMITY"
 					}
 				},
 				"/input/grip": {
@@ -3518,8 +3518,6 @@
 					"monado_bindings": {
 						"touch": "XRT_INPUT_TOUCH_PRO_TRIGGER_TOUCH",
 						"value": "XRT_INPUT_TOUCH_PRO_TRIGGER_VALUE",
-						"curl": "XRT_INPUT_TOUCH_PRO_TRIGGER_CURL",
-						"slide": "XRT_INPUT_TOUCH_PRO_TRIGGER_SLIDE",
 						"proximity": "XRT_INPUT_TOUCH_PRO_TRIGGER_PROXIMITY"
 					}
 				},
@@ -3576,7 +3574,7 @@
 					"localized_name": "Thumb",
 					"components": ["proximity"],
 					"monado_bindings": {
-						"force": "XRT_INPUT_TOUCH_PRO_THUMB_PROXIMITY"
+						"proximity": "XRT_INPUT_TOUCH_PRO_THUMB_PROXIMITY"
 					}
 				},
 				"/input/grip": {
@@ -3708,9 +3706,9 @@
 						"touch": "XRT_INPUT_TOUCH_PLUS_TRIGGER_TOUCH",
 						"value": "XRT_INPUT_TOUCH_PLUS_TRIGGER_VALUE",
 						"force": "XRT_INPUT_TOUCH_PLUS_TRIGGER_FORCE",
-						"curl": "XRT_INPUT_TOUCH_PLUS_TRIGGER_CURL",
-						"slide": "XRT_INPUT_TOUCH_PLUS_TRIGGER_SLIDE",
-						"proximity": "XRT_INPUT_TOUCH_PLUS_TRIGGER_PROXIMITY"
+						"curl_meta": "XRT_INPUT_TOUCH_PLUS_TRIGGER_CURL",
+						"slide_meta": "XRT_INPUT_TOUCH_PLUS_TRIGGER_SLIDE",
+						"proximity_meta": "XRT_INPUT_TOUCH_PLUS_TRIGGER_PROXIMITY"
 					}
 				},
 				"/input/thumbstick": {
@@ -3740,7 +3738,7 @@
 					"localized_name": "Thumb",
 					"components": ["proximity_meta"],
 					"monado_bindings": {
-						"force": "XRT_INPUT_TOUCH_PLUS_THUMB_PROXIMITY"
+						"proximity_meta": "XRT_INPUT_TOUCH_PLUS_THUMB_PROXIMITY"
 					}
 				},
 				"/input/grip": {
@@ -3861,8 +3859,6 @@
 						"touch": "XRT_INPUT_TOUCH_PLUS_TRIGGER_TOUCH",
 						"value": "XRT_INPUT_TOUCH_PLUS_TRIGGER_VALUE",
 						"force": "XRT_INPUT_TOUCH_PLUS_TRIGGER_FORCE",
-						"curl": "XRT_INPUT_TOUCH_PLUS_TRIGGER_CURL",
-						"slide": "XRT_INPUT_TOUCH_PLUS_TRIGGER_SLIDE",
 						"proximity": "XRT_INPUT_TOUCH_PLUS_TRIGGER_PROXIMITY"
 					}
 				},
@@ -3909,7 +3905,7 @@
 					"localized_name": "Thumb",
 					"components": ["proximity"],
 					"monado_bindings": {
-						"force": "XRT_INPUT_TOUCH_PLUS_THUMB_PROXIMITY"
+						"proximity": "XRT_INPUT_TOUCH_PLUS_THUMB_PROXIMITY"
 					}
 				},
 				"/input/grip": {
@@ -4090,6 +4086,26 @@
 					],
 					"monado_bindings": {
 						"haptic": "XRT_OUTPUT_NAME_PSVR2_HAPTIC"
+					}
+				}
+			}
+		},
+
+		"/interaction_profiles/mndx/psvr2_eye_gaze_internal_mndx": {
+			"title": "PlayStation VR2",
+			"type": "eye_tracker",
+			"monado_device": "XRT_DEVICE_PSVR2",
+			"extension": "MNDX_internal_rebinding_target",
+			"subaction_paths": [
+				"/user/eyes_ext"
+			],
+			"subpaths": {
+				"/input/gaze_ext": {
+					"type": "pose",
+					"localized_name": "Gaze",
+					"components": ["pose"],
+					"monado_bindings": {
+						"pose": "XRT_INPUT_GENERIC_EYE_GAZE_POSE"
 					}
 				}
 			}

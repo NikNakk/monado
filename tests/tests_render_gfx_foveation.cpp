@@ -274,7 +274,8 @@ struct GfxFixture
 
 		if (what == Draw::Mesh) {
 			render_gfx_mesh_ubo_data data{};
-			data.vertex_rot = {{1.f, 0.f, 0.f, 1.f}};
+			data.vertex_rot.v[0] = 1.f;
+			data.vertex_rot.v[3] = 1.f;
 			data.post_transform = full;
 			REQUIRE(render_gfx_mesh_alloc_and_write(&render, &data, map, sampler, src.view, &set) ==
 			        VK_SUCCESS);

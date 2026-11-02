@@ -24,3 +24,19 @@ oxr_binding_profile_find_binding_point(const struct oxr_binding_profile *profile
 	*out_binding_point = (struct oxr_binding_point *)ptr;
 	return true;
 }
+
+bool
+oxr_binding_profile_binds_to_subaction(const struct oxr_binding_profile *profile, XrPath subaction_path)
+{
+	/*
+	 * Profiles have no explicit list of the subaction paths they bind to yet,
+	 * for now the subaction paths of the binding points are a good proxy.
+	 */
+	for (size_t i = 0; i < profile->binding_point_count; i++) {
+		if (profile->binding_points[i].subaction->path == subaction_path) {
+			return true;
+		}
+	}
+
+	return false;
+}

@@ -87,14 +87,17 @@ struct GenericFixture
 		return result;
 	}
 	struct oxr_profile_resolver_info
-	resolve(struct xrt_device *dev, std::vector<struct oxr_suggested_profile *> profiles)
+	resolve(struct xrt_device *dev,
+	        std::vector<struct oxr_suggested_profile *> profiles,
+	        const char *subaction = "/user/hand/left")
 	{
 		refresh(dev);
 		struct oxr_suggested_profile_array array = {profiles.data(), profiles.size()};
 		struct oxr_profile_resolver_info info = {};
 		struct oxr_sink_logger slog = {};
 		oxr_resolver_populate_profile(&log, &slog, registry, &array, &context.io_cache,
-		                              &context.io_cache.info.devices[0], XRT_DEVICE_INVALID, &info);
+		                              &context.io_cache.info.devices[0], path(subaction), XRT_DEVICE_INVALID,
+		                              &info);
 		oxr_slog_cancel(&slog);
 		return info;
 	}
@@ -159,6 +162,20 @@ TEST_CASE("KHR generic controller fallback selection")
 		dev.binding_profile_count = 1;
 		CHECK(f.resolve(&dev, {&generic, &simple}).profile == &simple);
 	}
+}
+
+TEST_CASE("PS VR2 head and gaze profiles resolve only for their own subaction paths")
+{
+	GenericFixture f;
+	auto head = f.profile("/interaction_profiles/mndx/psvr2_mndx");
+	auto gaze = f.profile("/interaction_profiles/ext/eye_gaze_interaction");
+	xrt_device dev = {};
+	dev.name = XRT_DEVICE_PSVR2;
+	CHECK(f.resolve(&dev, {&gaze, &head}, "/user/head").profile == &head);
+	auto eyes = f.resolve(&dev, {&head, &gaze}, "/user/eyes_ext");
+	CHECK(eyes.profile == &gaze);
+	CHECK(eyes.rebinding_profile != nullptr);
+	CHECK(f.resolve(&dev, {&head, &gaze}, "/user/hand/left").profile == nullptr);
 }
 
 TEST_CASE("Sense generic inputs resolve through generated rebindings")
@@ -335,9 +352,13 @@ TEST_CASE("Unconverted profiles resolve native cached inputs without changing th
 	fallback.input_count = 1;
 	dev.binding_profiles = &fallback;
 	dev.binding_profile_count = 1;
-	auto info = f.resolve(&dev, {&profile});
+	auto info = f.resolve(&dev, {&profile}, mapping.user_path);
 	REQUIRE(info.profile == &profile);
-	REQUIRE(info.compatibility_profile != nullptr);
+	if (mapping.device == XRT_DEVICE_PSVR2) {
+		REQUIRE(info.rebinding_profile != nullptr);
+	} else {
+		REQUIRE(info.compatibility_profile != nullptr);
+	}
 	char str[160];
 	snprintf(str, sizeof(str), "%s%s", mapping.user_path, mapping.component);
 	const oxr_binding_point *point = nullptr;

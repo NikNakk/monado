@@ -22,6 +22,13 @@ memory(VkPhysicalDevice, VkPhysicalDeviceMemoryProperties *p)
 	*p = {};
 }
 VKAPI_ATTR void VKAPI_CALL
+formats(VkPhysicalDevice, VkFormat, VkFormatProperties *p)
+{
+	*p = {};
+	p->optimalTilingFeatures = VK_FORMAT_FEATURE_COLOR_ATTACHMENT_BIT |
+	                           VK_FORMAT_FEATURE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT;
+}
+VKAPI_ATTR void VKAPI_CALL
 queues(VkPhysicalDevice, uint32_t *count, VkQueueFamilyProperties *p)
 {
 	if (p) {
@@ -74,6 +81,7 @@ instance_proc(VkInstance, const char *name)
 	PROC("vkGetDeviceProcAddr", device_proc);
 	PROC("vkGetPhysicalDeviceProperties", properties);
 	PROC("vkGetPhysicalDeviceMemoryProperties", memory);
+	PROC("vkGetPhysicalDeviceFormatProperties", formats);
 	PROC("vkGetPhysicalDeviceQueueFamilyProperties", queues);
 	PROC("vkGetPhysicalDeviceImageFormatProperties2", images);
 	PROC("vkGetPhysicalDeviceImageFormatProperties2KHR", images);

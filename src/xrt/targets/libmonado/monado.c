@@ -362,7 +362,7 @@ mnd_root_get_client_state(mnd_root_t *root, uint32_t client_id, uint32_t *out_fl
 	flags |= (root->app_state.session_overlay) ? MND_CLIENT_SESSION_OVERLAY : 0u;
 	flags |= (!iob->block_poses && !iob->block_hand_tracking && !iob->block_inputs && !iob->block_outputs)
 	             ? MND_CLIENT_IO_ACTIVE
-	             : 0u;
+		     : 0u;
 	flags |= (iob->block_poses) ? MND_CLIENT_POSES_BLOCKED : 0u;
 	flags |= (iob->block_hand_tracking) ? MND_CLIENT_HT_BLOCKED : 0u;
 	flags |= (iob->block_inputs) ? MND_CLIENT_INPUTS_BLOCKED : 0u;
@@ -554,6 +554,7 @@ mnd_root_set_client_recommended_view_config(mnd_root_t *root,
 
 	struct xrt_recommended_view_config xrt_view_config = {
 	    .view_count = view_count,
+	    .valid = recommended_view_config->valid,
 	};
 	for (uint32_t i = 0; i < view_count; i++) {
 		xrt_view_config.views[i].width_pixels = recommended_view_config->view_configs[i].width_pixels;

@@ -25,6 +25,7 @@
 #include "xrt/xrt_openxr_includes.h"
 #include "xrt/xrt_config_os.h"
 #include "xrt/xrt_config_have.h"
+#include "xrt/xrt_app_policy.h"
 
 #include "os/os_threading.h"
 
@@ -682,6 +683,9 @@ oxr_system_get_body_tracking_calibration_meta_support(struct oxr_logger *log, st
 bool
 oxr_system_get_body_tracking_fidelity_meta_support(struct oxr_logger *log, struct oxr_instance *inst);
 
+XRT_CHECK_RESULT XrResult
+oxr_system_poll(struct oxr_logger *log, struct oxr_system *sys);
+
 /*
  *
  * oxr_event.cpp
@@ -722,13 +726,21 @@ oxr_event_push_XrEventDataMainSessionVisibilityChangedEXTX(struct oxr_logger *lo
 
 #ifdef OXR_HAVE_EXT_performance_settings
 XrResult
-oxr_event_push_XrEventDataPerfSettingsEXTX(struct oxr_logger *log,
-                                           struct oxr_session *sess,
-                                           enum xrt_perf_domain domain,
-                                           enum xrt_perf_sub_domain subDomain,
-                                           enum xrt_perf_notify_level fromLevel,
-                                           enum xrt_perf_notify_level toLevel);
+oxr_event_push_XrEventDataPerfSettingsEXT(struct oxr_logger *log,
+                                          struct oxr_session *sess,
+                                          enum xrt_perf_domain domain,
+                                          enum xrt_perf_sub_domain subDomain,
+                                          enum xrt_perf_notify_level fromLevel,
+                                          enum xrt_perf_notify_level toLevel);
 #endif // OXR_HAVE_EXT_performance_settings
+
+#ifdef OXR_HAVE_EXT_view_configuration_views_change
+XrResult
+oxr_event_push_XrEventDataViewConfigurationViewsChangedEXT(struct oxr_logger *log,
+                                                           struct oxr_system *system,
+                                                           enum xrt_view_type viewConfigurationType);
+#endif // OXR_HAVE_EXT_view_configuration_views_change
+
 /*!
  * This clears all pending events refers to the given session.
  */
@@ -1095,6 +1107,9 @@ struct oxr_system
 	//! The @ref xrt_iface level system.
 	struct xrt_system *xsys;
 
+	//! The @ref xrt_iface level app system.
+	struct xrt_app_system *xasys;
+
 	//! System devices used in all session types.
 	struct xrt_system_devices *xsysd;
 
@@ -1109,8 +1124,12 @@ struct oxr_system
 	//! Have the client application called the gfx api requirements func?
 	bool gotten_requirements;
 
+	bool view_config_mutex_created;
+	struct os_mutex view_config_mutex;
 	uint32_t view_config_count;
 	struct oxr_view_config_properties view_configs[XRT_MAX_COMPOSITOR_VIEW_CONFIGS_COUNT];
+	bool pending_view_config_update[XRT_MAX_COMPOSITOR_VIEW_CONFIGS_COUNT];
+	timepoint_ns view_update_config_time[XRT_MAX_COMPOSITOR_VIEW_CONFIGS_COUNT];
 
 	XrReferenceSpaceType reference_spaces[5];
 	uint32_t reference_space_count;
@@ -1191,7 +1210,11 @@ struct oxr_instance
 
 	struct u_debug_gui *debug_ui;
 
+	//! The @ref xrt_iface level instance.
 	struct xrt_instance *xinst;
+
+	//! The @ref xrt_iface level app instance.
+	struct xrt_app_instance *xainst;
 
 	//! Enabled extensions
 	struct oxr_extension_status extensions;
@@ -1222,10 +1245,16 @@ struct oxr_instance
 		struct oxr_event *next;
 	} event;
 
-	struct oxr_session *sessions;
+	//! Protects the sessions list @ref sessions_locked, taken before the event mutex.
+	struct os_mutex sessions_mutex;
+	//! The session list, protected by @ref sessions_mutex
+	struct oxr_session *sessions_locked;
 
 	//! Path cache for actions, needs path_store to work.
 	struct oxr_instance_path_cache path_cache;
+
+	//! Binding registry (reference-counted), shared by all action contexts of this instance.
+	struct oxr_binding_registry *binding_registry;
 
 	//! The default action context (reference-counted). Owned by instance; action sets also hold references.
 	struct oxr_instance_action_context *action_context;
@@ -1301,6 +1330,13 @@ struct oxr_instance
 		 * calling xrCreateSwapchain.
 		 */
 		bool no_usage_bit_validation_in_create_swapchain;
+
+		/*!
+		 * Don't return XR_ERROR_VALIDATION_FAILURE if an
+		 * application sets unsupported flags in XrCompositionLayer
+		 * when calling xrEndFrame.
+		 */
+		bool no_layer_flags_bit_validation;
 	} quirks;
 
 	//! Debug messengers

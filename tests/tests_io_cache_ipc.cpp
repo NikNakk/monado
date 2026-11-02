@@ -22,6 +22,7 @@
 #undef IPC_CHK_ONLY_PRINT
 #undef IPC_CHK_ALWAYS_RET
 #include "ipc_server_generated.h"
+#include "server/ipc_server_thread_shutdown.h"
 #include "xrt/xrt_io_cache.h"
 #include "xrt/xrt_space.h"
 #include "xrt/xrt_system.h"
@@ -40,6 +41,7 @@
 #include <oxr/path/oxr_path_store.h>
 #include <cstring>
 
+#include <algorithm>
 #include <atomic>
 #include <memory>
 #include <thread>
@@ -68,6 +70,7 @@ struct TestDevice : xrt_device
 	std::atomic<float> sample{0.25f};
 	std::atomic<int> last_output{XRT_OUTPUT_NAME_INVALID};
 	std::atomic<float> amplitude{0};
+	std::vector<float> pcm_samples;
 	xrt_input input_storage[2] = {};
 	xrt_output output_storage[1] = {};
 	xrt_binding_input_pair input_pairs[2] = {
@@ -106,7 +109,13 @@ struct TestDevice : xrt_device
 		set_output = [](xrt_device *base, xrt_output_name output, const xrt_output_value *value) {
 			auto *self = static_cast<TestDevice *>(base);
 			self->last_output = output;
-			self->amplitude = value->vibration.amplitude;
+			if (value->type == XRT_OUTPUT_VALUE_TYPE_PCM_VIBRATION) {
+				const auto &pcm = value->pcm_vibration;
+				self->pcm_samples.assign(pcm.buffer, pcm.buffer + pcm.buffer_size);
+				*pcm.samples_consumed = pcm.buffer_size;
+			} else {
+				self->amplitude = value->vibration.amplitude;
+			}
 			return XRT_SUCCESS;
 		};
 	}
@@ -141,6 +150,7 @@ struct Transport
 	std::atomic<int> dispatch_result{XRT_SUCCESS};
 	Transport(bool index_profile = false)
 	{
+		os_mutex_init(&server->global_state.lock);
 		if (index_profile) {
 			device.fallback.name = XRT_DEVICE_INDEX_CONTROLLER;
 			device.input_pairs[0].from = XRT_INPUT_INDEX_TRIGGER_VALUE;
@@ -196,9 +206,130 @@ struct Transport
 		close(state->imc.ipc_handle);
 		os_mutex_destroy(&connection.mutex);
 		os_mutex_destroy(&connection.send_mutex);
+		os_mutex_destroy(&server->global_state.lock);
 	}
 };
 } // namespace
+
+TEST_CASE("shutdown cancels stalled handler exchanges without waiting for the global lock")
+{
+	struct BlockedHandler
+	{
+		std::unique_ptr<ipc_server> server = std::make_unique<ipc_server>();
+		TestDevice device;
+		TestSystem system;
+		int peer = -1;
+		bool haptic = false;
+		xrt_result_t result = XRT_SUCCESS;
+		BlockedHandler()
+		{
+			os_mutex_init(&server->global_state.lock);
+			for (auto &thread : server->threads) {
+				thread.ics.imc.ipc_handle = XRT_IPC_HANDLE_INVALID;
+			}
+			system.static_xdev_count = 1;
+			system.static_xdevs[0] = &device;
+			server->xsysd = &system;
+			server->log_level = U_LOGGING_ERROR;
+		}
+		~BlockedHandler()
+		{
+			ipc_server_stop_and_join_client_threads(server.get());
+			if (peer >= 0) {
+				close(peer);
+			}
+			auto handle = server->threads[0].ics.imc.ipc_handle;
+			if (handle >= 0) {
+				close(handle);
+			}
+			os_mutex_destroy(&server->global_state.lock);
+		}
+		static void *
+		run(void *ptr)
+		{
+			auto &f = *static_cast<BlockedHandler *>(ptr);
+			auto &thread = f.server->threads[0];
+			ipc_server_client_thread_set_running(f.server.get(), &thread);
+			if (f.haptic) {
+				ipc_pcm_haptic_buffer samples = {};
+				samples.num_samples = 64;
+				samples.sample_rate = 320;
+				f.result = ipc_handle_device_set_haptic_output(
+				    &thread.ics, 0, XRT_OUTPUT_NAME_PSSENSE_VIBRATION, &samples);
+			} else {
+				xrt_pose offset = XRT_POSE_IDENTITY;
+				f.result = ipc_handle_space_locate_spaces(&thread.ics, 0, &offset, 64, 1);
+			}
+			return nullptr;
+		}
+	} f;
+	SECTION("space locations") {}
+	SECTION("PCM samples")
+	{
+		f.haptic = true;
+	}
+	int sockets[2];
+	REQUIRE(socketpair(AF_UNIX, SOCK_STREAM, 0, sockets) == 0);
+	f.peer = sockets[0];
+	auto &thread = f.server->threads[0];
+	thread.ics.server = f.server.get();
+	thread.ics.objects.xdevs[0] = &f.device;
+	thread.ics.imc.ipc_handle = sockets[1];
+	thread.ics.imc.log_level = U_LOGGING_ERROR;
+	thread.state = IPC_THREAD_STARTING;
+	int started = os_thread_start(&thread.thread, BlockedHandler::run, &f);
+	if (started != 0) {
+		thread.state = IPC_THREAD_READY;
+	}
+	REQUIRE(started == 0);
+	ipc_message_channel channel = {f.peer, U_LOGGING_ERROR};
+	xrt_result_t allocated = XRT_ERROR_ALLOCATION;
+	REQUIRE(ipc_receive(&channel, &allocated, sizeof(allocated)) == XRT_SUCCESS);
+	REQUIRE(allocated == XRT_SUCCESS);
+	// Deliberately withhold the payload after the real handler acknowledges allocation.
+	ipc_server_stop_and_join_client_threads(f.server.get());
+	CHECK(f.result == XRT_ERROR_IPC_FAILURE);
+	CHECK(thread.state == IPC_THREAD_READY);
+	ipc_server_stop_and_join_client_threads(f.server.get());
+}
+
+TEST_CASE("IO cache PCM transport bounds samples and completes blocked output exchanges")
+{
+	Transport f;
+	bool blocked = false;
+	SECTION("native samples are capped to the protocol capacity") {}
+	SECTION("blocked outputs consume the exchange without calling the device")
+	{
+		blocked = true;
+	}
+	f.state->client_state.io_blocks.block_outputs = blocked;
+	std::vector<float> samples(IPC_MAX_PCM_HAPTIC_SAMPLES + 17);
+	for (size_t i = 0; i < samples.size(); ++i) {
+		samples[i] = static_cast<float>(i % 17) / 17.0f;
+	}
+	uint32_t consumed = UINT32_MAX;
+	xrt_output_value value = {};
+	value.type = XRT_OUTPUT_VALUE_TYPE_PCM_VIBRATION;
+	value.pcm_vibration.buffer = samples.data();
+	value.pcm_vibration.buffer_size = static_cast<uint32_t>(samples.size());
+	value.pcm_vibration.sample_rate = 8000;
+	value.pcm_vibration.samples_consumed = &consumed;
+	REQUIRE(xrt_io_cache_set_output(f.cache, f.device.id, XRT_OUTPUT_NAME_PSSENSE_VIBRATION, &value) ==
+	        XRT_SUCCESS);
+	if (blocked) {
+		CHECK(consumed == 0);
+		CHECK(f.device.last_output == XRT_OUTPUT_NAME_INVALID);
+	} else {
+		CHECK(consumed == IPC_MAX_PCM_HAPTIC_SAMPLES);
+		CHECK(f.device.last_output == XRT_OUTPUT_NAME_PSSENSE_VIBRATION);
+		REQUIRE(f.device.pcm_samples.size() == IPC_MAX_PCM_HAPTIC_SAMPLES);
+		CHECK(std::equal(f.device.pcm_samples.begin(), f.device.pcm_samples.end(), samples.begin()));
+	}
+	// A subsequent command must still be aligned after the variable-length exchange.
+	xrt_io_cache_info info = {};
+	CHECK(xrt_io_cache_get_info(f.cache, &info) == XRT_SUCCESS);
+	CHECK(info.device_count == 1);
+}
 
 TEST_CASE("IO cache IPC carries compatibility metadata and native sample types")
 {
@@ -379,7 +510,8 @@ TEST_CASE("OpenXR action priority and overrides work with an IPC-backed cache")
 	oxr_profile_resolver_info info = {};
 	oxr_sink_logger slog = {};
 	oxr_resolver_populate_profile(&state.log, &slog, state.registry, &array, &context.io_cache,
-	                              &context.io_cache.info.devices[0], XRT_DEVICE_INVALID, &info);
+	                              &context.io_cache.info.devices[0], state.path("/user/hand/left"),
+	                              XRT_DEVICE_INVALID, &info);
 	REQUIRE(info.compatibility_profile != nullptr);
 	const oxr_binding_point *point = nullptr;
 	REQUIRE(oxr_binding_profile_find_binding_point(binding_profile,

@@ -19,6 +19,8 @@
 static void
 app_system_destroy(struct xrt_app_system *xasys);
 
+#define APP_SYSTEM_MAX_NONESSENTIAL_EVENTS 32
+
 /*
  *
  * Helpers.
@@ -49,6 +51,35 @@ app_system_create(struct b_app_instance *bainst, struct xrt_system *xsys)
 	}
 
 	return basys;
+}
+
+XRT_CHECK_RESULT static xrt_result_t
+app_system_add_event_locked(struct b_app_system *basys, const struct xrt_app_system_event *event)
+{
+	uint32_t num_events = 0;
+	struct b_app_system_event **ptr = &basys->events;
+	while (*ptr) {
+		ptr = &(*ptr)->next;
+		num_events++;
+	}
+
+	// Drop events when we have way too many, but don't make that fatal, the event we're dropping is non-essential.
+	// @note If essential events are added, don't do this! Error or let the list grow.
+	if (num_events >= APP_SYSTEM_MAX_NONESSENTIAL_EVENTS) {
+		U_LOG_D("Dropping non-essential event of type %d since event queue already contains maximum %d events.",
+		        event->type, APP_SYSTEM_MAX_NONESSENTIAL_EVENTS);
+		return XRT_SUCCESS;
+	}
+
+	*ptr = U_TYPED_CALLOC(struct b_app_system_event);
+
+	if ((*ptr) == NULL) {
+		return XRT_ERROR_ALLOCATION;
+	}
+
+	(*ptr)->base = *event;
+
+	return XRT_SUCCESS;
 }
 
 /*
@@ -92,6 +123,29 @@ app_system_destroy(struct xrt_app_system *xasys)
 	os_mutex_unlock(&bainst->app_systems.mutex);
 }
 
+xrt_result_t
+b_app_system_poll_events(struct xrt_app_system *xasys, struct xrt_app_system_event *out_xasyse)
+{
+	struct b_app_system *basys = b_app_system(xasys);
+
+	os_mutex_lock(&basys->mutex);
+	struct b_app_system_event *event = basys->events;
+
+	if (event) {
+		basys->events = event->next;
+		(*out_xasyse) = event->base;
+		free(event);
+	} else {
+		(*out_xasyse) = (struct xrt_app_system_event){
+		    .type = XRT_APP_SYSTEM_EVENT_NONE,
+		};
+	}
+
+	os_mutex_unlock(&basys->mutex);
+
+	return XRT_SUCCESS;
+}
+
 static xrt_result_t
 b_app_system_get_recommended_view_configuration(struct xrt_app_system *xasys,
                                                 enum xrt_view_type view_type,
@@ -103,9 +157,9 @@ b_app_system_get_recommended_view_configuration(struct xrt_app_system *xasys,
 		return XRT_ERROR_INVALID_ARGUMENT;
 	}
 
-	os_mutex_lock(&basys->view_config_mutex);
+	os_mutex_lock(&basys->mutex);
 	*out_recommended_view_config = basys->view_configs[view_type];
-	os_mutex_unlock(&basys->view_config_mutex);
+	os_mutex_unlock(&basys->mutex);
 
 	return XRT_SUCCESS;
 }
@@ -116,16 +170,26 @@ b_app_system_set_recommended_view_configuration(struct xrt_app_system *xasys,
                                                 const struct xrt_recommended_view_config *recommended_view_config)
 {
 	struct b_app_system *basys = b_app_system(xasys);
+	xrt_result_t xret = XRT_SUCCESS;
 
 	if (view_type == XRT_VIEW_TYPE_INVALID || view_type >= XRT_VIEW_TYPE_MAX) {
 		return XRT_ERROR_INVALID_ARGUMENT;
 	}
 
-	os_mutex_lock(&basys->view_config_mutex);
-	basys->view_configs[view_type] = *recommended_view_config;
-	os_mutex_unlock(&basys->view_config_mutex);
+	os_mutex_lock(&basys->mutex);
+	{
+		basys->view_configs[view_type] = *recommended_view_config;
 
-	return XRT_SUCCESS;
+		xret = app_system_add_event_locked( //
+		    basys,                          //
+		    &(struct xrt_app_system_event){
+		        .type = XRT_APP_SYSTEM_EVENT_RECOMMENDED_VIEW_CONFIGURATION_CHANGED,
+		        .recommended_view_configuration_changed = {.view_type = view_type},
+		    }); //
+	}
+	os_mutex_unlock(&basys->mutex);
+
+	return xret;
 }
 
 
@@ -246,6 +310,7 @@ b_app_system_init(struct xrt_app_instance *xainst,
                   void (*destroy_fn)(struct xrt_app_system *))
 {
 	// xrt_app_system fields.
+	basys->base.poll_events = b_app_system_poll_events;
 	basys->base.get_recommended_view_configuration = b_app_system_get_recommended_view_configuration;
 	basys->base.set_recommended_view_configuration = b_app_system_set_recommended_view_configuration;
 	basys->base.destroy = destroy_fn;
@@ -253,7 +318,7 @@ b_app_system_init(struct xrt_app_instance *xainst,
 	basys->xainst = xainst;
 	basys->xsys = xsys;
 
-	os_mutex_init(&basys->view_config_mutex);
+	os_mutex_init(&basys->mutex);
 
 	return true;
 }
@@ -261,5 +326,5 @@ b_app_system_init(struct xrt_app_instance *xainst,
 void
 b_app_system_fini(struct b_app_system *basys)
 {
-	os_mutex_destroy(&basys->view_config_mutex);
+	os_mutex_destroy(&basys->mutex);
 }

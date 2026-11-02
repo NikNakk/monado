@@ -86,6 +86,7 @@ EXTENSIONS = (
     ['XR_EXT_plane_detection', 'XRT_FEATURE_OPENXR_PLANE_DETECTION'],
     ['XR_EXT_samsung_odyssey_controller', 'XRT_FEATURE_OPENXR_INTERACTION_WINMR'],
     ['XR_EXT_user_presence', 'XRT_FEATURE_OPENXR_USER_PRESENCE'],
+    ['XR_EXT_view_configuration_views_change', 'XRT_FEATURE_OPENXR_VIEW_CONFIGURATION_VIEWS_CHANGE'],
     # Vendor extensions, sorted alphabetically.
     ['XR_ANDROID_face_tracking', 'XRT_FEATURE_OPENXR_FACE_TRACKING_ANDROID'],
     ['XR_BD_body_tracking', 'XRT_FEATURE_OPENXR_BODY_TRACKING_BD'],

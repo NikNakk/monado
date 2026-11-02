@@ -758,9 +758,9 @@ oxr_session_poll(struct oxr_logger *log, struct oxr_session *sess)
 			break;
 		case XRT_SESSION_EVENT_PERFORMANCE_CHANGE:
 #ifdef OXR_HAVE_EXT_performance_settings
-			oxr_event_push_XrEventDataPerfSettingsEXTX(
-			    log, sess, xse.performance.domain, xse.performance.sub_domain, xse.performance.from_level,
-			    xse.performance.to_level);
+			oxr_event_push_XrEventDataPerfSettingsEXT(log, sess, xse.performance.domain,
+			                                          xse.performance.sub_domain,
+			                                          xse.performance.from_level, xse.performance.to_level);
 #endif // OXR_HAVE_EXT_performance_settings
 			break;
 		case XRT_SESSION_EVENT_PASSTHRU_STATE_CHANGE:

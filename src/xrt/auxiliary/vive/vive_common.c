@@ -39,6 +39,9 @@ vive_determine_variant(const char *model_number)
 	} else if (strcmp(model_number, "Beyond") == 0) {
 		variant = VIVE_VARIANT_BEYOND;
 		U_LOG_D("Found Bigscreen Beyond HMD");
+	} else if (strcmp(model_number, "REF-HMD") == 0) {
+		variant = VIVE_VARIANT_PIMAX_P2;
+		U_LOG_D("Found REF-HMD, assuming Pimax P2");
 	} else {
 		U_LOG_W("Failed to parse Vive HMD variant!\n\tfirmware.model_[number|name]: '%s'", model_number);
 	}

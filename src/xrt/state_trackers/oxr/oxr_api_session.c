@@ -56,11 +56,13 @@ oxr_xrCreateSession(XrInstance instance, const XrSessionCreateInfo *createInfo, 
 	*out_session = oxr_session_to_openxr(sess);
 
 	/* Add to session list */
-	link = &inst->sessions;
+	os_mutex_lock(&inst->sessions_mutex);
+	link = &inst->sessions_locked;
 	while (*link) {
 		link = &(*link)->next;
 	}
 	*link = sess;
+	os_mutex_unlock(&inst->sessions_mutex);
 
 	return XR_SUCCESS;
 }
@@ -76,13 +78,18 @@ oxr_xrDestroySession(XrSession session)
 	struct oxr_logger log;
 	OXR_VERIFY_SESSION_AND_INIT_LOG(&log, session, sess, "xrDestroySession");
 
-	/* Remove from session list */
+	/*
+	 * Remove from session list, holding the lock also waits for any
+	 * in-flight xrPollEvent to stop using this session.
+	 */
 	inst = sess->sys->inst;
-	link = &inst->sessions;
+	os_mutex_lock(&inst->sessions_mutex);
+	link = &inst->sessions_locked;
 	while (*link != sess) {
 		link = &(*link)->next;
 	}
 	*link = sess->next;
+	os_mutex_unlock(&inst->sessions_mutex);
 
 	return oxr_handle_parent_destroy(&log, &sess->handle);
 }

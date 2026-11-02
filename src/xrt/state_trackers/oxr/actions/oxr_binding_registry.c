@@ -532,6 +532,7 @@ bool
 oxr_binding_registry_find_rebinding_from_source_for_device(const struct oxr_binding_registry *registry,
                                                            XrPath source_profile_path,
                                                            enum xrt_device_name target_device_name,
+                                                           XrPath subaction_path,
                                                            const struct oxr_rebinding_profile **out_rebinding)
 {
 	if (registry == NULL) {
@@ -550,10 +551,16 @@ oxr_binding_registry_find_rebinding_from_source_for_device(const struct oxr_bind
 			continue;
 		}
 
-		if (target_profile->device_name == target_device_name) {
-			*out_rebinding = rebinding;
-			return true;
+		if (target_profile->device_name != target_device_name) {
+			continue;
 		}
+		// Profiles for one device can bind to different subaction paths, like /user/head and /user/eyes_ext.
+		if (!oxr_binding_profile_binds_to_subaction(target_profile, subaction_path)) {
+			continue;
+		}
+
+		*out_rebinding = rebinding;
+		return true;
 	}
 
 	*out_rebinding = NULL;

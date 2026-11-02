@@ -322,18 +322,6 @@ create_device(struct vk_bundle *vk, const struct comp_vulkan_arguments *vk_args)
 {
 	VkResult ret;
 
-	const char *prio_strs[3] = {
-	    "QUEUE_GLOBAL_PRIORITY_REALTIME",
-	    "QUEUE_GLOBAL_PRIORITY_HIGH",
-	    "QUEUE_GLOBAL_PRIORITY_MEDIUM",
-	};
-
-	VkQueueGlobalPriorityEXT prios[3] = {
-	    VK_QUEUE_GLOBAL_PRIORITY_REALTIME_EXT, // This is the one we really want.
-	    VK_QUEUE_GLOBAL_PRIORITY_HIGH_EXT,     // Probably not as good but something.
-	    VK_QUEUE_GLOBAL_PRIORITY_MEDIUM_EXT,   // Default fallback.
-	};
-
 	const bool only_compute_queue = vk_args->only_compute_queue;
 	int gpu_index = -1;
 
@@ -354,6 +342,7 @@ create_device(struct vk_bundle *vk, const struct comp_vulkan_arguments *vk_args)
 	    .present_wait = true,
 	    .present_wait2 = true,
 	    .video_maintenance_1 = true,
+	    .image_tiling_control = true,
 	};
 
 	ret = vk_init_mutex(vk);
@@ -362,35 +351,14 @@ create_device(struct vk_bundle *vk, const struct comp_vulkan_arguments *vk_args)
 		return ret;
 	}
 
-	// No other way then to try to see if realtime is available.
-	for (size_t i = 0; i < ARRAY_SIZE(prios); i++) {
-		ret = vk_create_device(                  //
-		    vk,                                  //
-		    gpu_index,                           //
-		    only_compute_queue,                  // compute_only
-		    prios[i],                            // global_priority
-		    vk_args->required_device_extensions, //
-		    vk_args->optional_device_extensions, //
-		    &device_features);                   // optional_device_features
-
-		// All ok!
-		if (ret == VK_SUCCESS) {
-			VK_INFO(vk, "Created device and %s queue with %s.", only_compute_queue ? "COMPUTE" : "GRAPHICS",
-			        prio_strs[i]);
-			break;
-		}
-
-		// Try a lower priority.
-		if (ret == VK_ERROR_NOT_PERMITTED_EXT) {
-			continue;
-		}
-
-		// Some other error!
-		VK_ERROR_RET(vk, "vk_create_device", "Failed to create Vulkan device.", ret);
-		return ret;
-	}
-
-	// All tries failed, return error. Yes this code is clunky.
+	ret = vk_create_device(                  //
+	    vk,                                  //
+	    gpu_index,                           //
+	    only_compute_queue,                  // compute_only
+	    true,                                // realtime_priority
+	    vk_args->required_device_extensions, //
+	    vk_args->optional_device_extensions, //
+	    &device_features);                   // optional_device_features
 	if (ret != VK_SUCCESS) {
 		VK_ERROR_RET(vk, "vk_create_device", "Failed to create Vulkan device.", ret);
 		return ret;

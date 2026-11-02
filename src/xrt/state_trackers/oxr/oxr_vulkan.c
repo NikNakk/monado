@@ -162,8 +162,7 @@ static const char *required_vk_device_extensions[] = {
 
 static const char *optional_device_extensions[] = {
 #if defined(XRT_GRAPHICS_SYNC_HANDLE_IS_FD)
-    VK_KHR_EXTERNAL_SEMAPHORE_FD_EXTENSION_NAME,
-    VK_KHR_EXTERNAL_FENCE_FD_EXTENSION_NAME,
+    VK_KHR_EXTERNAL_SEMAPHORE_FD_EXTENSION_NAME, VK_KHR_EXTERNAL_FENCE_FD_EXTENSION_NAME,
 
 #elif defined(XRT_GRAPHICS_SYNC_HANDLE_IS_WIN32_HANDLE) // Not optional
 #elif defined(XRT_GRAPHICS_BUFFER_HANDLE_IS_IOSURFACE)
@@ -177,6 +176,10 @@ static const char *optional_device_extensions[] = {
 #endif
 #ifdef VK_KHR_timeline_semaphore
     VK_KHR_TIMELINE_SEMAPHORE_EXTENSION_NAME,
+#endif
+
+#ifdef VK_EXT_image_tiling_control
+    VK_EXT_IMAGE_TILING_CONTROL_EXTENSION_NAME,
 #else
     NULL, // avoid zero sized array with UB
 #endif

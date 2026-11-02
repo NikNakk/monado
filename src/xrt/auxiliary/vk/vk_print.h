@@ -136,6 +136,9 @@ XRT_CHECK_RESULT const char *
 vk_power_state_string(VkDisplayPowerStateEXT code);
 
 XRT_CHECK_RESULT const char *
+vk_queue_priority_string(VkQueueGlobalPriorityEXT priority);
+
+XRT_CHECK_RESULT const char *
 vk_format_string(VkFormat code);
 
 
