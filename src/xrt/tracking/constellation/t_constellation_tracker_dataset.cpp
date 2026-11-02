@@ -234,6 +234,7 @@ DataSerializer::write(const t_blob &value)
 	this->write(value.size.x);
 	this->write(value.size.y);
 	this->write(value.brightness);
+	this->write(value.greysum);
 }
 
 void
@@ -277,6 +278,7 @@ DataSerializer::read(t_blob &value)
 	this->read(value.size.x);
 	this->read(value.size.y);
 	this->read(value.brightness);
+	this->read(value.greysum);
 }
 
 // CameraSample

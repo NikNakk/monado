@@ -13,6 +13,7 @@
 #include "util/u_time.h"
 
 #include "math/m_predict.h"
+#include "math/m_vec3.h"
 
 #include "constellation/correspondence_search.h"
 
@@ -981,6 +982,7 @@ Camera::pushPose(CameraSample &camera_sample,
 		    device->id,                //
 		    Tcv_cam_device_optimized,  //
 		    covariance);               //
+
 		if (!success) {
 			CT_DEBUG(tracker,
 			         "Camera %d (group %d) RANSAC-PnP refinement for device %d from %u "
@@ -1060,11 +1062,8 @@ Camera::pushPose(CameraSample &camera_sample,
 			used_blobs++;
 		}
 	}
-
 	if (used_blobs > 0) {
 		average_brightness /= used_blobs;
-	} else {
-		average_brightness = 1.0f;
 	}
 
 	// Mark that we found a pose
@@ -1097,12 +1096,36 @@ Camera::pushPose(CameraSample &camera_sample,
 	    .world_pose = XRT_POSE_IDENTITY,
 	    .mosaic_index = mosaic->index,
 	    .camera_index = this->index,
-	    .average_brightness = average_brightness, // @todo compute this
+	    .average_brightness = average_brightness,
 	    .metrics = metrics,
+	    .leds = {},
 	};
 	if (Txr_world_device.has_value()) {
 		sample.world_pose = Txr_world_device.value();
 	}
+
+	for (int i = 0; i < blob_match_info.num_visible_leds; i++) {
+		const auto &visible_led = blob_match_info.visible_leds[i];
+
+		// Skip visible LEDs that have no matched blob
+		if (visible_led.matched_blob == nullptr) {
+			continue;
+		}
+
+		// Assert the IDs are valid indices into the array.
+		assert(visible_led.led->id >= 0);
+		assert((size_t)visible_led.led->id < ARRAY_SIZE(sample.leds));
+
+		// Mark the LED as observed
+		sample.leds[visible_led.led->id] = {
+		    .observed = true,
+		    .brightness = visible_led.matched_blob->brightness,
+		    .greysum = visible_led.matched_blob->greysum,
+		    .facing_dot = static_cast<float>(visible_led.facing_dot),
+		};
+	}
+
+	// Push the sample now that the data is filled out.
 	t_constellation_tracker_device_push_sample(device->device, &sample);
 
 	if (Txr_world_device.has_value()) {
