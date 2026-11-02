@@ -1,5 +1,5 @@
 // Copyright 2020-2021, Collabora, Ltd.
-// Copyright 2025, NVIDIA CORPORATION.
+// Copyright 2025-2026, NVIDIA CORPORATION.
 // SPDX-License-Identifier: BSL-1.0
 /*!
  * @file
@@ -94,14 +94,16 @@ create_listen_socket(struct ipc_server_mainloop *ml, int *out_fd)
 	int size = u_file_get_path_in_runtime_dir(XRT_IPC_MSG_SOCK_FILENAME, sock_file, PATH_MAX);
 	if (size == -1) {
 		U_LOG_E("Could not get socket file name");
-		return -1;
+		ret = -1;
+		goto err_close;
 	}
 
 	// Make sure the path fits.
 	const int dst_size = (int)ARRAY_SIZE(addr.sun_path);
 	if (size >= dst_size) {
 		U_LOG_E("Total IPC path too long (%i > %i)", size, dst_size);
-		return -1;
+		ret = -1;
+		goto err_close;
 	}
 
 	// Struct zero init at declaration.
@@ -119,7 +121,7 @@ create_listen_socket(struct ipc_server_mainloop *ml, int *out_fd)
 		ret = unlink(sock_file);
 		if (ret < 0) {
 			U_LOG_E("Failed to remove stale socket file %s: %s", sock_file, strerror(errno));
-			return ret;
+			goto err_close;
 		}
 		ret = bind(fd, (struct sockaddr *)&addr, sizeof(addr));
 	}
@@ -135,20 +137,22 @@ create_listen_socket(struct ipc_server_mainloop *ml, int *out_fd)
 			U_LOG_E("If monado-service is not running, delete %s before starting a new instance",
 			        sock_file);
 		}
-		close(fd);
-		return ret;
+		goto err_close;
 	}
 	// Save for later
 	ml->socket_filename = strdup(sock_file);
 
 	ret = listen(fd, IPC_MAX_CLIENTS);
 	if (ret < 0) {
-		close(fd);
-		return ret;
+		goto err_close;
 	}
 	U_LOG_D("Created listening socket %s.", sock_file);
 	*out_fd = fd;
 	return 0;
+
+err_close:
+	close(fd);
+	return ret;
 }
 
 static int

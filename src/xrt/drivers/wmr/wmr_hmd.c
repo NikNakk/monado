@@ -930,11 +930,9 @@ wmr_read_config_part(struct wmr_hmd *wh, unsigned char type, unsigned char *data
 {
 	DRV_TRACE_MARKER();
 
-	unsigned char buf[33];
-	int offset = 0;
-	int size;
+	unsigned char buf[33] = {0};
 
-	size = wmr_config_command_sync(wh, 0x0b, buf, sizeof(buf));
+	int size = wmr_config_command_sync(wh, 0x0b, buf, sizeof(buf));
 	if (size != 33 || buf[0] != 0x02) {
 		WMR_ERROR(wh, "Failed to issue command 0b: %02x %02x %02x", buf[0], buf[1], buf[2]);
 		return -1;
@@ -946,6 +944,7 @@ wmr_read_config_part(struct wmr_hmd *wh, unsigned char type, unsigned char *data
 		return -1;
 	}
 
+	int offset = 0;
 	while (true) {
 		size = wmr_config_command_sync(wh, 0x08, buf, sizeof(buf));
 		if (size != 33 || (buf[1] != 0x01 && buf[1] != 0x02)) {
@@ -974,24 +973,20 @@ wmr_read_config_raw(struct wmr_hmd *wh, uint8_t **out_data, size_t *out_size)
 {
 	DRV_TRACE_MARKER();
 
-	unsigned char meta[84];
-	uint8_t *data;
-	int size;
-	int data_size;
-
-	size = wmr_read_config_part(wh, 0x06, meta, sizeof(meta));
+	unsigned char meta[84] = {0};
+	int size = wmr_read_config_part(wh, 0x06, meta, sizeof(meta));
 	WMR_DEBUG(wh, "(0x06, meta) => %d", size);
-
-	if (size < 0) {
-		return -1;
-	}
 
 	/*
 	 * No idea what the other 64 bytes of metadata are, but the first two
 	 * seem to be little endian size of the data store.
 	 */
-	data_size = meta[0] | (meta[1] << 8);
-	data = calloc(1, data_size + 1);
+	if (size < 2) {
+		return -1;
+	}
+
+	int data_size = meta[0] | (meta[1] << 8);
+	uint8_t *data = calloc(1, data_size + 1);
 	if (!data) {
 		return -1;
 	}

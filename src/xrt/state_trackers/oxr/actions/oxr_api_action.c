@@ -867,6 +867,18 @@ oxr_xrApplyHapticFeedback(XrSession session,
 
 	if (hapticEvent->type == XR_TYPE_HAPTIC_PCM_VIBRATION_FB) {
 		OXR_VERIFY_EXTENSION(&log, sess->sys->inst, FB_haptic_pcm);
+
+		const XrHapticPcmVibrationFB *data = (const XrHapticPcmVibrationFB *)hapticEvent;
+		if (data->bufferSize == 0) {
+			return oxr_error(&log, XR_ERROR_VALIDATION_FAILURE,
+			                 "(hapticEvent->bufferSize == 0) cannot be zero");
+		}
+		if (data->buffer == NULL) {
+			return oxr_error(&log, XR_ERROR_VALIDATION_FAILURE, "(hapticEvent->buffer == NULL)");
+		}
+		if (data->samplesConsumed == NULL) {
+			return oxr_error(&log, XR_ERROR_VALIDATION_FAILURE, "(hapticEvent->samplesConsumed == NULL)");
+		}
 	} else {
 		OXR_VERIFY_ARG_TYPE_AND_NOT_NULL(&log, hapticEvent, XR_TYPE_HAPTIC_VIBRATION);
 	}

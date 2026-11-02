@@ -1,4 +1,5 @@
 // Copyright 2026, Nick Kennedy
+// Copyright 2026, NVIDIA CORPORATION.
 // SPDX-License-Identifier: BSL-1.0
 /*!
  * @file
@@ -8,14 +9,23 @@
 
 #include "server/ipc_server.h"
 #include "server/ipc_server_thread_shutdown.h"
+#include "shared/ipc_message_channel.h"
 #include "catch_amalgamated.hpp"
 
 #include <chrono>
 #include <condition_variable>
 #include <memory>
 #include <cwchar>
+#include <cstring>
 #include <mutex>
 #include <thread>
+#include <vector>
+
+#ifndef XRT_OS_WINDOWS
+#include <sys/ioctl.h>
+#include <sys/socket.h>
+#include <unistd.h>
+#endif
 
 namespace {
 struct Fixture
@@ -34,6 +44,10 @@ struct Fixture
 	bool read_attempted = false;
 	BOOL read_succeeded = TRUE;
 	DWORD read_error = ERROR_SUCCESS;
+#else
+	int socket_fd = -1;
+	bool socket_send = false;
+	xrt_result_t socket_result = XRT_SUCCESS;
 #endif
 	struct Client
 	{
@@ -44,11 +58,9 @@ struct Fixture
 	Fixture()
 	{
 		os_mutex_init(&server->global_state.lock);
-#ifdef XRT_OS_WINDOWS
 		for (auto &thread : server->threads) {
 			thread.ics.imc.ipc_handle = XRT_IPC_HANDLE_INVALID;
 		}
-#endif
 	}
 	~Fixture()
 	{
@@ -91,6 +103,24 @@ struct Fixture
 				f.read_succeeded = ReadFile(f.pipe, &byte, 1, &bytes, nullptr);
 				f.read_error = f.read_succeeded ? ERROR_SUCCESS : GetLastError();
 				lock.lock();
+			} else
+#else
+			if (f.socket_fd >= 0) {
+				// Model a handler blocked mid-message on its client socket.
+				lock.unlock();
+				struct ipc_message_channel imc = {f.socket_fd, U_LOGGING_WARN};
+				xrt_result_t xret;
+				if (f.socket_send) {
+					// More than the socket buffer holds, and the peer never reads.
+					std::vector<uint8_t> data(4 * 1024 * 1024);
+					xret = ipc_send(&imc, data.data(), data.size());
+				} else {
+					// The peer sends less than this, so the receive waits for the rest.
+					uint8_t data[64];
+					xret = ipc_receive(&imc, data, sizeof(data));
+				}
+				lock.lock();
+				f.socket_result = xret;
 			} else
 #endif
 			{
@@ -254,4 +284,143 @@ TEST_CASE("Windows server shutdown releases synchronous named-pipe reads")
 	CHECK(f.server->threads[0].state == IPC_THREAD_READY);
 	ipc_server_stop_and_join_client_threads(f.server.get());
 }
+#endif
+
+#ifndef XRT_OS_WINDOWS
+namespace {
+struct SocketPair
+{
+	int fds[2] = {-1, -1};
+	~SocketPair()
+	{
+		for (int fd : fds) {
+			if (fd >= 0) {
+				close(fd);
+			}
+		}
+	}
+};
+
+int
+queued_bytes(int fd)
+{
+	int queued = 0;
+	REQUIRE(ioctl(fd, FIONREAD, &queued) == 0);
+	return queued;
+}
+} // namespace
+
+TEST_CASE("Unix server shutdown releases a receive waiting for the rest of a payload")
+{
+	// Declared before the fixture so the sockets outlive its thread join.
+	SocketPair sockets;
+	REQUIRE(socketpair(AF_UNIX, SOCK_STREAM, 0, sockets.fds) == 0);
+	Fixture f;
+	f.socket_fd = sockets.fds[0];
+	f.server->threads[0].ics.imc.ipc_handle = sockets.fds[0];
+
+	// Send 16 of the 64 bytes the client thread waits for.
+	uint8_t partial[16] = {};
+	REQUIRE(send(sockets.fds[1], partial, sizeof(partial), MSG_NOSIGNAL) == (ssize_t)sizeof(partial));
+
+	f.start(1);
+
+	// Once the 16 bytes are consumed, the receive is waiting for the rest.
+	auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
+	while (queued_bytes(sockets.fds[0]) != 0 && std::chrono::steady_clock::now() < deadline) {
+		std::this_thread::yield();
+	}
+	REQUIRE(queued_bytes(sockets.fds[0]) == 0);
+
+	ipc_server_stop_and_join_client_threads(f.server.get());
+	CHECK(f.socket_result == XRT_ERROR_IPC_FAILURE);
+	CHECK(f.exited == 1);
+	CHECK(f.server->threads[0].state == IPC_THREAD_READY);
+}
+
+TEST_CASE("Unix server shutdown releases a send the client never reads")
+{
+	// Declared before the fixture so the sockets outlive its thread join.
+	SocketPair sockets;
+	REQUIRE(socketpair(AF_UNIX, SOCK_STREAM, 0, sockets.fds) == 0);
+	Fixture f;
+	f.socket_fd = sockets.fds[0];
+	f.socket_send = true;
+	f.server->threads[0].ics.imc.ipc_handle = sockets.fds[0];
+
+	f.start(1);
+
+	// Wait until the send has started filling the peer's queue.
+	auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
+	while (queued_bytes(sockets.fds[1]) == 0 && std::chrono::steady_clock::now() < deadline) {
+		std::this_thread::yield();
+	}
+	REQUIRE(queued_bytes(sockets.fds[1]) > 0);
+
+	ipc_server_stop_and_join_client_threads(f.server.get());
+	CHECK(f.socket_result == XRT_ERROR_IPC_FAILURE);
+	CHECK(f.exited == 1);
+	CHECK(f.server->threads[0].state == IPC_THREAD_READY);
+}
+
+#ifdef XRT_OS_OSX
+TEST_CASE("macOS fd transport completes a payload fragmented after its descriptor")
+{
+	SocketPair sockets;
+	SocketPair pipe_ends;
+	REQUIRE(socketpair(AF_UNIX, SOCK_STREAM, 0, sockets.fds) == 0);
+	REQUIRE(pipe(pipe_ends.fds) == 0);
+	uint8_t expected[64];
+	for (unsigned i = 0; i < sizeof(expected); ++i) {
+		expected[i] = static_cast<uint8_t>(i);
+	}
+	alignas(cmsghdr) char control[CMSG_SPACE(sizeof(int))] = {};
+	iovec iov = {expected, 16};
+	msghdr msg = {};
+	msg.msg_iov = &iov;
+	msg.msg_iovlen = 1;
+	msg.msg_control = control;
+	msg.msg_controllen = sizeof(control);
+	auto *cmsg = CMSG_FIRSTHDR(&msg);
+	cmsg->cmsg_level = SOL_SOCKET;
+	cmsg->cmsg_type = SCM_RIGHTS;
+	cmsg->cmsg_len = CMSG_LEN(sizeof(int));
+	memcpy(CMSG_DATA(cmsg), &pipe_ends.fds[0], sizeof(int));
+	REQUIRE(sendmsg(sockets.fds[1], &msg, MSG_NOSIGNAL) == 16);
+	xrt_result_t sent = XRT_ERROR_IPC_FAILURE;
+	std::thread tail([&] {
+		// Make the receive consume the descriptor-bearing prefix before the tail is available.
+		auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
+		int queued = 16;
+		while (ioctl(sockets.fds[0], FIONREAD, &queued) == 0 && queued > 0 &&
+		       std::chrono::steady_clock::now() < deadline) {
+			std::this_thread::yield();
+		}
+		if (queued != 0) {
+			shutdown(sockets.fds[1], SHUT_WR);
+			return;
+		}
+		ipc_message_channel channel = {sockets.fds[1], U_LOGGING_WARN};
+		sent = ipc_send(&channel, expected + 16, sizeof(expected) - 16);
+	});
+	ipc_message_channel channel = {sockets.fds[0], U_LOGGING_WARN};
+	uint8_t received[64] = {};
+	int fd = -1;
+	auto result = ipc_receive_fds(&channel, received, sizeof(received), &fd, 1);
+	tail.join();
+	CHECK(sent == XRT_SUCCESS);
+	CHECK(result == XRT_SUCCESS);
+	CHECK(memcmp(received, expected, sizeof(expected)) == 0);
+	if (fd >= 0) {
+		const char byte = 0x42;
+		CHECK(write(pipe_ends.fds[1], &byte, 1) == 1);
+		char read_byte = 0;
+		CHECK(read(fd, &read_byte, 1) == 1);
+		CHECK(read_byte == byte);
+		close(fd);
+	} else {
+		FAIL("The received descriptor is missing");
+	}
+}
+#endif
 #endif

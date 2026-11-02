@@ -1,0 +1,10 @@
+{
+	"eye_gaze_interaction_to_psvr2_eye_gaze_internal_mndx": {
+		"source_profile": "/interaction_profiles/ext/eye_gaze_interaction",
+		"target_profile": "/interaction_profiles/mndx/psvr2_eye_gaze_internal_mndx",
+		"bindings": {
+			"/user/eyes_ext/input/gaze_ext": true,
+			"/user/eyes_ext/input/gaze_ext/pose": true
+		}
+	}
+}

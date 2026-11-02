@@ -95,6 +95,21 @@ ipc_handle_app_system_destroy(volatile struct ipc_client_state *ics, uint32_t xa
 }
 
 xrt_result_t
+ipc_handle_app_system_poll_events(volatile struct ipc_client_state *ics,
+                                  uint32_t id,
+                                  struct xrt_app_system_event *out_xasyse)
+{
+	struct xrt_app_system *xasys = NULL;
+	GET_XASYS_OR_RETURN(ics, id, xasys);
+
+	if (xasys == NULL) {
+		return XRT_ERROR_IPC_FAILURE;
+	}
+
+	return xrt_app_system_poll_events(xasys, out_xasyse);
+}
+
+xrt_result_t
 ipc_handle_app_system_get_recommended_view_configuration(
     volatile struct ipc_client_state *ics,
     uint32_t id,

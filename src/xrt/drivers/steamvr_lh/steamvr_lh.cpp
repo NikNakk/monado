@@ -9,6 +9,7 @@
  */
 
 #include "xrt/xrt_config_arch.h"
+#include "xrt/xrt_config_drivers.h"
 #include "xrt/xrt_system.h"
 
 #include "interfaces/context.hpp"
@@ -22,6 +23,10 @@
 #include "vive/vive_bindings.h"
 
 #include "math/m_api.h"
+
+#ifdef XRT_BUILD_DRIVER_PIMAX_P2
+#include "pimax_p2/pimax_p2.h"
+#endif
 
 #include "openvr_driver.h"
 
@@ -993,6 +998,15 @@ Context::Log(const char *pchLogMessage)
 extern "C" enum xrt_result
 steamvr_lh_create_devices(struct xrt_prober *xp, struct xrt_system_devices *xsysd)
 {
+	// Pimax P2 init needs to happen before lighthouse init, as it may disconnect the HMD lighthouse USB device if
+	// PIMAX_REBOOT is enabled, which resets the USB hub in the headset.
+	// The lighthouse driver does not reconnect to USB devices and will stop tracking devices that have been
+	// disconnected.
+#ifdef XRT_BUILD_DRIVER_PIMAX_P2
+	pimax_p2_device *pdev = nullptr;
+	pimax_p2_init(&pdev);
+#endif
+
 	u_logging_level level = debug_get_log_option_lh_log();
 	// The driver likes to create a bunch of transient folders -
 	// let's try to make sure they're created where they normally are.
@@ -1073,6 +1087,15 @@ steamvr_lh_create_devices(struct xrt_prober *xp, struct xrt_system_devices *xsys
 		if (ctx->hmd->variant == VIVE_VARIANT_PRO2 && !ctx->hmd->init_vive_pro_2(xp)) {
 			U_LOG_IFL_W(level, "Found Vive Pro 2, but failed to initialize.");
 		}
+#ifdef XRT_BUILD_DRIVER_PIMAX_P2
+		if (ctx->hmd->variant == VIVE_VARIANT_PIMAX_P2 && (pdev == nullptr || !ctx->hmd->init_pimax(pdev))) {
+			U_LOG_IFL_W(level, "Found Pimax P2, but failed to initialize.");
+		}
+#else
+		if (ctx->hmd->variant == VIVE_VARIANT_PIMAX_P2) {
+			U_LOG_IFL_W(level, "Found Pimax P2, but the driver is not compiled in.");
+		}
+#endif
 
 		xsysd->static_xdevs[xsysd->static_xdev_count++] = ctx->hmd;
 	}

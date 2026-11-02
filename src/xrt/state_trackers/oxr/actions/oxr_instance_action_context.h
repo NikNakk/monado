@@ -73,24 +73,20 @@ struct oxr_instance_action_context
  */
 
 /*!
- * Create a new instance action context (reference count 1) and install the
- * generated binding registry.
+ * Create a new instance action context (reference count 1).
  *
  * @param log Logger
- * @param store Path store used to create the binding registry
+ * @param registry Binding registry used by the context, the context takes a
+ *        reference to it.
  * @param out_context On success, the new context (refcount 1). Caller must
  *        call @ref oxr_refcounted_unref on context->base when done.
  * @public @memberof oxr_instance_action_context
  * @ingroup oxr_main
  */
 XRT_CHECK_RESULT XrResult
-oxr_instance_action_context_create_with_registry(struct oxr_logger *log,
-                                                 struct oxr_path_store *store,
-                                                 struct oxr_instance_action_context **out_context);
-
-void
-oxr_instance_action_context_set_binding_registry(struct oxr_instance_action_context *context,
-                                                 struct oxr_binding_registry *registry);
+oxr_instance_action_context_create(struct oxr_logger *log,
+                                   struct oxr_binding_registry *registry,
+                                   struct oxr_instance_action_context **out_context);
 
 
 #ifdef __cplusplus

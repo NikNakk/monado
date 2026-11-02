@@ -513,6 +513,12 @@ struct ipc_server
 		// Counter for total number of connected clients
 		uint32_t connected_client_count;
 
+		/*!
+		 * Never hold this across client socket I/O (ipc_send, ipc_receive and
+		 * the handle variants). Every client loop, new connections and the
+		 * shutdown path that cancels blocked I/O take this lock, so a client
+		 * that stops mid-message would stall the whole server.
+		 */
 		struct os_mutex lock;
 	} global_state;
 

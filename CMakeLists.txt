@@ -388,6 +388,7 @@ option_with_deps(XRT_BUILD_DRIVER_WMR "Enable Windows Mixed Reality driver" DEPE
 option_with_deps(XRT_BUILD_DRIVER_XREAL_AIR "Enable Xreal Air HMD driver" DEPENDS XRT_HAVE_HIDAPI)
 option_with_deps(XRT_BUILD_DRIVER_SIMULAVR "Enable simula driver" DEPENDS XRT_HAVE_REALSENSE)
 option_with_deps(XRT_BUILD_DRIVER_SOLARXR "Enable SolarXR driver" DEPENDS XRT_HAVE_LINUX XRT_MODULE_IPC)
+option_with_deps(XRT_BUILD_DRIVER_PIMAX_P2 "Enable Pimax P2 driver" DEPENDS XRT_BUILD_DRIVER_STEAMVR_LIGHTHOUSE XRT_HAVE_HIDAPI)
 option(XRT_BUILD_DRIVER_SIMULATED "Enable simulated driver" ON)
 
 option(XRT_BUILD_SAMPLES "Enable compiling sample code implementations that will not be linked into any final targets" ON)
@@ -430,6 +431,12 @@ option(XRT_FEATURE_OPENXR_OVERLAY "Enable XR_EXTX_overlay" ON)
 option(XRT_FEATURE_OPENXR_PERFORMANCE_SETTINGS "Enable XR_EXT_performance_settings" OFF)
 option(XRT_FEATURE_OPENXR_PLANE_DETECTION "Enable XR_EXT_plane_detection" OFF)
 option(XRT_FEATURE_OPENXR_USER_PRESENCE "Enable XR_EXT_user_presence" ON)
+if(APPLE)
+	set(XRT_OPENXR_VIEW_CONFIGURATION_VIEWS_CHANGE_DEFAULT OFF)
+else()
+	set(XRT_OPENXR_VIEW_CONFIGURATION_VIEWS_CHANGE_DEFAULT ON)
+endif()
+option(XRT_FEATURE_OPENXR_VIEW_CONFIGURATION_VIEWS_CHANGE "Enable XR_EXT_view_configuration_views_change" ${XRT_OPENXR_VIEW_CONFIGURATION_VIEWS_CHANGE_DEFAULT})
 option(XRT_FEATURE_OPENXR_VARJO_QUAD_VIEWS "Enable XR_VARJO_quad_views" ON)
 option(XRT_FEATURE_OPENXR_VISIBILITY_MASK "Enable XR_KHR_visibility_mask" ON)
 option(XRT_FEATURE_OPENXR_VULKAN_SWAPCHAIN_FORMAT_LIST "Enable XR_KHR_vulkan_swapchain_format_list" ON)
@@ -531,6 +538,7 @@ list(
 	"XREAL_AIR"
 	"STEAMVR_LIGHTHOUSE"
 	"SOLARXR"
+	"PIMAX_P2"
 	)
 
 # Package name needs to be known by the native code itself.
@@ -757,6 +765,7 @@ message(STATUS "#    FEATURE_OPENXR_MNDX_FOVEATION_METAL:                   ${XR
 	message(STATUS "#    FEATURE_OPENXR_SPACE_LOCAL_FLOOR:                      ${XRT_FEATURE_OPENXR_SPACE_LOCAL_FLOOR}")
 	message(STATUS "#    FEATURE_OPENXR_SPACE_UNBOUNDED:                        ${XRT_FEATURE_OPENXR_SPACE_UNBOUNDED}")
 	message(STATUS "#    FEATURE_OPENXR_USER_PRESENCE:                          ${XRT_FEATURE_OPENXR_USER_PRESENCE}")
+	message(STATUS "#    FEATURE_OPENXR_VIEW_CONFIGURATION_VIEWS_CHANGE:        ${XRT_FEATURE_OPENXR_VIEW_CONFIGURATION_VIEWS_CHANGE}")
 	message(STATUS "#    FEATURE_OPENXR_VISIBILITY_MASK:                        ${XRT_FEATURE_OPENXR_VISIBILITY_MASK}")
 	message(STATUS "#    FEATURE_OPENXR_VULKAN_SWAPCHAIN_FORMAT_LIST:           ${XRT_FEATURE_OPENXR_VULKAN_SWAPCHAIN_FORMAT_LIST}")
 	message(STATUS "#    FEATURE_OPENXR_XDEV_SPACE:                             ${XRT_FEATURE_OPENXR_XDEV_SPACE}")
@@ -800,6 +809,7 @@ message(STATUS "#    DRIVER_WMR:                  ${XRT_BUILD_DRIVER_WMR}")
 message(STATUS "#    DRIVER_XREAL_AIR:            ${XRT_BUILD_DRIVER_XREAL_AIR}")
 message(STATUS "#    DRIVER_STEAMVR_LIGHTHOUSE:   ${XRT_BUILD_DRIVER_STEAMVR_LIGHTHOUSE}")
 message(STATUS "#    DRIVER_SOLARXR:              ${XRT_BUILD_DRIVER_SOLARXR}")
+message(STATUS "#    DRIVER_PIMAX_P2:             ${XRT_BUILD_DRIVER_PIMAX_P2}")
 message(STATUS "#####----- Config -----#####")
 # cmake-format: on
 

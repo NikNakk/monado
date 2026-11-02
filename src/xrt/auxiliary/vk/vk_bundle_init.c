@@ -16,7 +16,13 @@
  * @ingroup aux_vk
  */
 
+#include "xrt/xrt_config_os.h"
+
 #include "util/u_pretty_print.h"
+
+#ifdef XRT_OS_WINDOWS
+#include "util/u_windows.h"
+#endif
 
 #include "vk/vk_compositor_flags.h"
 #include "vk/vk_helpers.h"
@@ -389,21 +395,27 @@ fill_in_external_object_properties(struct vk_bundle *vk)
 #endif
 #if defined(XRT_GRAPHICS_SYNC_HANDLE_IS_FD)
 
-	vk->external.fence_sync_fd = vk->has_KHR_external_fence_fd && is_fence_bit_supported( //
-	    vk, VK_EXTERNAL_FENCE_HANDLE_TYPE_SYNC_FD_BIT);
-	vk->external.fence_opaque_fd = vk->has_KHR_external_fence_fd && is_fence_bit_supported( //
-	    vk, VK_EXTERNAL_FENCE_HANDLE_TYPE_OPAQUE_FD_BIT);
+	vk->external.fence_sync_fd =
+	    vk->has_KHR_external_fence_fd && is_fence_bit_supported( //
+	                                         vk, VK_EXTERNAL_FENCE_HANDLE_TYPE_SYNC_FD_BIT);
+	vk->external.fence_opaque_fd =
+	    vk->has_KHR_external_fence_fd && is_fence_bit_supported( //
+	                                         vk, VK_EXTERNAL_FENCE_HANDLE_TYPE_OPAQUE_FD_BIT);
 
-	vk->external.binary_semaphore_sync_fd = vk->has_KHR_external_semaphore_fd && is_binary_semaphore_bit_supported( //
-	    vk, VK_EXTERNAL_SEMAPHORE_HANDLE_TYPE_SYNC_FD_BIT);
-	vk->external.binary_semaphore_opaque_fd = vk->has_KHR_external_semaphore_fd && is_binary_semaphore_bit_supported( //
-	    vk, VK_EXTERNAL_SEMAPHORE_HANDLE_TYPE_OPAQUE_FD_BIT);
+	vk->external.binary_semaphore_sync_fd =
+	    vk->has_KHR_external_semaphore_fd && is_binary_semaphore_bit_supported( //
+	                                             vk, VK_EXTERNAL_SEMAPHORE_HANDLE_TYPE_SYNC_FD_BIT);
+	vk->external.binary_semaphore_opaque_fd =
+	    vk->has_KHR_external_semaphore_fd && is_binary_semaphore_bit_supported( //
+	                                             vk, VK_EXTERNAL_SEMAPHORE_HANDLE_TYPE_OPAQUE_FD_BIT);
 
 	//! @todo Is this safe to assume working, do we need to check an extension?
-	vk->external.timeline_semaphore_sync_fd = vk->has_KHR_external_semaphore_fd && is_timeline_semaphore_bit_supported( //
-	    vk, VK_EXTERNAL_SEMAPHORE_HANDLE_TYPE_SYNC_FD_BIT);
-	vk->external.timeline_semaphore_opaque_fd = vk->has_KHR_external_semaphore_fd && is_timeline_semaphore_bit_supported( //
-	    vk, VK_EXTERNAL_SEMAPHORE_HANDLE_TYPE_OPAQUE_FD_BIT);
+	vk->external.timeline_semaphore_sync_fd =
+	    vk->has_KHR_external_semaphore_fd && is_timeline_semaphore_bit_supported( //
+	                                             vk, VK_EXTERNAL_SEMAPHORE_HANDLE_TYPE_SYNC_FD_BIT);
+	vk->external.timeline_semaphore_opaque_fd =
+	    vk->has_KHR_external_semaphore_fd && is_timeline_semaphore_bit_supported( //
+	                                             vk, VK_EXTERNAL_SEMAPHORE_HANDLE_TYPE_OPAQUE_FD_BIT);
 
 #elif defined(XRT_GRAPHICS_SYNC_HANDLE_IS_WIN32_HANDLE)
 
@@ -660,6 +672,13 @@ filter_device_features(struct vk_bundle *vk,
 	};
 #endif
 
+#ifdef VK_EXT_image_tiling_control
+	VkPhysicalDeviceImageTilingControlFeaturesEXT image_tiling_control_info = {
+	    .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_IMAGE_TILING_CONTROL_FEATURES_EXT,
+	    .pNext = NULL,
+	};
+#endif
+
 	VkPhysicalDeviceFeatures2 physical_device_features = {
 	    .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2,
 	    .pNext = NULL,
@@ -727,6 +746,13 @@ filter_device_features(struct vk_bundle *vk,
 	}
 #endif
 
+#ifdef VK_EXT_image_tiling_control
+	if (vk->has_EXT_image_tiling_control) {
+		vk_append_to_pnext_chain((VkBaseInStructure *)&physical_device_features,
+		                         (VkBaseInStructure *)&image_tiling_control_info);
+	}
+#endif
+
 	vk->vkGetPhysicalDeviceFeatures2( //
 	    physical_device,              // physicalDevice
 	    &physical_device_features);   // pFeatures
@@ -779,6 +805,10 @@ filter_device_features(struct vk_bundle *vk,
 	CHECK(ext_fmt_resolve, ext_fmt_resolve_info.externalFormatResolve);
 #endif
 
+#ifdef VK_EXT_image_tiling_control
+	CHECK(image_tiling_control, image_tiling_control_info.imageTilingControl);
+#endif
+
 	CHECK(shader_image_gather_extended, physical_device_features.features.shaderImageGatherExtended);
 
 	CHECK(shader_storage_image_write_without_format,
@@ -798,7 +828,8 @@ filter_device_features(struct vk_bundle *vk,
 	         "\n\tstorage_buffer_8bit_access: %i"
 	         "\n\tsynchronization_2: %i"
 	         "\n\ttimeline_semaphore: %i"
-	         "\n\tvideo_maintenance_1: %i",                              //
+	         "\n\tvideo_maintenance_1: %i"
+	         "\n\timage_tiling_control: %i",                             //
 	         device_features->ext_fmt_resolve,                           //
 	         device_features->null_descriptor,                           //
 	         device_features->present_wait,                              //
@@ -808,7 +839,8 @@ filter_device_features(struct vk_bundle *vk,
 	         device_features->storage_buffer_8bit_access,                //
 	         device_features->synchronization_2,                         //
 	         device_features->timeline_semaphore,                        //
-	         device_features->video_maintenance_1);                      //
+	         device_features->video_maintenance_1,                       //
+	         device_features->image_tiling_control);                     //
 }
 
 static inline void
@@ -865,6 +897,38 @@ vk_insert_get_queue(struct vk_bundle *vk, const struct vk_queue_pair *new_queue)
 	return NULL;
 }
 
+static void
+select_queue_priorities(struct vk_bundle *vk,
+                        bool realtime_priority,
+                        const VkQueueGlobalPriorityEXT **out_prios,
+                        uint32_t *out_prio_count)
+{
+	static const VkQueueGlobalPriorityEXT realtime_prios[] = {
+	    VK_QUEUE_GLOBAL_PRIORITY_REALTIME_EXT, // This is the one we really want.
+	    VK_QUEUE_GLOBAL_PRIORITY_HIGH_EXT,     // Probably not as good but something.
+	    VK_QUEUE_GLOBAL_PRIORITY_MEDIUM_EXT,   // Default fallback.
+	};
+
+	static const VkQueueGlobalPriorityEXT medium_prios[] = {
+	    VK_QUEUE_GLOBAL_PRIORITY_MEDIUM_EXT,
+	};
+
+	// If we don't have global priority, only allow medium priority queues.
+	bool try_realtime = realtime_priority && (vk->has_EXT_global_priority || vk->has_KHR_global_priority);
+#ifdef XRT_OS_WINDOWS
+	// NVIDIA needs SeIncreaseBasePriorityPrivilege for HIGH and REALTIME queues.
+	try_realtime = try_realtime && u_win_grant_inc_base_priorty_base_privileges(vk->log_level);
+#endif
+
+	if (try_realtime) {
+		*out_prios = realtime_prios;
+		*out_prio_count = ARRAY_SIZE(realtime_prios);
+	} else {
+		*out_prios = medium_prios;
+		*out_prio_count = ARRAY_SIZE(medium_prios);
+	}
+}
+
 
 /*
  *
@@ -882,7 +946,7 @@ XRT_CHECK_RESULT VkResult
 vk_create_device(struct vk_bundle *vk,
                  int forced_index,
                  bool only_compute,
-                 VkQueueGlobalPriorityEXT global_priority,
+                 bool realtime_priority,
                  struct u_extension_list *required_device_ext_list,
                  struct u_extension_list *optional_device_ext_list,
                  const struct vk_device_features *optional_device_features)
@@ -919,19 +983,12 @@ vk_create_device(struct vk_bundle *vk,
 	vk->features.present_wait = device_features.present_wait;
 	vk->features.present_wait2 = device_features.present_wait2;
 	vk->features.video_maintenance_1 = device_features.video_maintenance_1;
+	vk->features.image_tiling_control = device_features.image_tiling_control;
 
 
 	/*
 	 * Queue
 	 */
-
-	// If we don't have global priority, only allow medium priority queues.
-	if (!vk->has_EXT_global_priority && //
-	    !vk->has_KHR_global_priority && //
-	    global_priority != VK_QUEUE_GLOBAL_PRIORITY_MEDIUM_EXT) {
-		ret = VK_ERROR_NOT_PERMITTED_EXT;
-		goto err_destroy;
-	}
 
 	vk_reset_queues(vk);
 
@@ -974,7 +1031,6 @@ vk_create_device(struct vk_bundle *vk,
 	VkDeviceQueueGlobalPriorityCreateInfoEXT priority_info = {
 	    .sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_GLOBAL_PRIORITY_CREATE_INFO_EXT,
 	    .pNext = NULL,
-	    .globalPriority = global_priority,
 	};
 
 #ifdef VK_KHR_video_encode_queue
@@ -1086,6 +1142,14 @@ vk_create_device(struct vk_bundle *vk,
 	};
 #endif
 
+#ifdef VK_EXT_image_tiling_control
+	VkPhysicalDeviceImageTilingControlFeaturesEXT image_tiling_control_info = {
+	    .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_IMAGE_TILING_CONTROL_FEATURES_EXT,
+	    .pNext = NULL,
+	    .imageTilingControl = device_features.image_tiling_control,
+	};
+#endif
+
 	VkPhysicalDeviceFeatures enabled_features = {
 	    .shaderImageGatherExtended = device_features.shader_image_gather_extended,
 	    .shaderStorageImageWriteWithoutFormat = device_features.shader_storage_image_write_without_format,
@@ -1164,17 +1228,37 @@ vk_create_device(struct vk_bundle *vk,
 	}
 #endif
 
-	ret = vk->vkCreateDevice(vk->physical_device, &device_create_info, NULL, &vk->device);
+#ifdef VK_EXT_image_tiling_control
+	if (vk->has_EXT_image_tiling_control) {
+		vk_append_to_pnext_chain((VkBaseInStructure *)&device_create_info,
+		                         (VkBaseInStructure *)&image_tiling_control_info);
+	}
+#endif
+
+	const VkQueueGlobalPriorityEXT *prios = NULL;
+	uint32_t prio_count = 0;
+	select_queue_priorities(vk, realtime_priority, &prios, &prio_count);
+
+	// No other way then to try to see if realtime is available.
+	for (uint32_t i = 0; i < prio_count; i++) {
+		priority_info.globalPriority = prios[i];
+
+		ret = vk->vkCreateDevice(vk->physical_device, &device_create_info, NULL, &vk->device);
+		if (ret != VK_ERROR_NOT_PERMITTED_EXT) {
+			break;
+		}
+
+		// Don't spam the not permitted returns as we try all of the different priorities.
+		VK_DEBUG(vk, "Is CAP_SYS_NICE set? Try: sudo setcap cap_sys_nice+ep monado-service");
+	}
 
 	// Destroy the list now.
 	u_extension_list_destroy(&device_ext_list);
 
-	if (ret == VK_ERROR_NOT_PERMITTED_EXT) {
-		// Don't spam the not permitted returns as we try all of the different priorities.
-		VK_DEBUG(vk, "Is CAP_SYS_NICE set? Try: sudo setcap cap_sys_nice+ep monado-service");
-		goto err_destroy;
-	}
 	VK_CHK_WITH_GOTO(ret, "vkCreateDevice", err_destroy);
+
+	VK_INFO(vk, "Created device and %s queue with %s.", only_compute ? "COMPUTE" : "GRAPHICS",
+	        vk_queue_priority_string(priority_info.globalPriority));
 
 	// Fill in the device features we are interested in.
 	fill_in_device_features(vk, main_queue.family_index);

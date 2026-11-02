@@ -58,6 +58,14 @@ oxr_binding_profile_find_binding_point(const struct oxr_binding_profile *profile
                                        XrPath path,
                                        const struct oxr_binding_point **out_binding_point);
 
+/*!
+ * Does @p profile bind to the top-level @p subaction_path?
+ *
+ * @memberof oxr_binding_profile
+ */
+bool
+oxr_binding_profile_binds_to_subaction(const struct oxr_binding_profile *profile, XrPath subaction_path);
+
 
 #ifdef __cplusplus
 }

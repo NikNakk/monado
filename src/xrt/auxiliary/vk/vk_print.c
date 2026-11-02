@@ -905,6 +905,18 @@ vk_power_state_string(VkDisplayPowerStateEXT code)
 }
 
 XRT_CHECK_RESULT const char *
+vk_queue_priority_string(VkQueueGlobalPriorityEXT priority)
+{
+	switch (priority) {
+		ENUM_TO_STR(VK_QUEUE_GLOBAL_PRIORITY_LOW_EXT);
+		ENUM_TO_STR(VK_QUEUE_GLOBAL_PRIORITY_MEDIUM_EXT);
+		ENUM_TO_STR(VK_QUEUE_GLOBAL_PRIORITY_HIGH_EXT);
+		ENUM_TO_STR(VK_QUEUE_GLOBAL_PRIORITY_REALTIME_EXT);
+	default: return "UNKNOWN QUEUE PRIORITY";
+	}
+}
+
+XRT_CHECK_RESULT const char *
 vk_format_feature_flag_string(VkFormatFeatureFlagBits bits, bool null_on_unknown)
 {
 	switch (bits) {

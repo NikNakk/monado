@@ -4,7 +4,142 @@ Copyright 2026, Nick Kennedy
 SPDX-License-Identifier: BSL-1.0
 -->
 
-# Upstream merge exploration — 2026-11-02
+# Upstream merge review and integration — 2026-11-02
+
+## Integration implementation
+
+The user authorised the merge with preservation of the proven Sense tracker.
+The integration merges upstream `db1903bd4` into `macos-upstream-clean`, from
+integration parent `cf1c9e99b` (the review record on top of `ae2b6d059`).
+The exploration below is retained as the initial review, not the final status.
+
+### Tracking and compatibility decisions
+
+The production constellation sources, public tracking API, Sense and PS VR2
+drivers, Rift and Rift-sensor drivers, and PS VR2 Sense builder are unchanged
+from the integration parent. Joint solving, EKF, LED-space transforms, camera
+and illumination policy, reacquisition and selected settings are preserved.
+There is no second copy of the tracker and no new backend-selection toggle.
+
+The coupled upstream tracker migration is explicitly deferred for this sync,
+including its Rift changes. This preserves existing Linux/Rift behaviour;
+it does **not** claim to integrate the new upstream Rift fusion backend.
+These upstream commits enter ancestry but their changes are deferred:
+
+| Commits | Deferred change |
+| --- | --- |
+| `d823f1b9f` | Pose-metrics return-value/API changes, coupled to our separate association implementation. |
+| `2458cc046`, `a90761e99`, `85e7d233e` | Tracker prior ordering, device search order and pose-rejection changes. |
+| `54eebd9a4`, `6e8efeba5`, `c7f2c1c90`, `59be345db` | Rig calibration, online fusion, IMU changes, shared Ceres context and tracker-owned pose queries. |
+| `53ac594b1`, `d9178085a`, `5b1118e95`, `7a97f712e`, `9b73f2546`, `f9dd56627` | Related sensor-pose, sample/sequence, blob-coordinate, Rift calibration/capability and comment changes. |
+| `9884e32a8`, `d5893d16d`, `b1174ee76` | Follow-ups to the deferred fusion implementation. |
+
+Future upstream syncs must consult this list: Git ancestry alone will treat
+these commits as merged, although subsequent patches that depend on their
+new APIs still require adaptation or explicit deferral here.
+
+Legacy driver compatibility tables and their IPC metadata remain available.
+Upstream `129ed9cf7` (removal of these tables) and its QWERTY follow-up
+`647eb1b5c` are deliberately deferred, preserving optional Sense-to-Index,
+hand-controller emulation and the other recorded mappings. Upstream's generated
+rebinding improvements are integrated, including its PS VR2 gaze target and
+subaction-path filtering. Cache-based compatibility selection now also takes
+the subaction path, so head and gaze profiles cannot claim each other's slot.
+
+### Other merge resolutions
+
+- Adopt upstream shutdown cancellation, handler lock changes, haptic bounds,
+  I/O-block handling and IPC fixes. Keep macOS input-lock/share initialisation,
+  native ownership, hosting and GPU-lifetime protections.
+  Adapt the new cache PCM exchange to hold this fork's wire-send mutex through
+  the allocation handshake and payload, releasing it on every error and before
+  waiting for the final reply. Cache transport tests cover capped PCM contents,
+  blocked-output consumption and the next command's framing.
+- Adopt upstream's target-type-aware manifest filenames. A prefix install to
+  a temporary directory generates runtime and libmonado paths ending in
+  `.dylib`, both resolving to installed files.
+- Adopt unique ordinary POSIX shared-memory names and retain the private and
+  read-only APIs. Failed mappings still return a null output.
+- Adopt upstream's Unix byte transport and interrupted-operation handling.
+  Retain macOS graphics-handle transport and completion of fragmented fd
+  payloads, carrying the tail without sending SCM_RIGHTS again. Linux keeps
+  upstream's exact-size fd-message policy.
+- Combine image-tiling control with the platform-independent image-create
+  chain and Metal allocation path. Keep the private three-image request at
+  bit 3; assign tiling preference bit 4 to avoid changing the existing external
+  compatibility value. Upstream uses bit 3 in its own ABI; builds of this fork
+  consistently use the fork's enum. The preference is capability-gated and
+  makes no demonstrated macOS performance claim.
+- Keep the new view-configuration-change extension off by default on macOS,
+  with upstream's enabled default elsewhere. Existing macOS feature choices
+  and tracking environment preferences are unchanged.
+
+The added regression coverage checks shared-memory isolation, head/gaze
+subaction selection, macOS fragmented descriptor payloads, and real
+space-location/PCM handlers blocked after acknowledging allocation. The latter
+exercise the shutdown helper against the actual handlers, including repeated
+cleanup. They do not claim coverage of every full-service deadlock.
+
+### Linux test-only repairs
+
+The initial Linux suite exposed two inherited fixture problems. Neither repair
+changes production tracking or weakens the FD extension-negotiation assertions:
+
+- The Vulkan FD-sync mock omitted `vkGetPhysicalDeviceFormatProperties`, which
+  is used during external-image probing on Linux. Add that mock entry point;
+  its intentionally null FD export entry points remain null.
+- The sparse prior-reacquisition test asserted <40 mm error on every accepted
+  noisy single-camera observation with three or four real LEDs and clutter.
+  Linux seed 53/trial 40 returns 43.696 mm, with four matches and 0.848 px RMS.
+  A diagnostic refinement started at truth also fails, reaching 60.687 mm
+  error with four matches and 0.361 px RMS: this is not an independently
+  established unique-pose accuracy guarantee. The 80 trials accept 78 poses,
+  with 7.588 mm aggregate position RMS and two >20 mm errors.
+  Replace the per-observation 40 mm claim with **<10 mm aggregate RMS**,
+  retaining at least 60% acceptance, at most 10% >20 mm errors, the failure of
+  ordinary oriented bootstrap on these sparse inputs, and the separate search
+  radius/wrong-hand tests. This explicitly changes the statistical acceptance
+  criterion; it does not establish a hard bound on individual sparse poses.
+- Use explicit identity-matrix element assignments in the graphics foveation
+  fixture to remove its existing macOS missing-braces warning.
+
+### Validation and deployment
+
+Validation builds use `/private/tmp/monado-merge-arm64` and
+`/private/tmp/monado-merge-x64-client`, preserving the runnable development
+builds and installed runtime. The x86-64 client uses the existing universal
+MoltenVK dependency and its existing client-only dependency/feature selection.
+The first x86-64 validation setup accidentally selected arm64 Homebrew
+dependencies; correcting the temporary settings produces a successful build.
+
+The full macOS suite passes **94/94**, including three isolated launchd service
+GPU fault/recovery tests, Metal/Vulkan pixel tests, tracking fixtures and the
+new handler shutdown regressions. The new handler fixture initially omitted
+its per-client device slot and timed out in setup; that fixture error is fixed.
+The full default-options Ubuntu 24.04 x86-64 suite passes **58/58** in
+317.76 s under Docker emulation, with no compiler warnings. After the final
+PCM send-lock adaptation, all six affected Linux transport/binding/rendering
+test executables pass again (0.71 s), with a warning-free incremental build.
+The final macOS suite passes **94/94** again in 37.70 s, including all three
+isolated service recovery suites. Both native and x86-64 client builds pass.
+The final targeted render check also passes after the test initializer warning
+fix. Windows/Android CI and physical-headset regression were not run locally.
+
+Checks use the CI-pinned clang-format 23.1.1, cmakelang 0.6.13, codespell 2.4.1
+and REUSE 6.2.0. The contribution-check base is updated to `db1903bd4`.
+Formatting/spelling for merge-changed files passes. The full fork-wide check
+still reports pre-existing formatting in unchanged experiment, compositor,
+tracking and QWERTY files; retained tracking source is not reformatted during
+this sync. REUSE reports 154 pre-existing files without metadata and a missing
+GPL-3.0-or-later license for an existing xrizer patch. All 154 files are
+byte-identical to the integration parent; none is introduced by this merge.
+These existing contribution-check failures are not claimed as passing.
+
+No runtime is installed to the user's prefix, no registered service is
+restarted, no headset run is made, and nothing is pushed. Before deploying this
+source, rebuild matching native service/client, x86-64 client and external
+bridge/proxy against the changed IPC protocol. User-operated headset
+regression remains the deployment/publication gate.
 
 ## Scope and recommendation
 
@@ -18,13 +153,13 @@ that ancestor. The generic-controller/I/O-cache merges `7b1c728e7` and
 **Recommend a staged upstream integration, preserving the validated Sense
 backend.** The IPC shutdown improvements are suitable to adopt. A wholesale
 resolution in favour of upstream would replace tracking and compatibility
-behaviour that this fork deliberately retained. This exploration does not
-merge, commit, push, install, restart the service, or run headset hardware.
+behaviour that this fork deliberately retained. The initial exploration did
+not merge, commit, push, install, restart the service, or run headset hardware.
 
 `git merge-tree --write-tree HEAD upstream/main` produced trial tree
 `93d4925277201f1f5145259a4acf4a0d4e3ee50a` with **19 conflicted files**.
 This tree contains conflict markers and is not a buildable merge candidate.
-No integration branch or index change was made.
+No integration branch or index change was made during that initial exploration.
 
 ## Shutdown: an extension of our upstream contribution
 

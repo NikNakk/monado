@@ -892,25 +892,27 @@ branch-oriented companion to this document.
 
 ## Upstream sync
 
-The [2026-11-02 merge exploration](macos-upstream-merge-review-2026-11.md)
-compares current integration `ae2b6d059` (matching origin) with freshly fetched
-GitLab `main` at `db1903bd4`: 93 new upstream commits and 19 conflicted files
-in a trial merge. The October generic-controller/I/O-cache work below is now
-integrated via `b3ad95b0b`. Upstream's new shutdown changes extend our merged
-!3029 contribution; the expanded helper/transport suite passes 10/10 macOS
-runs. The full new merge is not implemented: constellation fusion/API changes
-need an explicit adaptation preserving the validated Sense joint/EKF path.
-No installed runtime or integration branch tip was changed by this review.
+The [2026-11-02 upstream integration](macos-upstream-merge-review-2026-11.md)
+merges GitLab `main` through `db1903bd4`, resolving the 19 conflicted files
+from 93 new upstream commits. It adopts shutdown/IPC, generated-binding,
+manifest and Vulkan improvements while deliberately deferring the coupled
+constellation fusion/API migration and legacy-table removal. Production Sense
+joint/EKF tracking, calibration, illumination and settings are unchanged.
+The native and x86-64 client builds pass; macOS passes 94/94 tests including
+isolated GPU service recovery, and Linux passes 58/58. The review records the
+pre-existing contribution-check failures. Nothing is installed or pushed;
+matching service/client/proxy rebuilds and a user-operated headset check are
+required before deploying this source.
 
 
 The 2026-10-21 [generic-controller comparison and upstream merge](macos-upstream-generic-controller.md)
-is prepared on `codex/upstream-generic-controller`, based on the current WSI
-fragment-output branch. It adopts upstream's generated action/rebinding system
+was prepared on `codex/upstream-generic-controller` from the WSI
+fragment-output branch and is now integrated via `b3ad95b0b`. It adopts upstream's generated action/rebinding system
 through `9fd3968ba`, preserving two generic fallback behaviors, Sense LED-space
 tracking and opt-in defaults. The eight I/O-cache commits now carry remaining
 compatibility mappings in a service-selected, pointer-free cache snapshot.
 Automated validation and the user-operated headset gate are recorded in the review.
-This does not move `macos-upstream-clean` or install/push a runtime.
+That review record predates its integration; it did not itself install or push a runtime.
 
 
 On 2026-10-07, `macos-upstream-clean` merged GitLab upstream `main` through

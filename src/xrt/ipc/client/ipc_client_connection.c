@@ -122,11 +122,13 @@ ipc_connect_pipe(struct ipc_connection *ipc_c, const char *pipe_name)
 	HMODULE hmod;
 	if (!GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
 	                        (LPCSTR)ipc_connect_pipe, &hmod)) {
+		err = GetLastError();
 		IPC_ERROR(ipc_c, "GetModuleHandleExA failed: %lu %s", err, ipc_winerror(err));
 		return INVALID_HANDLE_VALUE;
 	}
 	char current_path[MAX_PATH] = {0};
 	if (!GetModuleFileNameA(hmod, current_path, sizeof(current_path))) {
+		err = GetLastError();
 		IPC_ERROR(ipc_c, "GetModuleFileNameA failed: %lu %s", err, ipc_winerror(err));
 		return INVALID_HANDLE_VALUE;
 	}
@@ -136,10 +138,18 @@ ipc_connect_pipe(struct ipc_connection *ipc_c, const char *pipe_name)
 		return INVALID_HANDLE_VALUE;
 	}
 
+	/*!
+	 * @todo This tries <module file>\<exe> and then <module dir>\service\<exe>,
+	 * but never <module dir>\<exe>, so a service next to the runtime isn't found.
+	 */
 	char service_path[MAX_PATH] = {0};
 	snprintf(service_path, MAX_PATH, "%s\\%s", current_path, XRT_SERVICE_EXECUTABLE);
 	STARTUPINFOA si = {.cb = sizeof(si)};
 	PROCESS_INFORMATION pi;
+	/*!
+	 * @todo Both CreateProcessA calls get the path as an unquoted command line, which can start the wrong program
+	 * if the path contains spaces. Pass it as lpApplicationName instead.
+	 */
 	if (!CreateProcessA(NULL, service_path, NULL, NULL, false, 0, NULL, NULL, &si, &pi)) {
 		*p = 0;
 		p = strrchr(service_path, '\\');
@@ -337,7 +347,8 @@ ipc_client_setup_shm(struct ipc_connection *ipc_c)
 	const int flags = MAP_SHARED;
 	const int access = PROT_READ | PROT_WRITE;
 
-	ipc_c->ism = mmap(NULL, size, access, flags, ipc_c->ism_handle, 0);
+	void *ptr = mmap(NULL, size, access, flags, ipc_c->ism_handle, 0);
+	ipc_c->ism = ptr == MAP_FAILED ? NULL : ptr;
 #endif
 
 	if (ipc_c->ism == NULL) {

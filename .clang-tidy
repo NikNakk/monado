@@ -73,7 +73,6 @@ Checks:       |
     -cert-str34-c,
     -clang-analyzer-core.NonNullParamChecker,
     -clang-analyzer-core.NullDereference,
-    -clang-analyzer-core.UndefinedBinaryOperatorResult,
     -clang-analyzer-cplusplus.InnerPointer,
     -clang-analyzer-optin.core.EnumCastOutOfRange,
     -clang-analyzer-optin.performance.Padding,

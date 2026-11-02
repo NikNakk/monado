@@ -54,9 +54,13 @@ TEST_CASE("binding_registry")
 	CHECK(saw_dpad);
 	CHECK(saw_xy);
 
+	XrPath right_hand = XR_NULL_PATH;
+	REQUIRE(oxr_path_store_get_or_create(&store, "/user/hand/right", strlen("/user/hand/right"), &right_hand) ==
+	        XR_SUCCESS);
+
 	const struct oxr_rebinding_profile *rebinding = nullptr;
-	REQUIRE(oxr_binding_registry_find_rebinding_from_source_for_device(registry, generic_profile_path,
-	                                                                   XRT_DEVICE_INDEX_CONTROLLER, &rebinding));
+	REQUIRE(oxr_binding_registry_find_rebinding_from_source_for_device(
+	    registry, generic_profile_path, XRT_DEVICE_INDEX_CONTROLLER, right_hand, &rebinding));
 	REQUIRE(rebinding != nullptr);
 
 	XrPath source_primary = XR_NULL_PATH;

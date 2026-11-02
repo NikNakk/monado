@@ -909,6 +909,19 @@ math_lerp(double from, double to, double amount)
 	return (from * (1.0 - amount)) + (to * (amount));
 }
 
+static inline struct xrt_uv_triplet
+uv_triplet_lerp(struct xrt_uv_triplet from, struct xrt_uv_triplet to, float amount)
+{
+	struct xrt_uv_triplet out;
+	out.r.x = math_lerp(from.r.x, to.r.x, amount);
+	out.r.y = math_lerp(from.r.y, to.r.y, amount);
+	out.g.x = math_lerp(from.g.x, to.g.x, amount);
+	out.g.y = math_lerp(from.g.y, to.g.y, amount);
+	out.b.x = math_lerp(from.b.x, to.b.x, amount);
+	out.b.y = math_lerp(from.b.y, to.b.y, amount);
+	return out;
+}
+
 /*
  *
  * Optics functions.

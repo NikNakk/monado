@@ -3,11 +3,11 @@
 		"source_profile": "/interaction_profiles/oculus/touch_controller",
 		"target_profile": "/interaction_profiles/valve/index_controller",
 		"helpers": [
-			"/helper/controller/poses",
-			"/helper/controller/thumbstick",
-			"/helper/controller/trigger",
-			"/helper/controller/squeeze",
-			"/helper/controller/output"
+			"/helper/controller/identity/poses",
+			"/helper/controller/identity/thumbstick",
+			"/helper/controller/identity/trigger",
+			"/helper/controller/identity/squeeze",
+			"/helper/controller/identity/output"
 		],
 		"bindings": {
 			"/user/hand/left/input/menu": "/user/hand/left/input/system",

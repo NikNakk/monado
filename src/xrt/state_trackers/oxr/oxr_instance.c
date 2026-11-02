@@ -37,6 +37,7 @@
 #include "oxr_roles.h"
 #include "oxr_generated_bindings.h"
 #include "actions/oxr_binding.h"
+#include "actions/oxr_binding_registry.h"
 #include "actions/oxr_subaction.h"
 
 #include <sys/types.h>
@@ -87,6 +88,9 @@ oxr_instance_destroy(struct oxr_logger *log, struct oxr_handle_base *hb)
 		inst->action_context = NULL;
 	}
 
+	oxr_binding_registry_unref(inst->binding_registry);
+	inst->binding_registry = NULL;
+
 	// Maybe a no-op, needs to happen before path_store if not.
 	oxr_instance_path_cache_fini(&inst->path_cache);
 
@@ -103,14 +107,22 @@ oxr_instance_destroy(struct oxr_logger *log, struct oxr_handle_base *hb)
 #endif
 
 	os_mutex_destroy(&inst->system_init_lock);
+	os_mutex_destroy(&inst->sessions_mutex);
+
+	if (inst->system.view_config_mutex_created) {
+		os_mutex_destroy(&inst->system.view_config_mutex);
+	}
 
 	xrt_space_overseer_destroy(&inst->system.xso);
 	xrt_system_devices_destroy(&inst->system.xsysd);
+	xrt_app_system_destroy(&inst->system.xasys);
 	xrt_system_destroy(&inst->system.xsys);
 
 #ifdef XRT_FEATURE_CLIENT_DEBUG_GUI
 	u_debug_gui_stop(&inst->debug_ui);
 #endif
+
+	xrt_app_instance_destroy(&inst->xainst);
 
 	xrt_instance_destroy(&inst->xinst);
 
@@ -213,6 +225,7 @@ apply_quirks(struct oxr_logger *log, struct oxr_instance *inst, const XrInstance
 	inst->quirks.parallel_views = false;
 	inst->quirks.no_texture_source_alpha = false;
 	inst->quirks.no_usage_bit_validation_in_create_swapchain = false;
+	inst->quirks.no_layer_flags_bit_validation = false;
 
 	if (starts_with("UnrealEngine", inst->appinfo.detected.engine.name) && //
 	    inst->appinfo.detected.engine.major == 4 &&                        //
@@ -229,6 +242,11 @@ apply_quirks(struct oxr_logger *log, struct oxr_instance *inst, const XrInstance
 	// Metro Awakening sets XR_SWAPCHAIN_USAGE_INPUT_ATTACHMENT_BIT_KHR without requesting the extension.
 	if (strcmp("Impact", create_info->applicationInfo.applicationName) == 0) {
 		inst->quirks.no_usage_bit_validation_in_create_swapchain = true;
+	}
+
+	// Microsoft Flight Simulator 2020 writes garbage in layerFlags for xrEndFrame
+	if (strcmp("FS2020", create_info->applicationInfo.applicationName) == 0) {
+		inst->quirks.no_layer_flags_bit_validation = true;
 	}
 
 	// Currently always true.
@@ -294,6 +312,12 @@ oxr_instance_create(struct oxr_logger *log,
 		return ret;
 	}
 
+	m_ret = os_mutex_init(&inst->sessions_mutex);
+	if (m_ret < 0) {
+		ret = oxr_error(log, XR_ERROR_RUNTIME_FAILURE, "Failed to init sessions mutex");
+		return ret;
+	}
+
 
 #ifdef XRT_FEATURE_CLIENT_DEBUG_GUI
 	struct u_debug_gui_create_info udgci = {
@@ -316,7 +340,12 @@ oxr_instance_create(struct oxr_logger *log,
 	}
 
 	// Might use the path_store and path_cache, do after them.
-	ret = oxr_instance_action_context_create_with_registry(log, &inst->path_store, &inst->action_context);
+	ret = oxr_binding_registry_create(log, &inst->path_store, &inst->binding_registry);
+	if (ret != XR_SUCCESS) {
+		return oxr_error(log, ret, "Failed to create binding registry");
+	}
+
+	ret = oxr_instance_action_context_create(log, inst->binding_registry, &inst->action_context);
 	if (ret != XR_SUCCESS) {
 		return oxr_error(log, ret, "Failed to create instance action context");
 	}
@@ -341,6 +370,9 @@ oxr_instance_create(struct oxr_logger *log,
 #endif
 #ifdef OXR_HAVE_EXT_hand_interaction
 	    .ext_hand_interaction_enabled = extensions->EXT_hand_interaction,
+#endif
+#ifdef OXR_HAVE_EXT_view_configuration_views_change
+	    .view_configuration_views_change_supported = extensions->EXT_view_configuration_views_change,
 #endif
 #ifdef OXR_HAVE_HTC_facial_tracking
 	    .htc_facial_tracking_enabled = extensions->HTC_facial_tracking,
@@ -391,6 +423,13 @@ oxr_instance_create(struct oxr_logger *log,
 		return ret;
 	}
 
+	xret = xrt_instance_create_app_instance(inst->xinst, &inst->xainst);
+	if (xret != XRT_SUCCESS) {
+		ret = oxr_error(log, XR_ERROR_RUNTIME_UNAVAILABLE, "Failed to create instance '%i'", xret);
+		oxr_instance_destroy(log, &inst->handle.base);
+		return ret;
+	}
+
 #ifdef XRT_OS_ANDROID
 	xret = xrt_instance_android_register_activity_lifecycle_callback(
 	    inst->xinst->android_instance, on_activity_lifecycle_state_changed,
@@ -430,27 +469,29 @@ oxr_instance_create(struct oxr_logger *log,
 	        "\tquirks.skip_end_session: %s\n"
 	        "\tquirks.parallel_views: %s\n"
 	        "\tquirks.no_texture_source_alpha: %s\n"
-	        "\tquirks.ignore_invalid_swapchain_usage_bits: %s\n",
-	        createInfo->applicationInfo.applicationName,                                //
-	        createInfo->applicationInfo.applicationVersion,                             //
-	        createInfo->applicationInfo.engineName,                                     //
-	        createInfo->applicationInfo.engineVersion,                                  //
-	        XR_VERSION_MAJOR(createInfo->applicationInfo.apiVersion),                   //
-	        XR_VERSION_MINOR(createInfo->applicationInfo.apiVersion),                   //
-	        XR_VERSION_PATCH(createInfo->applicationInfo.apiVersion),                   //
-	        inst->appinfo.detected.engine.name,                                         //
-	        inst->appinfo.detected.engine.major,                                        //
-	        inst->appinfo.detected.engine.minor,                                        //
-	        inst->appinfo.detected.engine.patch,                                        //
-	        inst->quirks.disable_vulkan_format_depth ? "true" : "false",                //
-	        inst->quirks.disable_vulkan_format_depth_stencil ? "true" : "false",        //
-	        inst->quirks.disable_quad_views ? "true" : "false",                         //
-	        inst->quirks.no_validation_error_in_create_ref_space ? "true" : "false",    //
-	        inst->quirks.skip_end_session ? "true" : "false",                           //
-	        inst->quirks.parallel_views ? "true" : "false",                             //
-	        inst->quirks.no_texture_source_alpha ? "true" : "false",                    //
-	        inst->quirks.no_usage_bit_validation_in_create_swapchain ? "true" : "false" //
-	);                                                                                  //
+	        "\tquirks.ignore_invalid_swapchain_usage_bits: %s\n"
+	        "\tquirks.ignore_invalid_layer_flags_bits: %s\n",
+	        createInfo->applicationInfo.applicationName,                                 //
+	        createInfo->applicationInfo.applicationVersion,                              //
+	        createInfo->applicationInfo.engineName,                                      //
+	        createInfo->applicationInfo.engineVersion,                                   //
+	        XR_VERSION_MAJOR(createInfo->applicationInfo.apiVersion),                    //
+	        XR_VERSION_MINOR(createInfo->applicationInfo.apiVersion),                    //
+	        XR_VERSION_PATCH(createInfo->applicationInfo.apiVersion),                    //
+	        inst->appinfo.detected.engine.name,                                          //
+	        inst->appinfo.detected.engine.major,                                         //
+	        inst->appinfo.detected.engine.minor,                                         //
+	        inst->appinfo.detected.engine.patch,                                         //
+	        inst->quirks.disable_vulkan_format_depth ? "true" : "false",                 //
+	        inst->quirks.disable_vulkan_format_depth_stencil ? "true" : "false",         //
+	        inst->quirks.disable_quad_views ? "true" : "false",                          //
+	        inst->quirks.no_validation_error_in_create_ref_space ? "true" : "false",     //
+	        inst->quirks.skip_end_session ? "true" : "false",                            //
+	        inst->quirks.parallel_views ? "true" : "false",                              //
+	        inst->quirks.no_texture_source_alpha ? "true" : "false",                     //
+	        inst->quirks.no_usage_bit_validation_in_create_swapchain ? "true" : "false", //
+	        inst->quirks.no_layer_flags_bit_validation ? "true" : "false"                //
+	);                                                                                   //
 
 #ifdef XRT_FEATURE_RENDERDOC
 
@@ -541,6 +582,23 @@ oxr_instance_init_system_locked(struct oxr_logger *log, struct oxr_instance *ins
 		struct u_pp_sink_stack_only sink;
 		u_pp_delegate_t dg = u_pp_sink_stack_only_init(&sink);
 		u_pp(dg, "Call to xrt_instance_create_system failed: ");
+		u_pp_xrt_result(dg, xret);
+		ret = oxr_error(log, XR_ERROR_INITIALIZATION_FAILED, "%s", sink.buffer);
+		return ret;
+	}
+
+	int iret = os_mutex_init(&sys->view_config_mutex);
+	if (iret < 0) {
+		ret = oxr_error(log, XR_ERROR_RUNTIME_FAILURE, "Call to os_mutex_init failed: %d", iret);
+		return ret;
+	}
+	sys->view_config_mutex_created = true;
+
+	xret = xrt_app_instance_create_app_system(inst->xainst, sys->xsys, &sys->xasys);
+	if (xret != XRT_SUCCESS) {
+		struct u_pp_sink_stack_only sink;
+		u_pp_delegate_t dg = u_pp_sink_stack_only_init(&sink);
+		u_pp(dg, "Call to xrt_app_instance_create_app_system failed: ");
 		u_pp_xrt_result(dg, xret);
 		ret = oxr_error(log, XR_ERROR_INITIALIZATION_FAILED, "%s", sink.buffer);
 		return ret;

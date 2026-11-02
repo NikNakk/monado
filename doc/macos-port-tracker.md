@@ -164,25 +164,26 @@ record are carried with the runtime corrections.
   output-barrier and diagnostics work. Shared tracking stays opt-in.
 - Canonical upstream remains the Monado project on freedesktop.org.
 
-The [2026-11-02 upstream merge review](macos-upstream-merge-review-2026-11.md)
-finds 93 new commits through `db1903bd4` and 19 conflicted files. Upstream
-shutdown extends our !3029 fix; its expanded helper/transport suite passes
-10/10 macOS runs. A full merge needs a deliberate Sense tracker adaptation,
-preserving the validated joint/EKF backend. Current integration `ae2b6d059`
-already contains the October generic-controller/I/O-cache merges and matches
-origin; this exploration does not move it or replace the installed runtime.
+The [2026-11-02 upstream integration](macos-upstream-merge-review-2026-11.md)
+merges 93 new commits through `db1903bd4`, resolving 19 conflicted files.
+Production Sense joint/EKF tracking is unchanged: the coupled upstream tracker
+migration and legacy-table removal are explicitly deferred. Upstream shutdown,
+IPC, generated-binding, manifest and Vulkan improvements are included. Native
+and x86-64 client builds pass; macOS passes 94/94 tests and Linux 58/58. See the
+review for validation details and existing contribution-check failures. Nothing is installed or
+pushed; headset validation and matching protocol rebuilds precede deployment.
 
 
 The 2026-10-21 [generic-controller comparison and upstream merge](macos-upstream-generic-controller.md)
-is prepared on `codex/upstream-generic-controller`, based on the current WSI
-fragment-output branch. It adopts upstream's generated action/rebinding system
+was prepared on `codex/upstream-generic-controller` from the WSI
+fragment-output branch and is now integrated via `b3ad95b0b`. It adopts upstream's generated action/rebinding system
 through `9fd3968ba`, preserving two generic fallback behaviors, Sense LED-space
 tracking and opt-in defaults. The eight I/O-cache commits now carry remaining
 compatibility mappings in a service-selected, pointer-free cache snapshot.
 Automated validation and the user-operated headset gate are recorded in the review.
-This does not move `macos-upstream-clean` or install/push a runtime.
+That review record predates its integration; it did not itself install or push a runtime.
 
-- Latest local sync: `macos-upstream-clean` merged GitLab `main` through
+- Historical October 7 sync: `macos-upstream-clean` merged GitLab `main` through
   `ec188bb13` on 2026-10-07 in `753698f92`, without conflicts. The fork's
   passthrough and floor-calibration workers now use upstream's replacement
   thread-naming API. The macOS service check build and all 45 CTest suites

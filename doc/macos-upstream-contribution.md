@@ -8,7 +8,7 @@ SPDX-License-Identifier: BSL-1.0
 This integration branch combines hardware, platform, IPC, compositor and
 experimental OpenXR work. Submit independently buildable review units against
 upstream, with optional features disabled by default. The current sync base is
-`ec188bb13`; update the base in `scripts/check-contribution-style.py` when the
+`db1903bd4`; update the base in `scripts/check-contribution-style.py` when the
 next upstream sync is reviewed.
 
 ## Upstream progress, 2026-10-15

@@ -115,6 +115,38 @@ class DPad:
         self.activate_component = activate_component
 
 
+def resolve_monado_binding(profile_name, identifier_json_path, json_subpath, component_name):
+    """Look up the Monado enum for one component.
+
+    ``false`` means the OpenXR path is exposed with no Monado input or output.
+    A missing key is an error: the component name and the monado_bindings key
+    have to be the same string.
+    """
+    if "monado_bindings" not in json_subpath:
+        raise RuntimeError(
+            f"Interaction profile {profile_name} path {identifier_json_path} "
+            f"has no monado_bindings object.")
+
+    monado_bindings = json_subpath["monado_bindings"]
+    if component_name not in monado_bindings:
+        raise RuntimeError(
+            f"Interaction profile {profile_name} path {identifier_json_path} "
+            f"component '{component_name}' is missing from monado_bindings. "
+            f"Use an XRT_INPUT or XRT_OUTPUT name, or false for no Monado mapping.")
+
+    monado_binding = monado_bindings[component_name]
+    # JSON false is the explicit "expose the path, bind no device input" case.
+    if monado_binding is False:
+        return None
+    if isinstance(monado_binding, str):
+        return monado_binding
+
+    raise RuntimeError(
+        f"Interaction profile {profile_name} path {identifier_json_path} "
+        f"component '{component_name}' has monado_bindings value {monado_binding!r}. "
+        f"Use an XRT_INPUT or XRT_OUTPUT name, or false for no Monado mapping.")
+
+
 class Component:
     """Components correspond with the standard OpenXR components click, touch,
     force, value, x, y, twist, pose
@@ -122,6 +154,7 @@ class Component:
 
     @classmethod
     def parse_components(component_cls,
+                         profile_name,
                          subaction_path,
                          identifier_json_path,
                          json_subpath):
@@ -136,7 +169,10 @@ class Component:
                     json_subpath["dpad_emulation"]["position"] == component_name):
                 matched_dpad_emulation = json_subpath["dpad_emulation"]
 
-            monado_binding = json_subpath["monado_bindings"].get(component_name, None)
+            monado_binding = resolve_monado_binding(profile_name,
+                                                    identifier_json_path,
+                                                    json_subpath,
+                                                    component_name)
 
             steamvr_path = steamvr_subpath_name(identifier_json_path, json_subpath["type"])
             if "steamvr_path" in json_subpath:
@@ -215,7 +251,7 @@ class Identifier:
     """
 
     @classmethod
-    def parse_identifiers(indentifer_cls, json_profile):
+    def parse_identifiers(indentifer_cls, profile_name, json_profile):
         """Turn a profile's input paths into a list of Component objects."""
 
         json_subaction_paths = json_profile["subaction_paths"]
@@ -234,7 +270,8 @@ class Identifier:
                 # Full path to the identifier
                 identifier_path = subaction_path + json_path
 
-                component_list = Component.parse_components(subaction_path,
+                component_list = Component.parse_components(profile_name,
+                                                            subaction_path,
                                                             json_path,
                                                             json_subpath)
 
@@ -400,7 +437,7 @@ class Profile:
                 self.openxr_version_promoted = { "major" : promoted.get("major"), "minor" : promoted.get("minor") }
 
         self.is_virtual = profile_name.startswith("/virtual_profiles/")
-        self.identifiers = Identifier.parse_identifiers(json_profile)
+        self.identifiers = Identifier.parse_identifiers(profile_name, json_profile)
 
         self.steamvr_controller_type = None
         if "steamvr_controllertype" in json_profile:

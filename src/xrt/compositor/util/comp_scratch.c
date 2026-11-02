@@ -31,7 +31,7 @@ fill_info(VkExtent2D extent, VkFormat srgb_format, VkFormat unorm_format, struct
 	// Must be true.
 	assert(unorm_format != VK_FORMAT_UNDEFINED);
 
-	enum xrt_swapchain_create_flags create = 0;
+	enum xrt_swapchain_create_flags create = XRT_SWAPCHAIN_CREATE_TILING_MAX_PERFORMANCE;
 
 	enum xrt_swapchain_usage_bits bits =      //
 	    XRT_SWAPCHAIN_USAGE_COLOR |           //

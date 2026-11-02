@@ -33,7 +33,8 @@ context_init(struct oxr_logger *log, struct oxr_instance_action_context *context
 static void
 context_fini(struct oxr_instance_action_context *context)
 {
-	oxr_instance_action_context_set_binding_registry(context, NULL);
+	oxr_binding_registry_unref(context->binding_registry);
+	context->binding_registry = NULL;
 	oxr_pair_hashset_fini(&context->action_sets);
 	oxr_suggested_profile_array_clear(&context->suggested_profiles);
 }
@@ -46,8 +47,10 @@ context_destroy_cb(struct oxr_refcounted *orc)
 	free(context);
 }
 
-static XrResult
-oxr_instance_action_context_create(struct oxr_logger *log, struct oxr_instance_action_context **out_context)
+XrResult
+oxr_instance_action_context_create(struct oxr_logger *log,
+                                   struct oxr_binding_registry *registry,
+                                   struct oxr_instance_action_context **out_context)
 {
 	struct oxr_instance_action_context *context = U_TYPED_CALLOC(struct oxr_instance_action_context);
 	if (context == NULL) {
@@ -63,46 +66,9 @@ oxr_instance_action_context_create(struct oxr_logger *log, struct oxr_instance_a
 		return ret;
 	}
 
-	*out_context = context;
-	return XR_SUCCESS;
-}
-
-XrResult
-oxr_instance_action_context_create_with_registry(struct oxr_logger *log,
-                                                 struct oxr_path_store *store,
-                                                 struct oxr_instance_action_context **out_context)
-{
-	struct oxr_instance_action_context *context = NULL;
-	XrResult ret = oxr_instance_action_context_create(log, &context);
-	if (ret != XR_SUCCESS) {
-		return ret;
-	}
-
-	struct oxr_binding_registry *registry = NULL;
-	ret = oxr_binding_registry_create(log, store, &registry);
-	if (ret != XR_SUCCESS) {
-		oxr_refcounted_unref(&context->base);
-		return ret;
-	}
-
-	oxr_instance_action_context_set_binding_registry(context, registry);
-	oxr_binding_registry_unref(registry);
-
-	*out_context = context;
-	return XR_SUCCESS;
-}
-
-void
-oxr_instance_action_context_set_binding_registry(struct oxr_instance_action_context *context,
-                                                 struct oxr_binding_registry *registry)
-{
-	if (registry != NULL) {
-		oxr_binding_registry_ref(registry);
-	}
-
-	if (context->binding_registry != NULL) {
-		oxr_binding_registry_unref(context->binding_registry);
-	}
-
 	context->binding_registry = registry;
+	oxr_binding_registry_ref(context->binding_registry);
+
+	*out_context = context;
+	return XR_SUCCESS;
 }

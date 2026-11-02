@@ -65,7 +65,7 @@ enum xrt_session_event_type
 	//! The passthrough state of the session has changed
 	XRT_SESSION_EVENT_PASSTHRU_STATE_CHANGE = 8,
 
-	// ! The visibility mask of given view has changed
+	//! The visibility mask of given view has changed
 	XRT_SESSION_EVENT_VISIBILITY_MASK_CHANGE = 9,
 
 	//! Request the session to quit.

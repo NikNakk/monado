@@ -26,6 +26,7 @@
 #include "util/u_timing_trace.h"
 
 #include "server/ipc_server.h"
+#include "server/ipc_server_handle_helpers.h"
 #include "server/ipc_server_objects.h"
 #include "ipc_server_generated.h"
 #include "xrt/xrt_defines.h"
@@ -396,43 +397,13 @@ send_device_inputs(volatile struct ipc_client_state *ics, struct xrt_device *xde
 		IPC_CHK_ALWAYS_RET(ics->server, xret, "ipc_send(inputs)");
 	}
 
-	struct xrt_input filtered[1024];
+	struct xrt_input filtered[1024] = {0};
 	if (ARRAY_SIZE(filtered) < xdev->input_count) {
 		return XRT_ERROR_IPC_FAILURE;
 	}
 
-	for (uint32_t i = 0; i < xdev->input_count; i++) {
-		struct xrt_input *src = &xdev->inputs[i];
-		struct xrt_input *dst = &filtered[i];
-
-		bool blocked = false;
-		switch (XRT_GET_INPUT_TYPE(src->name)) {
-		case XRT_INPUT_TYPE_POSE: //
-			blocked = iob->block_poses && dst->name != XRT_INPUT_GENERIC_HEAD_POSE;
-			break;
-		case XRT_INPUT_TYPE_HAND_TRACKING: //
-			blocked = iob->block_hand_tracking;
-			break;
-		case XRT_INPUT_TYPE_VEC1_ZERO_TO_ONE:
-		case XRT_INPUT_TYPE_VEC1_MINUS_ONE_TO_ONE:
-		case XRT_INPUT_TYPE_VEC2_MINUS_ONE_TO_ONE:
-		case XRT_INPUT_TYPE_VEC3_MINUS_ONE_TO_ONE:
-		case XRT_INPUT_TYPE_BOOLEAN: //
-			blocked = iob->block_inputs;
-			break;
-		// Don't block face or body tracking.
-		case XRT_INPUT_TYPE_BODY_TRACKING:
-		case XRT_INPUT_TYPE_FACE_TRACKING: break;
-		}
-
-		if (blocked) {
-			// Make sure it's zeroed out, and we only zero out what we send.
-			U_ZERO(dst);
-			dst->name = src->name;
-		} else {
-			memcpy(dst, src, sizeof(*dst));
-		}
-	}
+	memcpy(filtered, xdev->inputs, input_size);
+	ipc_server_client_filter_blocked_inputs(ics, filtered, xdev->input_count);
 
 	xret = ipc_send(imc, filtered, input_size);
 	IPC_CHK_ALWAYS_RET(ics->server, xret, "ipc_send(filtered inputs)");
@@ -463,12 +434,8 @@ send_device_outputs(volatile struct ipc_client_state *ics, struct xrt_device *xd
 		return XRT_ERROR_IPC_FAILURE;
 	}
 
-	for (uint32_t i = 0; i < xdev->output_count; i++) {
-		struct xrt_output *dst = &filtered[i];
-		// Make sure it's zeroed out, and we only zero out what we send.
-		U_ZERO(dst);
-		dst->name = xdev->outputs[i].name;
-	}
+	memcpy(filtered, xdev->outputs, output_size);
+	ipc_server_client_filter_blocked_outputs(ics, filtered, xdev->output_count);
 
 	xret = ipc_send(imc, filtered, output_size);
 	IPC_CHK_ALWAYS_RET(ics->server, xret, "ipc_send(filtered outputs)");
@@ -551,6 +518,7 @@ ipc_handle_instance_is_system_available(volatile struct ipc_client_state *ics, b
 
 	struct ipc_server *s = ics->server;
 
+	// No client socket I/O while holding the global state lock.
 	os_mutex_lock(&s->global_state.lock);
 
 	xret = ipc_server_init_system_if_available_locked(s, ics, out_available);
@@ -882,6 +850,10 @@ ipc_handle_space_locate_space(volatile struct ipc_client_state *ics,
 	    out_relation);                      //
 }
 
+/*
+ * Exchanges several messages with the client, so do not hold the global state
+ * lock anywhere in this function.
+ */
 xrt_result_t
 ipc_handle_space_locate_spaces(volatile struct ipc_client_state *ics,
                                uint32_t base_space_id,
@@ -900,8 +872,6 @@ ipc_handle_space_locate_spaces(volatile struct ipc_client_state *ics,
 	struct xrt_space_relation *out_relations = U_TYPED_ARRAY_CALLOC(struct xrt_space_relation, space_count);
 
 	xrt_result_t xret = XRT_SUCCESS;
-
-	os_mutex_lock(&ics->server->global_state.lock);
 
 	uint32_t *space_ids = U_TYPED_ARRAY_CALLOC(uint32_t, space_count);
 
@@ -976,7 +946,6 @@ out_locate_spaces:
 	free(xspaces);
 	free(offsets);
 	free(out_relations);
-	os_mutex_unlock(&ics->server->global_state.lock);
 	return xret;
 }
 
@@ -1605,6 +1574,7 @@ ipc_handle_compositor_layer_sync(volatile struct ipc_client_state *ics,
 	 * Manage shared state.
 	 */
 
+	// No client socket I/O while holding the global state lock.
 	os_mutex_lock(&ics->server->global_state.lock);
 
 	*out_free_slot_id = (ics->server->current_slot_index + 1) % IPC_MAX_SLOTS;
@@ -1669,6 +1639,7 @@ ipc_handle_compositor_layer_sync_with_semaphore(volatile struct ipc_client_state
 	 * Manage shared state.
 	 */
 
+	// No client socket I/O while holding the global state lock.
 	os_mutex_lock(&ics->server->global_state.lock);
 
 	*out_free_slot_id = (ics->server->current_slot_index + 1) % IPC_MAX_SLOTS;
@@ -1753,7 +1724,10 @@ ipc_handle_system_get_clients(volatile struct ipc_client_state *_ics, struct ipc
 {
 	struct ipc_server *s = _ics->server;
 
-	// Look client list.
+	/*
+	 * Look client list.
+	 * No client socket I/O while holding the global state lock.
+	 */
 	os_mutex_lock(&s->global_state.lock);
 
 	uint32_t count = 0;
@@ -2792,6 +2766,9 @@ ipc_handle_device_set_output(volatile struct ipc_client_state *ics,
                              enum xrt_output_name name,
                              const struct xrt_output_value *value)
 {
+	xrt_result_t xret = ipc_server_validate_output_value(ics, value);
+	IPC_CHK_AND_RET(ics->server, xret, "ipc_server_validate_output_value");
+
 	if (ics->client_state.io_blocks.block_outputs) {
 		return XRT_SUCCESS;
 	}
@@ -2805,6 +2782,10 @@ ipc_handle_device_set_output(volatile struct ipc_client_state *ics,
 	return xrt_device_set_output(xdev, name, value);
 }
 
+/*
+ * Exchanges several messages with the client, so only hold the global state
+ * lock around the device call, never across the client socket I/O.
+ */
 xrt_result_t
 ipc_handle_device_set_haptic_output(volatile struct ipc_client_state *ics,
                                     uint32_t id,
@@ -2812,10 +2793,6 @@ ipc_handle_device_set_haptic_output(volatile struct ipc_client_state *ics,
                                     const struct ipc_pcm_haptic_buffer *buffer)
 {
 	IPC_TRACE_MARKER();
-
-	if (ics->client_state.io_blocks.block_outputs) {
-		return XRT_SUCCESS;
-	}
 
 	struct ipc_message_channel *imc = (struct ipc_message_channel *)&ics->imc;
 	struct ipc_server *s = ics->server;
@@ -2827,7 +2804,8 @@ ipc_handle_device_set_haptic_output(volatile struct ipc_client_state *ics,
 	struct xrt_device *xdev = NULL;
 	GET_XDEV_OR_RETURN(ics, device_id, xdev);
 
-	os_mutex_lock(&ics->server->global_state.lock);
+	xret = ipc_server_validate_pcm_haptic_buffer(ics, buffer);
+	IPC_CHK_AND_RET(s, xret, "ipc_server_validate_pcm_haptic_buffer");
 
 	float *samples = U_TYPED_ARRAY_CALLOC(float, buffer->num_samples);
 
@@ -2851,21 +2829,30 @@ ipc_handle_device_set_haptic_output(volatile struct ipc_client_state *ics,
 		goto set_haptic_output_end;
 	}
 
-	uint32_t samples_consumed;
-	struct xrt_output_value value = {
-	    .type = XRT_OUTPUT_VALUE_TYPE_PCM_VIBRATION,
-	    .pcm_vibration =
-	        {
-	            .append = buffer->append,
-	            .buffer_size = buffer->num_samples,
-	            .sample_rate = buffer->sample_rate,
-	            .samples_consumed = &samples_consumed,
-	            .buffer = samples,
-	        },
-	};
+	uint32_t samples_consumed = 0;
 
-	// Set the output.
-	xrt_device_set_output(xdev, name, &value);
+	// Serializes PCM output across clients. No client socket I/O while holding the global state lock.
+	os_mutex_lock(&ics->server->global_state.lock);
+
+	// Blocked outputs still take the PCM. The device is not asked to play it.
+	if (!ics->client_state.io_blocks.block_outputs) {
+		struct xrt_output_value value = {
+		    .type = XRT_OUTPUT_VALUE_TYPE_PCM_VIBRATION,
+		    .pcm_vibration =
+		        {
+		            .append = buffer->append,
+		            .buffer_size = buffer->num_samples,
+		            .sample_rate = buffer->sample_rate,
+		            .samples_consumed = &samples_consumed,
+		            .buffer = samples,
+		        },
+		};
+
+		// Set the output.
+		xrt_device_set_output(xdev, name, &value);
+	}
+
+	os_mutex_unlock(&ics->server->global_state.lock);
 
 	xret = ipc_send(imc, &samples_consumed, sizeof samples_consumed);
 	if (xret != XRT_SUCCESS) {
@@ -2876,8 +2863,6 @@ ipc_handle_device_set_haptic_output(volatile struct ipc_client_state *ics,
 	xret = XRT_SUCCESS;
 
 set_haptic_output_end:
-	os_mutex_unlock(&ics->server->global_state.lock);
-
 	free(samples);
 
 	return xret;
@@ -2937,10 +2922,13 @@ ipc_handle_device_get_visibility_mask(volatile struct ipc_client_state *ics,
 		goto out_free;
 	}
 
-	xret = ipc_send(imc, mask, reply.mask_size);
-	if (xret != XRT_SUCCESS) {
-		IPC_ERROR(s, "Failed to send mask");
-		goto out_free;
+	// A zero-length Windows WriteFile is a message. Send the mask only when it has bytes.
+	if (reply.mask_size != 0) {
+		xret = ipc_send(imc, mask, reply.mask_size);
+		if (xret != XRT_SUCCESS) {
+			IPC_ERROR(s, "Failed to send mask");
+			goto out_free;
+		}
 	}
 
 out_free:

@@ -1235,6 +1235,7 @@ vive_device_create(struct os_hid_device *mainboard_dev,
 	case VIVE_VARIANT_PRO2: snprintf(d->base.str, XRT_DEVICE_NAME_LEN, "HTC Vive Pro 2 (vive)"); break;
 	case VIVE_VARIANT_INDEX: snprintf(d->base.str, XRT_DEVICE_NAME_LEN, "Valve Index (vive)"); break;
 	case VIVE_VARIANT_BEYOND: snprintf(d->base.str, XRT_DEVICE_NAME_LEN, "Bigscreen Beyond (vive)"); break;
+	case VIVE_VARIANT_PIMAX_P2: snprintf(d->base.str, XRT_DEVICE_NAME_LEN, "Pimax P2 (vive)"); break;
 	case VIVE_UNKNOWN: snprintf(d->base.str, XRT_DEVICE_NAME_LEN, "Unknown HMD (vive)"); break;
 	}
 	snprintf(d->base.serial, XRT_DEVICE_NAME_LEN, "%s", d->config.firmware.device_serial_number);

@@ -108,6 +108,53 @@ xrt_app_instance_destroy(struct xrt_app_instance **xainst_ptr)
 }
 
 
+/*!
+ * Type of an @ref xrt_app_system event.
+ *
+ * @see xrt_app_system_event
+ * @ingroup xrt_iface
+ */
+enum xrt_app_system_event_type
+{
+	//! This app system has no events.
+	XRT_APP_SYSTEM_EVENT_NONE = 0,
+
+	//! The recommended view configuration of some view type has changed.
+	XRT_APP_SYSTEM_EVENT_RECOMMENDED_VIEW_CONFIGURATION_CHANGED = 1,
+};
+
+/*!
+ * Recommended view configuration changed event, type @ref XRT_APP_SYSTEM_EVENT_RECOMMENDED_VIEW_CONFIGURATION_CHANGED.
+ *
+ * @see xrt_app_system_event
+ * @ingroup xrt_iface
+ */
+struct xrt_app_system_event_recommended_view_configuration_changed
+{
+	//! The @ref xrt_view_type that has changed.
+	enum xrt_view_type view_type;
+};
+
+/*!
+ * Union of all app system events, used to return multiple events through one interface.
+ *
+ * @see xrt_app_system_event
+ * @ingroup xrt_iface
+ */
+struct xrt_app_system_event
+{
+	enum xrt_app_system_event_type type;
+	union {
+		struct xrt_app_system_event_recommended_view_configuration_changed
+		    recommended_view_configuration_changed;
+	};
+};
+
+/*!
+ * A single view in a recommended view configuration
+ *
+ * @ingroup xrt_iface
+ */
 struct xrt_recommended_view_config_view
 {
 	//! The width of the view.
@@ -118,6 +165,11 @@ struct xrt_recommended_view_config_view
 	uint32_t sample_count;
 };
 
+/*!
+ * A recommended view configuration
+ *
+ * @ingroup xrt_iface
+ */
 struct xrt_recommended_view_config
 {
 	//! Whether the recommendation is valid.
@@ -150,10 +202,16 @@ struct xrt_app_system
 	 */
 
 	/*!
-	 * Gets the recommended view configuration for the given view type, if available and supported.
-	 * Only the `recommended` field is guaranteed to be provided, and `max` may be left unspecified.
+	 * Poll a single event from this app system, if no event is available then
+	 * the type of the event will be @ref XRT_APP_SYSTEM_EVENT_NONE.
 	 *
-	 * This allows a policy to set a new recommended view configuration for the lifetime of this application.
+	 * @param      xasys      Pointer to self
+	 * @param[out] out_xasyse Event to be returned.
+	 */
+	xrt_result_t (*poll_events)(struct xrt_app_system *xasys, struct xrt_app_system_event *out_xasyse);
+
+	/*!
+	 * Gets the recommended view configuration for the given view type, if available and supported.
 	 *
 	 * @param      xasys                       Pointer to self
 	 * @param      view_type                   The view type to get the recommended view configuration for.
@@ -165,11 +223,7 @@ struct xrt_app_system
 	    struct xrt_recommended_view_config *out_recommended_view_config);
 
 	/*!
-	 * Sets the recommended view configuration for the given view type.
-	 * Only the `recommended` field will be meaningfully read by the xrt_app_system.
-	 *
-	 * The callee should push a session event of type @ref XRT_SESSION_EVENT_RECOMMENDED_VIEW_CONFIGURATION_CHANGE
-	 * when the recommended view configuration changes, so that sessions can react to this change if they want to.
+	 * Sets the recommended view configuration for this application, for the given view type.
 	 *
 	 * @note The xrt_app_system may not do verification on the passed configuration, it is up to the callee to not
 	 *       pass invalid data into here.
@@ -196,6 +250,19 @@ struct xrt_app_system
 	 * @}
 	 */
 };
+
+/*!
+ * @copydoc xrt_app_system::poll_events
+ *
+ * Helper for calling through the function pointer.
+ *
+ * @public @memberof xrt_app_system
+ */
+XRT_NONNULL_ALL static inline xrt_result_t
+xrt_app_system_poll_events(struct xrt_app_system *xasys, struct xrt_app_system_event *out_xasyse)
+{
+	return xasys->poll_events(xasys, out_xasyse);
+}
 
 /*!
  * @copydoc xrt_app_system::get_recommended_view_configuration

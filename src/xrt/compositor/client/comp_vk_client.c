@@ -1,4 +1,5 @@
 // Copyright 2019-2024, Collabora, Ltd.
+// Copyright 2026, NVIDIA CORPORATION.
 // SPDX-License-Identifier: BSL-1.0
 /*!
  * @file
@@ -15,6 +16,7 @@
 #include "util/u_handles.h"
 #include "util/u_trace_marker.h"
 #include "util/u_debug.h"
+#include "xrt/xrt_compositor.h"
 
 #include "comp_vk_client.h"
 #ifdef XRT_HAVE_VK_CLIENT_METAL_TEXTURES
@@ -882,6 +884,10 @@ client_vk_swapchain_create(struct xrt_compositor *xc,
 	// Update the create info.
 	struct xrt_swapchain_create_info xinfo = *info;
 	xinfo.bits |= xsccp.extra_bits;
+
+	if (vk->features.image_tiling_control) {
+		xinfo.create |= XRT_SWAPCHAIN_CREATE_TILING_MAX_PERFORMANCE;
+	}
 
 	struct xrt_swapchain_native *xscn = NULL;
 #ifdef XRT_HAVE_VK_CLIENT_METAL_TEXTURES

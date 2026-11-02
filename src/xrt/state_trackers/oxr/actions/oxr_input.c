@@ -571,6 +571,7 @@ binding_device_from_cache(const struct oxr_io_cache *io_cache, int32_t index)
 
 static void
 resolve_binding_infos_from_roles(struct oxr_logger *log,
+                                 const struct oxr_instance_path_cache *path_cache,
                                  const struct oxr_session_action_context *action_context,
                                  const struct oxr_suggested_profile_array *suggested_profiles,
                                  const struct oxr_roles *roles,
@@ -589,7 +590,8 @@ resolve_binding_infos_from_roles(struct oxr_logger *log,
 		}                                                                                                      \
 		oxr_slog(&slog, "\n\t" #NAME ": (%s)", u_str_xrt_device_name(dev->name));                              \
 		oxr_resolver_populate_profile(log, &slog, action_context->binding_registry, suggested_profiles,        \
-		                              io_cache, dev, GET_PROFILE_NAME_BY_ROLE(roles, NAME), &out_infos->NAME); \
+		                              io_cache, dev, path_cache->NAME, GET_PROFILE_NAME_BY_ROLE(roles, NAME),  \
+		                              &out_infos->NAME);                                                       \
 	} while (false);
 	OXR_FOR_EACH_VALID_SUBACTION_PATH_DETAILED(RESOLVE_INFO)
 #undef RESOLVE_INFO
@@ -1353,6 +1355,7 @@ session_update_action_bindings(struct oxr_logger *log,
 	struct oxr_profiles_per_subaction profiles = {0};
 	resolve_binding_infos_from_roles( //
 	    log,                          //
+	    &inst->path_cache,            //
 	    action_context,               //
 	    array,                        //
 	    roles,                        //

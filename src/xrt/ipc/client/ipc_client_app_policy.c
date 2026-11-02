@@ -85,6 +85,17 @@ app_system_destroy(struct xrt_app_system *xasys)
 }
 
 static xrt_result_t
+app_system_poll_events(struct xrt_app_system *xasys, struct xrt_app_system_event *out_xasyse)
+{
+	struct ipc_client_app_system *icasys = ipc_client_app_system(xasys);
+
+	xrt_result_t xret = ipc_call_app_system_poll_events(icasys->ipc_c, icasys->id, out_xasyse);
+	IPC_CHK_AND_RET(icasys->ipc_c, xret, "ipc_call_poll_events");
+
+	return XRT_SUCCESS;
+}
+
+static xrt_result_t
 app_system_get_recommended_view_configuration(struct xrt_app_system *xasys,
                                               enum xrt_view_type view_type,
                                               struct xrt_recommended_view_config *out_view_config)
@@ -134,6 +145,7 @@ app_instance_create_app_system(struct xrt_app_instance *xainst,
 		return xret;
 	}
 
+	icasys->base.poll_events = app_system_poll_events;
 	icasys->base.get_recommended_view_configuration = app_system_get_recommended_view_configuration;
 	icasys->base.set_recommended_view_configuration = app_system_set_recommended_view_configuration;
 	icasys->base.destroy = app_system_destroy;

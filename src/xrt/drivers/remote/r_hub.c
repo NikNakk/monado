@@ -15,6 +15,7 @@
 
 #include "b_body_tracker.h"
 #include "b_hand_tracker.h"
+#include "b_io_cache.h"
 
 #include "r_internal.h"
 
@@ -431,6 +432,7 @@ r_create_devices(uint16_t port,
 	                                            r_hub_system_devices_destroy);
 	r->base.create_body_tracker = b_body_tracker_create;
 	r->base.create_hand_tracker = b_hand_tracker_create;
+	r->base.create_io_cache = b_io_cache_create;
 
 	r->origin.type = XRT_TRACKING_TYPE_RGB;
 	r->origin.initial_offset = (struct xrt_pose)XRT_POSE_IDENTITY;

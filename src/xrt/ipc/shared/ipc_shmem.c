@@ -25,6 +25,8 @@
 #include <sys/stat.h>
 #include <fcntl.h>
 #include <stdbool.h>
+#include <errno.h>
+#include <stdatomic.h>
 #include <stdio.h>
 #endif
 
@@ -53,8 +55,6 @@ ipc_shmem_create(size_t size, xrt_shmem_handle_t *out_handle, void **out_map)
 
 #elif defined(XRT_OS_UNIX)
 
-#define MONADO_SHMEM_NAME "/monado_shm"
-
 static xrt_result_t
 shmem_create_named(const char *name,
                    bool exclusive,
@@ -67,7 +67,43 @@ shmem_create_named(const char *name,
 xrt_result_t
 ipc_shmem_create(size_t size, xrt_shmem_handle_t *out_handle, void **out_map)
 {
-	return shmem_create_named(MONADO_SHMEM_NAME, false, false, size, out_handle, out_map);
+	*out_handle = -1;
+	*out_map = NULL;
+
+	static atomic_uint shmem_counter;
+	char name[32];
+
+	int fd = -1;
+	for (int attempt = 0; attempt < 32; attempt++) {
+		unsigned int count = atomic_fetch_add_explicit(&shmem_counter, 1, memory_order_relaxed);
+		snprintf(name, sizeof(name), "/monado_shm_%x_%x", (unsigned)getpid(), count);
+		fd = shm_open(name, O_CREAT | O_EXCL | O_RDWR, S_IRUSR | S_IWUSR);
+		if (fd >= 0) {
+			break;
+		}
+		if (errno != EEXIST) {
+			return XRT_ERROR_IPC_FAILURE;
+		}
+	}
+	if (fd < 0) {
+		return XRT_ERROR_IPC_FAILURE;
+	}
+
+	// Don't need the name entry anymore, we can share the FD.
+	shm_unlink(name);
+
+	if (ftruncate(fd, size) < 0) {
+		close(fd);
+		return XRT_ERROR_IPC_FAILURE;
+	}
+	xrt_result_t result = ipc_shmem_map(fd, size, out_map);
+	if (result != XRT_SUCCESS) {
+		close(fd);
+		return result;
+	}
+
+	*out_handle = fd;
+	return XRT_SUCCESS;
 }
 
 xrt_result_t

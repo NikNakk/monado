@@ -13,15 +13,19 @@
 #include "server/ipc_server.h"
 #include "server/ipc_server_thread_shutdown.h"
 
-#ifdef XRT_OS_WINDOWS
+#ifndef XRT_OS_WINDOWS
+#include <sys/socket.h>
+#endif
+
 /*!
- * Cancel the blocking read each client thread is sitting in.
+ * Cancel any blocking I/O a client thread is sitting in.
  *
- * The epoll based client loop wakes up on its own timeout and so notices
+ * An idle epoll based client loop wakes up on its own timeout and so notices
  * the thread entering STOPPING, but the Windows one blocks in ReadFile() with no
- * timeout and would only notice once the client happens to send something.
- * Cancelling the pending I/O makes that read fail so the thread can run its
- * shutdown and be joined.
+ * timeout and would only notice once the client happens to send something. On
+ * every platform a handler can also block mid-message, on a client that never
+ * sends the rest of a payload or never reads a reply. Cancelling the pending
+ * I/O makes it fail so the thread can run its shutdown and be joined.
  *
  * The client thread closes this handle in common_shutdown() while holding the
  * global state lock, so take it here as well, otherwise we could cancel I/O on
@@ -43,15 +47,22 @@ ipc_server_cancel_all_client_io(struct ipc_server *s)
 			continue;
 		}
 
+#ifdef XRT_OS_WINDOWS
 		CancelIoEx(ipc_handle, NULL);
 		// Also prevent a read starting just after cancellation from blocking.
 		// This is the server end of a named pipe, owned by the client thread.
 		DisconnectNamedPipe(ipc_handle);
+#else
+		/*
+		 * Unlike close(), this wakes I/O that is already blocked and fails I/O that starts later.
+		 * The client thread still owns the fd and closes it in common_shutdown().
+		 */
+		shutdown(ipc_handle, SHUT_RDWR);
+#endif
 	}
 
 	os_mutex_unlock(&s->global_state.lock);
 }
-#endif // XRT_OS_WINDOWS
 
 void
 ipc_server_client_thread_set_running(struct ipc_server *s, struct ipc_thread *it)
@@ -81,9 +92,9 @@ ipc_server_client_thread_is_running(struct ipc_server *s, struct ipc_thread *it)
  * locks a mutex that teardown has already freed (observed as an
  * `om->initialized` assertion in multi_compositor_destroy).
  *
- * Stop their loops before joining: the epoll based client loop notices STOPPING
- * on its next timeout, while the Windows one is woken by
- * @ref ipc_server_cancel_all_client_io.
+ * Stop their loops before joining, then wake every thread blocked in client
+ * I/O with @ref ipc_server_cancel_all_client_io. That covers the Windows loop's
+ * ReadFile() and handlers stuck mid-message on any platform.
  *
  * Called from shutdown_clients() before the main loop returns, and again from
  * teardown_all() as a fallback.
@@ -107,10 +118,8 @@ ipc_server_stop_and_join_client_threads(struct ipc_server *s)
 	if (!have_threads) {
 		return;
 	}
-	// Wake every blocked read before waiting for any one client to finish.
-#ifdef XRT_OS_WINDOWS
+	// Wake every thread blocked in client I/O before waiting for any one client to finish.
 	ipc_server_cancel_all_client_io(s);
-#endif
 	for (uint32_t i = 0; i < IPC_MAX_CLIENTS; i++) {
 		struct ipc_thread *it = &s->threads[i];
 		if (!join_thread[i]) {
