@@ -164,6 +164,14 @@ record are carried with the runtime corrections.
   output-barrier and diagnostics work. Shared tracking stays opt-in.
 - Canonical upstream remains the Monado project on freedesktop.org.
 
+The [2026-11-02 upstream merge review](macos-upstream-merge-review-2026-11.md)
+finds 93 new commits through `db1903bd4` and 19 conflicted files. Upstream
+shutdown extends our !3029 fix; its expanded helper/transport suite passes
+10/10 macOS runs. A full merge needs a deliberate Sense tracker adaptation,
+preserving the validated joint/EKF backend. Current integration `ae2b6d059`
+already contains the October generic-controller/I/O-cache merges and matches
+origin; this exploration does not move it or replace the installed runtime.
+
 
 The 2026-10-21 [generic-controller comparison and upstream merge](macos-upstream-generic-controller.md)
 is prepared on `codex/upstream-generic-controller`, based on the current WSI

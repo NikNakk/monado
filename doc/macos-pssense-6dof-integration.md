@@ -15,6 +15,14 @@ commits, settings and instrumented loss statistics were not recorded for this
 confirmation; it establishes practical sustained use, not complete coverage of
 all reconnect, occlusion or teardown cases.
 
+**2026-11-02 user confirmation:** the current Sense tracking works very well
+in extended play sessions. The user reports sustained practical success beyond
+the earlier 10–20 minute checkpoint; exact durations, games and tested runtime
+commit were not supplied. This is additional user-reported hardware evidence
+for retaining the existing tracking path, not a new instrumented comparison.
+The [November upstream merge policy](macos-upstream-merge-review-2026-11.md#sense-preservation-policy)
+requires preserving its behaviour during the sync.
+
 The Sony-like LED profile and oriented reacquisition improved the earlier
 left/right imbalance and avoided lockouts in the recorded successful sessions.
 Earlier LED faults remain historical evidence rather than an established fault

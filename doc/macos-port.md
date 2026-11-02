@@ -892,6 +892,16 @@ branch-oriented companion to this document.
 
 ## Upstream sync
 
+The [2026-11-02 merge exploration](macos-upstream-merge-review-2026-11.md)
+compares current integration `ae2b6d059` (matching origin) with freshly fetched
+GitLab `main` at `db1903bd4`: 93 new upstream commits and 19 conflicted files
+in a trial merge. The October generic-controller/I/O-cache work below is now
+integrated via `b3ad95b0b`. Upstream's new shutdown changes extend our merged
+!3029 contribution; the expanded helper/transport suite passes 10/10 macOS
+runs. The full new merge is not implemented: constellation fusion/API changes
+need an explicit adaptation preserving the validated Sense joint/EKF path.
+No installed runtime or integration branch tip was changed by this review.
+
 
 The 2026-10-21 [generic-controller comparison and upstream merge](macos-upstream-generic-controller.md)
 is prepared on `codex/upstream-generic-controller`, based on the current WSI
