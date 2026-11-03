@@ -14,12 +14,31 @@
 
 #include "os/os_threading.h"
 
+#include "tracking/t_tracking.h"
 #include "tracking/t_time_sync.h"
 #include "tracking/t_constellation.h"
 
 
-//! 10 seconds after last visually seen sample to resync
+//! 5 seconds after last visually seen sample to resync
 #define T_LED_SYNC_DEFAULT_RESYNC_TIME (time_duration_ns)(U_TIME_1S_IN_NS * 5LL)
+
+#define T_LED_SYNC_SELECTED_LEDS 2
+
+//! How many elements are in the seen LEDs ring buffer
+#define T_LED_SYNC_SEEN_LEDS_ACCUMULATION_BUFFER_SIZE 5
+//! The amount of bits in the full gray code we're decoding
+#define T_LED_SYNC_GRAY_CODE_SIZE_BITS 11
+//! 20 frames per sample
+#define T_LED_SYNC_BRIGHTNESS_CURVE_NUM_SAMPLES 20
+
+// @todo Remove this once clang-format is updated in CI
+// clang-format off
+#define T_LED_SYNC_SEEN_LED_BUFFER_INDEX(sequence_id) ((sequence_id) % T_LED_SYNC_SEEN_LEDS_ACCUMULATION_BUFFER_SIZE)
+#define T_LED_SYNC_GRAY_CODE_BUFFER_INDEX(camera_index, sequence_id, led_idx)                                          \
+	(((((camera_index) * T_LED_SYNC_GRAY_CODE_SIZE_BITS) + ((sequence_id) % T_LED_SYNC_GRAY_CODE_SIZE_BITS)) *     \
+	  T_LED_SYNC_SELECTED_LEDS) +                                                                                  \
+	 (led_idx))
+// clang-format on
 
 //! Flags to control the behavior of the LED sync refinement routine.
 enum t_led_sync_refinement_flags
@@ -41,6 +60,11 @@ enum t_led_sync_refinement_flags
 	 * parts of the exposure that aren't possible, which can cause refinement to sometimes take longer.
 	 */
 	T_LED_SYNC_REFINEMENT_FLAGS_HAS_LATENCY_CAP = 1 << 2,
+	/*!
+	 * Whether the device we're syncing is specifically a PS VR2 controller ("pssense"), and so has access to the
+	 * extra Gray code (BROAD) and brightness curve integral (BG) syncing modes.
+	 */
+	T_LED_SYNC_REFINEMENT_FLAGS_PS_SENSE = 1 << 3,
 };
 
 //! Options for the LED sync refinement.
@@ -75,6 +99,32 @@ enum t_led_sync_sample_timestamp_mode
 	T_LED_SYNC_SAMPLE_TIMESTAMP_MODE_HOST_DEVICE_CLOCK_OFFSET = 2,
 };
 
+enum t_led_sync_sample_pssense_mode
+{
+	//! "PRESCAN", used to scan for an initial offset to then refine.
+	T_LED_SYNC_SAMPLE_PSSENSE_MODE_PRESCAN = 0,
+	/*!
+	 * "BROAD", blink certain LEDs in an 11-frame Gray code to refine where we are in the offset faster than a
+	 * binary search can.
+	 */
+	T_LED_SYNC_SAMPLE_PSSENSE_MODE_BROAD,
+	/*!
+	 * "BG", blink certain LEDs with a brightness curve over a set of frames, then fit a curve to that measured
+	 * data, allowing us to get sub-frame accuracy in terms of where we are.
+	 */
+	T_LED_SYNC_SAMPLE_PSSENSE_MODE_BG,
+	//! "STABLE", all LEDs blink narrowly on the trimmed cycle, holding sync with nothing measured.
+	T_LED_SYNC_SAMPLE_PSSENSE_MODE_STABLE,
+};
+
+struct t_led_sync_sample_pssense_data
+{
+	//! The base time offset to send to the controller (in nanoseconds).
+	time_duration_ns base_time_offset_ns;
+	//! The LEDs to enable, or 0xff if we don't have a selection.
+	uint8_t leds[4];
+};
+
 //! A sample read out from the driver, to pass to the device in question.
 struct t_led_sync_sample
 {
@@ -87,26 +137,111 @@ struct t_led_sync_sample
 	} timestamp;
 	enum t_led_sync_sample_timestamp_mode timestamp_mode;
 
+	/*!
+	 * Clock skew (device vs host, in ns per ns) and its host-time epoch. Only used in
+	 * HOST_DEVICE_CLOCK_OFFSET mode: device_ts = host_ts + offset + skew * (host_ts - epoch).
+	 */
+	double clock_skew;
+	timepoint_ns clock_epoch_ns;
+
+	//! The LED cycle period in device ns, already trimmed for the skew. 0 lets the driver use its own estimate.
+	double cycle_period_ns;
+
 	//! The latency offset to apply to fudge the blink to line up as best as possible with the exposure.
 	time_duration_ns fudge_offset_ns;
 	//! The duration to make the LEDs blink for, in nanoseconds.
 	time_duration_ns blink_duration_ns;
+
+	struct t_led_sync_sample_pssense_data pssense;
+	enum t_led_sync_sample_pssense_mode pssense_mode;
 };
 
 enum t_led_sync_phase
 {
 	//! The initial phase, where we haven't made any adjustments yet.
-	T_LED_SYNC_SEARCH_PHASE_INIT = 0,
+	T_LED_SYNC_PHASE_INIT = 0,
 	//! Trying to find some offset that gets us in sync at all.
-	T_LED_SYNC_SEARCH_PHASE_FIND_INITIAL_OFFSET = 1,
+	T_LED_SYNC_PHASE_FIND_INITIAL_OFFSET,
 	//! Trying to align the rising edge of the LED blinks with the falling edge of the camera exposure.
-	T_LED_SYNC_SEARCH_PHASE_FIND_RIGHT_EDGE = 2,
+	T_LED_SYNC_PHASE_FIND_RIGHT_EDGE,
 	//! Trying to align the falling edge of the LED blinks with the rising edge of the camera exposure.
-	T_LED_SYNC_SEARCH_PHASE_FIND_LEFT_EDGE = 3,
+	T_LED_SYNC_PHASE_FIND_LEFT_EDGE,
+	//! Trying to decode the Gray codes present in the LEDs we've selected.
+	T_LED_SYNC_PHASE_DECODE_GRAY,
+	//! Trying to optimize the brightness curve for the correct time offset.
+	T_LED_SYNC_PHASE_OPTIMIZE_BRIGHTNESS_CURVE,
 	//! We've found an offset, now we can optimize the blink duration to something that keeps it tracking.
-	T_LED_SYNC_SEARCH_PHASE_REFINE_BLINK_DURATION = 4,
+	T_LED_SYNC_PHASE_REFINE_BLINK_DURATION,
 	//! We've found an offset and optimized the center of the LED blink to the center of the exposure.
-	T_LED_SYNC_SEARCH_PHASE_MAINTAIN_OFFSET = 5,
+	T_LED_SYNC_PHASE_MAINTAIN_OFFSET,
+	//! PS Sense only, BG has converged so the LEDs hold sync on the trimmed cycle until BG checks them again.
+	T_LED_SYNC_PHASE_STABLE,
+};
+
+struct t_led_sync_seen_led
+{
+	//! How many times it's been seen
+	uint8_t accum_seen_count;
+	//! How "facing" the camera it was
+	float accum_facing_dot;
+};
+
+//! One camera's view of the selected LEDs in one frame, brightness is the blob's greysum, 0 if it wasn't seen.
+struct t_led_sync_frame
+{
+	uint64_t sequence_id;
+	float brightness[T_LED_SYNC_SELECTED_LEDS];
+	float facing_dot[T_LED_SYNC_SELECTED_LEDS];
+};
+
+//! Frame period measured over a long run of frames, so it's steady enough to base the LED cycle on.
+struct t_led_sync_period_estimate
+{
+	uint64_t anchor_sequence_id;
+	timepoint_ns anchor_ns;
+	//! The previous run's estimate, the next one has to agree with it to be trusted.
+	double candidate_ns;
+	//! The last trusted estimate, 0 until there is one.
+	double period_ns;
+};
+
+//! Clock sync from BROAD on: the LED cycle, the clock model kept on it, and BG's offset servo and skew fit.
+struct t_led_sync_delta_sync
+{
+	//! The camera frame the clock model last matched the LED cycle at, its drift is measured from here.
+	uint64_t anchor_sequence_id;
+	timepoint_ns anchor_ns;
+
+	//! Host time the published offset is valid at, the skew extrapolates from here.
+	timepoint_ns epoch_ns;
+	//! Estimated clock skew, device vs host, in ns per ns.
+	double skew;
+	//! Sum of all servo corrections this BG session.
+	time_duration_ns servo_integral_ns;
+	//! Smoothed offset of the LEDs from the exposure, as the servo correction that would center them.
+	double led_error_ns;
+	bool has_led_error;
+
+	//! The frame period the LED cycle is trimmed from, set when BROAD starts and moved onto each trusted estimate.
+	double base_period_ns;
+	//! The skew changed and the new cycle still has to be sent.
+	bool trim_pending;
+	//! Host time of the last accepted measurement, for the no-data watchdog.
+	timepoint_ns last_measurement_ns;
+
+	//! Skew windows fitted since BG was entered.
+	uint32_t num_windows;
+	//! When the fitted rate last started staying under the STABLE gate, 0 if it isn't.
+	timepoint_ns converged_since_ns;
+	//! Whether this sync has reached STABLE, BG comes back from it warm.
+	bool been_stable;
+	//! Host time STABLE was entered.
+	timepoint_ns stable_entry_ns;
+
+	//! Least-squares window of the phase deviation against time.
+	uint32_t num_samples;
+	timepoint_ns window_start_ns;
+	double sum_t, sum_tt, sum_d, sum_td;
 };
 
 struct t_led_sync_refinement
@@ -121,6 +256,10 @@ struct t_led_sync_refinement
 
 	struct os_mutex lock;
 
+	/*
+	 * Exposure Info
+	 */
+
 	/*!
 	 * Whether we know the actual exposure time of the frames. We may not, so we have to work without it in some
 	 * cases.
@@ -128,9 +267,16 @@ struct t_led_sync_refinement
 	bool has_exposure_time;
 	//! The known time the frame was exposed for.
 	time_duration_ns exposure_time_ns;
-
 	//! The known interval between frames.
 	time_duration_ns exposure_interval_ns;
+	struct t_led_sync_period_estimate period_estimate;
+	//! The latest timing event's frame and exposure time.
+	uint64_t last_exposure_sequence_id;
+	timepoint_ns last_exposure_ns;
+
+	/*
+	 * Driver Sample
+	 */
 
 	//! Whether we have a sample ready to be sent to the driver/device.
 	bool has_sample_for_driver;
@@ -139,6 +285,10 @@ struct t_led_sync_refinement
 	//! Whether the sample has been applied
 	bool sample_applied;
 
+	/*
+	 * State
+	 */
+
 	//! The current search phase
 	enum t_led_sync_phase phase;
 
@@ -146,7 +296,7 @@ struct t_led_sync_refinement
 	 * The current estimated latency offset between the device and the host, in nanoseconds. This is what we are
 	 * trying to refine.
 	 */
-	time_duration_ns current_latency_offset_ns;
+	time_duration_ns current_clock_offset_ns;
 	/*!
 	 * The amount of fudge between the latency offset and the actual blink start time, in nanoseconds, so we can
 	 * place the blink at the optimal time for the exposure.
@@ -160,7 +310,7 @@ struct t_led_sync_refinement
 	uint32_t frames_since_last_visually_seen;
 
 	//! The sequence ID of the latest timing event we processed.
-	uint32_t current_sequence_id;
+	uint64_t current_sequence_id;
 
 	//! The time the latest sample was applied to the driver/device
 	timepoint_ns last_sample_apply_time_ns;
@@ -177,6 +327,68 @@ struct t_led_sync_refinement
 		//! The current right bound of the binary search, if we're in a find edge phase.
 		time_duration_ns right_bound_ns;
 	} binary_search_state;
+
+	struct
+	{
+		//! The index into the seen LEDs ring buffer
+		uint32_t cur_sequence_id;
+
+		//! The time when we last selected the set of LEDs
+		timepoint_ns last_selection_ns;
+
+		uint32_t num_samples;
+
+		/*!
+		 * The seen LEDs ring buffer.
+		 *
+		 * Indexed via `(leds_seen_idx * XRT_CONSTELLATION_MAX_LEDS_PER_DEVICE) + led_id`
+		 */
+		struct t_led_sync_seen_led
+		    buf[XRT_CONSTELLATION_MAX_LEDS_PER_DEVICE * T_LED_SYNC_SEEN_LEDS_ACCUMULATION_BUFFER_SIZE];
+	} leds_seen;
+
+	struct
+	{
+		//! Whether or not we have applied the final cycle position or not.
+		bool applied_gray_start;
+
+		/*!
+		 * A ring buffer storing the last @ref T_LED_SYNC_GRAY_CODE_SIZE_BITS bits of the brightness sequence
+		 * per camera.
+		 *
+		 * Indexed via @ref T_LED_SYNC_GRAY_CODE_BUFFER_INDEX
+		 */
+		float
+		    led_brightnesses[T_LED_SYNC_GRAY_CODE_SIZE_BITS * XRT_TRACKING_MAX_CAMS * T_LED_SYNC_SELECTED_LEDS];
+		/*!
+		 * A ring buffer storing the last @ref T_LED_SYNC_GRAY_CODE_SIZE_BITS bits of the sequence, storing the
+		 * facing directions of each sample, so that we can pick the value from the camera that saw the LED the
+		 * best.
+		 *
+		 * Indexed via @ref T_LED_SYNC_GRAY_CODE_BUFFER_INDEX
+		 */
+		float
+		    led_facing_dots[T_LED_SYNC_GRAY_CODE_SIZE_BITS * XRT_TRACKING_MAX_CAMS * T_LED_SYNC_SELECTED_LEDS];
+
+		//! How many decodes we've had that match in a row, see @ref GRAY_CODE_MATCHES_NEEDED
+		uint32_t matching_decodes;
+		//! The gray code we're trying
+		uint8_t decoded_gray_code;
+		//! The last time we had an accepted gray code (or the start of this phase).
+		timepoint_ns last_accepted_gray_code_ns;
+	} decode_gray;
+
+	struct
+	{
+		//! The LEDs @ref frames were recorded for.
+		uint8_t leds[T_LED_SYNC_SELECTED_LEDS];
+		//! The first frame the next measurement may use.
+		uint64_t window_start_sequence_id;
+		//! Ring buffer of the last @ref T_LED_SYNC_BRIGHTNESS_CURVE_NUM_SAMPLES frames per camera.
+		struct t_led_sync_frame frames[XRT_TRACKING_MAX_CAMS][T_LED_SYNC_BRIGHTNESS_CURVE_NUM_SAMPLES];
+	} optimize_brightness_curve;
+
+	struct t_led_sync_delta_sync delta_sync;
 
 	struct
 	{

@@ -22,8 +22,8 @@
 // @todo Remove when clang-format is updated in CI
 // clang-format off
 // IMU ticks are in thirds of a microsecond, so 1 tick = 333.333... nanoseconds
-#define NS_TO_IMU_TICKS(ns) (((uint64_t)(ns) * 3) / 1000)
-#define IMU_TICKS_TO_NS(ticks) (((uint64_t)(ticks) * 1000) / 3)
+#define NS_TO_IMU_TICKS(ns) (((int64_t)(ns) * 3) / 1000)
+#define IMU_TICKS_TO_NS(ticks) (((int64_t)(ticks) * 1000) / 3)
 
 #define PERIOD_ID_TO_DURATION_NS(period_id) (time_duration_ns)(IMU_TICKS_TO_NS(150LLU * (uint64_t)period_id))
 // @note: the +1 is to ensure things round correctly when dealing with converting to and back
@@ -186,33 +186,51 @@ struct pssense_output_adaptive_trigger_settings
 
 enum pssense_led_sync_phase
 {
-	// initializing
+	//! initializing
 	LED_SYNC_PHASE_INIT = 0,
-	// ???
+	//! All LEDs blink at the absolute time given
 	LED_SYNC_PHASE_PRESCAN = 1,
-	// ???
+	//! Specified LEDs blink a gray code to get a broad sync.
 	LED_SYNC_PHASE_BROAD = 2,
-	// ???
+	//! Specified LEDs blink a brightness curve to refine clock sync/skew to high accuracy.
 	LED_SYNC_PHASE_BG = 3,
-	// ???
+	//! LED sync is stable, all LEDs blink normally
 	LED_SYNC_PHASE_STABLE = 4,
-	// used during passthrough to prevent LEDs from bleeding into it
+	//! used during passthrough to prevent LEDs from bleeding into it
 	LED_SYNC_PHASE_LED_ALL_OFF = 5,
-	// probably 100% duty cycle?
+	//! probably 100% duty cycle?
 	LED_SYNC_PHASE_LED_ALL_ON = 6,
-	// probably also 100% duty cycle?
+	//! probably also 100% duty cycle?
 	LED_SYNC_PHASE_DEBUG = 7,
 };
 
 struct pssense_led_settings
 {
 	uint8_t phase;
+	//! The sequence number of the packet changing determines when the settings are read.
 	uint8_t sequence_number;
+	//! The blink length, in subgrids, or 50us.
 	uint8_t period_id;
-	//! The position, in IMU ticks, @ref NS_PER_IMU_TICK
-	__le32 cycle_position;
+	union {
+		/*!
+		 * The position when to start the blink, in IMU ticks, @ref NS_TO_IMU_TICKS.
+		 *
+		 * This is used during the PRESCAN phase, @ref pssense_led_sync_phase.
+		 */
+		__le32 cycle_position_absolute;
+		/*!
+		 * An offset from the current cycle position, in IMU ticks, @ref NS_TO_IMU_TICKS.
+		 *
+		 * This is used during the BROAD, BG, and STABLE phases, @ref pssense_led_sync_phase.
+		 */
+		__le32 cycle_position_delta;
+	};
 	//! The length, in thirds of a nanosecond.
 	__le32 cycle_length;
+	/*!
+	 * Four slots which hold LED IDs (1-indexed) that can be used to blink those LEDs at a different pattern than
+	 * normal, with the pattern depending on the sync phase. 0xFF means slot unused.
+	 */
 	uint8_t led_blink[4];
 };
 

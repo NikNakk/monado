@@ -60,6 +60,7 @@
 
 DEBUG_GET_ONCE_LOG_OPTION(pssense_log, "PSSENSE_LOG", U_LOGGING_INFO)
 DEBUG_GET_ONCE_BOOL_OPTION(pssense_pc_polling_rate, "PSSENSE_SET_PC_POLLING_RATE", true)
+DEBUG_GET_ONCE_BOOL_OPTION(pssense_advanced_led_sync, "PSSENSE_ADVANCED_LED_SYNC", true)
 
 /*!
  * Indices where each input is in the input list.
@@ -194,9 +195,14 @@ struct pssense_device
 		timepoint_ns last_exposure_local_timestamp_ns;
 		time_duration_ns average_exposure_interval_ns;
 
+		/*!
+		 * Whether or not the sequence number is being incremented automatically, should never
+		 * be set to true during BROAD/BG/STABLE.
+		 */
 		bool increment_sequence_num;
 		uint8_t led_sequence_num;
 
+		//! A debug value for testing sync issues.
 		int32_t timing_fudge_100us;
 
 		//! Locked by controller_thread.
@@ -209,10 +215,15 @@ struct pssense_device
 
 		struct t_led_sync_refinement led_sync_refinement;
 		uint8_t period_id;
+		enum pssense_led_sync_phase sync_phase;
 
 		bool led_sync_sample_needs_marking;
 		bool led_sync_sample_needs_sending;
 		struct t_led_sync_sample latest_led_sync_sample;
+		//! The latest sample's base-time delta, in IMU ticks.
+		int32_t led_sync_delta_ticks;
+		//! What the deltas didn't fit into whole IMU ticks, in thirds of a ns, carried into the next one.
+		int64_t led_sync_delta_remainder_ns3;
 
 		struct xrt_pose T_led_imu;
 	} tracking;
@@ -327,13 +338,33 @@ pssense_host_ts_to_device(struct pssense_device *pssense,
 		return true;
 	}
 	case T_LED_SYNC_SAMPLE_TIMESTAMP_MODE_HOST_DEVICE_CLOCK_OFFSET: {
-		*out_device_timestamp_ns =
-		    host_timestamp_ns + pssense->tracking.latest_led_sync_sample.timestamp.host_device_clock_offset_ns;
+		const struct t_led_sync_sample *s = &pssense->tracking.latest_led_sync_sample;
+		*out_device_timestamp_ns = host_timestamp_ns + s->timestamp.host_device_clock_offset_ns +
+		                           (time_duration_ns)(s->clock_skew * (host_timestamp_ns - s->clock_epoch_ns));
 		return true;
 	}
 	}
 
 	return false;
+}
+
+//! Converts the latest sample's base-time delta to whole IMU ticks, carrying the remainder into the next one.
+static void
+pssense_convert_led_sync_delta_locked(struct pssense_device *pssense)
+{
+	const struct t_led_sync_sample *sample = &pssense->tracking.latest_led_sync_sample;
+
+	// An absolute position replaces everything the deltas built up.
+	if (sample->pssense_mode == T_LED_SYNC_SAMPLE_PSSENSE_MODE_PRESCAN) {
+		pssense->tracking.led_sync_delta_ticks = 0;
+		pssense->tracking.led_sync_delta_remainder_ns3 = 0;
+		return;
+	}
+
+	// One IMU tick is exactly 1000 thirds of a nanosecond.
+	int64_t delta_ns3 = sample->pssense.base_time_offset_ns * 3 + pssense->tracking.led_sync_delta_remainder_ns3;
+	pssense->tracking.led_sync_delta_ticks = (int32_t)(delta_ns3 / 1000);
+	pssense->tracking.led_sync_delta_remainder_ns3 = delta_ns3 % 1000;
 }
 
 static bool
@@ -352,8 +383,17 @@ pssense_device_ts_to_host(struct pssense_device *pssense,
 		return true;
 	}
 	case T_LED_SYNC_SAMPLE_TIMESTAMP_MODE_HOST_DEVICE_CLOCK_OFFSET: {
-		*out_host_timestamp_ns = device_timestamp_ns -
-		                         pssense->tracking.latest_led_sync_sample.timestamp.host_device_clock_offset_ns;
+		const struct t_led_sync_sample *s = &pssense->tracking.latest_led_sync_sample;
+		double skew = s->clock_skew;
+		double epoch = (double)s->clock_epoch_ns;
+		double offset = (double)s->timestamp.host_device_clock_offset_ns;
+		double device = (double)device_timestamp_ns;
+
+		// Exact inverse of:
+		// device_ts = host_ts + offset + skew * (host_ts - epoch)
+		//          = host_ts * (1 + skew) + offset - skew * epoch
+		// host_ts  = (device_ts - offset + skew * epoch) / (1 + skew)
+		*out_host_timestamp_ns = (timepoint_ns)((device - offset + (skew * epoch)) / (1.0 + skew));
 		return true;
 	}
 	}
@@ -1171,38 +1211,44 @@ pssense_timing_event_sink_push(struct t_timing_event_sink *sink, const struct t_
 
 	// update the LED settings
 	if (pssense->tracking.received_frames > 10) {
-		// Update the sample from the LED sync routine
-		if (t_led_sync_get_sample(&pssense->tracking.led_sync_refinement,
+		// Update the sample from the LED sync routine, but only check if we aren't pending a sample.
+		if (!pssense->tracking.led_sync_sample_needs_sending &&
+		    !pssense->tracking.led_sync_sample_needs_marking &&
+		    t_led_sync_get_sample(&pssense->tracking.led_sync_refinement,
 		                          &pssense->tracking.latest_led_sync_sample)) {
 			pssense->tracking.led_sync_sample_needs_sending = true;
 			pssense->tracking.period_id =
 			    DURATION_NS_TO_PERIOD_ID(pssense->tracking.latest_led_sync_sample.blink_duration_ns);
 			pssense->tracking.led_sequence_num += 1;
+
+			// Converted once here, so rebuilding the settings before they're sent can't lose it.
+			pssense_convert_led_sync_delta_locked(pssense);
+
+			switch (pssense->tracking.latest_led_sync_sample.pssense_mode) {
+			case T_LED_SYNC_SAMPLE_PSSENSE_MODE_PRESCAN:
+				pssense->tracking.sync_phase = LED_SYNC_PHASE_PRESCAN;
+				break;
+			case T_LED_SYNC_SAMPLE_PSSENSE_MODE_BROAD:
+				pssense->tracking.sync_phase = LED_SYNC_PHASE_BROAD;
+				break;
+			case T_LED_SYNC_SAMPLE_PSSENSE_MODE_BG: pssense->tracking.sync_phase = LED_SYNC_PHASE_BG; break;
+			case T_LED_SYNC_SAMPLE_PSSENSE_MODE_STABLE:
+				pssense->tracking.sync_phase = LED_SYNC_PHASE_STABLE;
+				break;
+			}
 		}
 
 		uint8_t period_id = pssense->tracking.period_id;
 
-		// Convert the timestamp, latency offset will be applied within here. Must happen after fetching the
-		// sample above, so the latency and the fudge offset below come from the same sample.
-		timepoint_ns next_blink_time = 0;
-		if (!pssense_host_ts_to_device(pssense, pssense->tracking.last_exposure_local_timestamp_ns,
-		                               &next_blink_time)) {
-			os_thread_helper_unlock(&pssense->controller_thread);
-			return;
+		// Once the refinement trims the cycle for the clock skew it owns it, before that use our own
+		// estimate.
+		double cycle_period_ns = pssense->tracking.latest_led_sync_sample.cycle_period_ns;
+		if (cycle_period_ns <= 0.0) {
+			cycle_period_ns = (double)pssense->tracking.average_exposure_interval_ns;
 		}
 
-		next_blink_time += (int64_t)pssense->tracking.timing_fudge_100us * 100 * U_TIME_1US_IN_NS;
-		// Apply the fudge offset, which will line up the blink center with exposure center
-		next_blink_time += (int64_t)pssense->tracking.latest_led_sync_sample.fudge_offset_ns;
-
-		// PSSENSE cycle position on the wire is the *center* of the exposure, but our LED sync assumes it's the
-		// start of the exposure, so we need to make it blink later to account
-		next_blink_time += PERIOD_ID_TO_DURATION_NS(period_id) / 2;
-
 		// inside thirds of a nanosecond
-		uint32_t cycle_length = pssense->tracking.average_exposure_interval_ns * 3;
-		// in IMU ticks
-		uint32_t cycle_position = NS_TO_IMU_TICKS(next_blink_time);
+		uint32_t cycle_length = (uint32_t)(cycle_period_ns * 3.0 + 0.5);
 
 #if 0
 		static int64_t jitter_integration = 0;
@@ -1216,14 +1262,67 @@ pssense_timing_event_sink_push(struct t_timing_event_sink *sink, const struct t_
 		}
 #endif
 
+		if (pssense->tracking.timing_fudge_100us != 0 &&
+		    pssense->tracking.led_settings.phase != LED_SYNC_PHASE_PRESCAN) {
+			pssense->tracking.led_sync_delta_ticks +=
+			    NS_TO_IMU_TICKS((int64_t)pssense->tracking.timing_fudge_100us * 100 * U_TIME_1US_IN_NS);
+
+			pssense->tracking.led_sequence_num += 1;
+
+			// Reset fudge since it stacks
+			pssense->tracking.timing_fudge_100us = 0;
+		}
+
 		pssense->tracking.led_settings = (struct pssense_led_settings){
-		    .phase = LED_SYNC_PHASE_PRESCAN,
+		    .phase = pssense->tracking.sync_phase,
 		    .cycle_length = __cpu_to_le32(cycle_length),
-		    .cycle_position = __cpu_to_le32(cycle_position),
 		    .sequence_number = pssense->tracking.led_sequence_num,
 		    .led_blink = {0xFF, 0xFF, 0xFF, 0xFF},
 		    .period_id = period_id,
 		};
+
+		if (pssense->tracking.led_settings.phase == LED_SYNC_PHASE_PRESCAN) {
+			/*
+			 * Convert the timestamp, latency offset will be applied within here. Must happen after fetching
+			 * the sample above, so the latency and the fudge offset below come from the same sample.
+			 */
+			timepoint_ns next_blink_time = 0;
+			if (!pssense_host_ts_to_device(pssense, pssense->tracking.last_exposure_local_timestamp_ns,
+			                               &next_blink_time)) {
+				os_thread_helper_unlock(&pssense->controller_thread);
+				return;
+			}
+
+			next_blink_time += (int64_t)pssense->tracking.timing_fudge_100us * 100 * U_TIME_1US_IN_NS;
+			// Apply the fudge offset, which will line up the blink center with exposure center
+			next_blink_time += (int64_t)pssense->tracking.latest_led_sync_sample.fudge_offset_ns;
+
+			// in IMU ticks
+			uint32_t cycle_position = NS_TO_IMU_TICKS(next_blink_time);
+
+			pssense->tracking.led_settings.cycle_position_absolute = __cpu_to_le32(cycle_position);
+		} else {
+			// Only the rebuilds before the sample is sent carry its delta, after that it would stack.
+			int32_t delta_ticks = pssense->tracking.led_sync_delta_ticks;
+			pssense->tracking.led_settings.cycle_position_delta = __cpu_to_le32((uint32_t)delta_ticks);
+		}
+
+		memcpy(pssense->tracking.led_settings.led_blink, pssense->tracking.latest_led_sync_sample.pssense.leds,
+		       sizeof(pssense->tracking.led_settings.led_blink));
+
+		for (size_t i = 0; i < ARRAY_SIZE(pssense->tracking.led_settings.led_blink); i++) {
+			uint8_t *led = &pssense->tracking.led_settings.led_blink[i];
+			if ((*led) == 0xFF) {
+				continue;
+			}
+
+			// The wire LED IDs are 1-indexed
+			(*led)++;
+		}
+
+		static_assert(sizeof(pssense->tracking.led_settings.led_blink) ==
+		                  sizeof(pssense->tracking.latest_led_sync_sample.pssense.leds),
+		              "Size of the sync LEDs doesn't equal wire LEDs.");
 
 		if (pssense->tracking.increment_sequence_num) {
 			pssense->tracking.led_sequence_num += 1;
@@ -1609,8 +1708,6 @@ pssense_create(struct xrt_prober *xp,
 
 	m_imu_3dof_init(&pssense->tracking.fusion, M_IMU_3DOF_USE_GRAVITY_DUR_20MS);
 
-	// pssense->tracking.timing_fudge_100us = 20; // 2.0ms fudge
-	pssense->tracking.increment_sequence_num = true;
 	pssense->timing.clock_tracker = m_clock_windowed_skew_tracker_alloc(2048);
 
 	m_relation_history_create(&pssense->tracking.imu_relation_history);
@@ -1729,12 +1826,22 @@ pssense_create(struct xrt_prober *xp,
 		return NULL;
 	}
 
+	// @todo Once LED blink refinement is fixed, enable that again
+	enum t_led_sync_refinement_flags sync_refinement_flags = T_LED_SYNC_REFINEMENT_FLAGS_OPTICAL_DRIVEN_OFFSET | //
+	                                                         T_LED_SYNC_REFINEMENT_FLAGS_HAS_LATENCY_CAP |       //
+	                                                         T_LED_SYNC_REFINEMENT_FLAGS_PS_SENSE;
+	if (!debug_get_bool_option_pssense_advanced_led_sync()) {
+		sync_refinement_flags &= ~T_LED_SYNC_REFINEMENT_FLAGS_OPTICAL_DRIVEN_OFFSET;
+		sync_refinement_flags &= ~T_LED_SYNC_REFINEMENT_FLAGS_PS_SENSE;
+
+		// Automatically increment the sequence number if we're not doing advanced LED sync.
+		pssense->tracking.increment_sequence_num = true;
+	}
+
 	// @note We don't do blink duration refinement right now because that needs to eventually adjust the latency
 	//       offset as it goes and produces a worse result with the current implementation.
 	struct t_led_sync_refinement_options led_sync_refinement_options = {
-	    // @todo Once LED blink refinement is fixed, enable that again
-	    // @todo Once optical clock sync is implemented in full, enable that here
-	    .flags = T_LED_SYNC_REFINEMENT_FLAGS_HAS_LATENCY_CAP,
+	    .flags = sync_refinement_flags,
 	    .initial_blink_duration_ns = PERIOD_ID_TO_DURATION_NS(30),
 	    .min_blink_duration_ns = PERIOD_ID_TO_DURATION_NS(1),
 	    .max_blink_duration_ns = PERIOD_ID_TO_DURATION_NS(MAX_PERIOD_ID),
@@ -1751,6 +1858,7 @@ pssense_create(struct xrt_prober *xp,
 	}
 
 	pssense->tracking.period_id = DURATION_NS_TO_PERIOD_ID(led_sync_refinement_options.initial_blink_duration_ns);
+	pssense->tracking.sync_phase = LED_SYNC_PHASE_PRESCAN;
 
 	ret = os_thread_helper_init(&pssense->controller_thread);
 	if (ret != 0) {
@@ -1832,6 +1940,9 @@ pssense_create(struct xrt_prober *xp,
 	u_var_add_bool(pssense, &pssense->tracking.increment_sequence_num, "Increment LED Sequence Number");
 	u_var_add_u8(pssense, &pssense->tracking.led_sequence_num, "LED Sequence Number");
 	u_var_add_u8(pssense, &pssense->tracking.period_id, "LED Blink Period ID");
+	u_var_add_i32(pssense, (int32_t *)&pssense->tracking.sync_phase, "LED sync phase");
+	u_var_add_u8(pssense, &pssense->tracking.led_settings.led_blink[0], "LED Blink[0]");
+	u_var_add_u8(pssense, &pssense->tracking.led_settings.led_blink[1], "LED Blink[1]");
 	u_var_add_i32(pssense, &pssense->tracking.timing_fudge_100us, "Timing Fudge (100us)");
 	u_var_add_bool(pssense, &pssense->tracking.use_constellation, "Use Constellation Tracking");
 
