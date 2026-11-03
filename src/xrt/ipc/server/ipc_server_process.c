@@ -33,6 +33,7 @@
 
 #include "shared/ipc_protocol.h"
 #include "shared/ipc_shmem.h"
+#include "shared/ipc_utils.h"
 #include "server/ipc_server.h"
 #include "server/ipc_server_objects.h"
 #include "server/ipc_server_interface.h"
@@ -1160,6 +1161,19 @@ ipc_server_main_common(const struct ipc_server_main_info *ismi,
 
 #ifdef XRT_OS_WINDOWS
 	timeBeginPeriod(1);
+
+	// Windows 11 ignores timeBeginPeriod if the process isn't visible or audible.
+	PROCESS_POWER_THROTTLING_STATE throttling = {
+	    .Version = PROCESS_POWER_THROTTLING_CURRENT_VERSION,
+	    .ControlMask = PROCESS_POWER_THROTTLING_IGNORE_TIMER_RESOLUTION,
+	    .StateMask = 0,
+	};
+	if (!SetProcessInformation(GetCurrentProcess(), ProcessPowerThrottling, &throttling, sizeof(throttling))) {
+		DWORD err = GetLastError();
+		U_LOG_IFL_I(log_level,
+		            "SetProcessInformation(ProcessPowerThrottling) failed (expected before Windows 11): %lu %s",
+		            err, ipc_winerror(err));
+	}
 #endif
 
 	/*
