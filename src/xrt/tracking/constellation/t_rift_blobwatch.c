@@ -105,6 +105,15 @@ struct blobservation
 
 #define QUEUE_ENTRIES (NUM_FRAMES_HISTORY + 1)
 
+/*
+ * A dimmer peak in a blob is split off as its own LED if the brightest path to a brighter peak dips below this
+ * fraction of its brightness, both measured from the pixel threshold.
+ */
+#define BLOB_SPLIT_SADDLE_RATIO 0.75f
+// Blobs with more peaks than this, such as large noisy areas, are not split.
+#define MAX_PEAKS_PER_BLOB 32
+#define PEAK_NONE ((uint8_t)0xFF)
+
 struct extent
 {
 	uint16_t start;
@@ -114,9 +123,28 @@ struct extent
 	uint16_t left;
 	uint16_t right;
 	uint32_t area;
+	// x of the first pixel on the top line, a pixel to flood fill the whole blob from
+	uint16_t seed_x;
 
 	// Maximum pixel colour detected
 	uint8_t max_pixel;
+};
+
+struct blob_pixel
+{
+	uint16_t x;
+	uint16_t y;
+	uint8_t value;
+	// Index of the peak this pixel belongs to, PEAK_NONE until assigned
+	uint8_t peak;
+};
+
+struct blob_bounds
+{
+	uint16_t left;
+	uint16_t top;
+	uint16_t right;
+	uint16_t bottom;
 };
 
 struct extent_line
@@ -194,6 +222,30 @@ struct t_rift_blobwatch
 
 	struct blobservation *last_observation;
 
+	// Scratch buffers for collecting the connected pixels of each blob
+	struct
+	{
+		// Frame sized, the generation each pixel was last visited in, so a blob is only collected once a frame
+		uint8_t *visited;
+		uint8_t generation;
+		uint32_t width;
+		uint32_t height;
+
+		// Flood fill stack of packed pixel coordinates, only grows past the largest allowed blob for larger
+		// ones
+		uint32_t *stack;
+		uint32_t stack_capacity;
+
+		// Sized for the largest allowed blob, its pixels, their indices by position, and their brightness order
+		struct blob_pixel *pixels;
+		uint32_t *pixel_index;
+		uint32_t *order;
+		uint32_t capacity;
+
+		// The maximum blob width the buffers are sized for, the parameter can change while processing a frame
+		uint16_t max_blob_width;
+	} scratch;
+
 	struct
 	{
 		struct u_var_draggable_u8 blob_required_threshold;
@@ -207,90 +259,325 @@ t_rift_blobwatch(struct t_blobwatch *bw)
 	return (struct t_rift_blobwatch *)bw;
 }
 
-static uint32_t
-compute_greysum(
-    struct t_rift_blobwatch *bw, struct xrt_frame *frame, struct extent *e, uint16_t end_y, float *led_x, float *led_y)
+/*
+ * Flood fills the pixels connected to the seed into the scratch pixels, marking them visited so other extents of the
+ * same blob skip it. Returns false if the blob is wider or taller than the maximum blob width, the whole blob is still
+ * marked visited so none of its parts get stored.
+ *
+ * Also counts the bright enough local maxima, ties going to the earlier pixel. Every separate peak a blob could be
+ * split at contains one, so a blob with fewer than two can't be split.
+ */
+static bool
+collect_blob_pixels(struct t_rift_blobwatch *bw,
+                    struct xrt_frame *frame,
+                    uint16_t seed_x,
+                    uint16_t seed_y,
+                    uint32_t *out_count,
+                    uint32_t *out_peak_count,
+                    struct blob_bounds *out_bounds)
 {
-	const uint16_t width = e->right - e->left + 1;
-	const uint16_t height = end_y - e->top + 1;
-	uint8_t *pixels;
-	uint16_t x, y;
-	uint32_t x_pos, y_pos;
-	uint32_t greysum_total = 0, greysum_x = 0, greysum_y = 0;
+	uint8_t *visited = bw->scratch.visited;
+	const uint8_t generation = bw->scratch.generation;
+	const uint32_t width = frame->width;
+	const uint32_t height = frame->height;
+	const uint8_t threshold = bw->params.pixel_threshold;
+	const uint16_t max_width = bw->scratch.max_blob_width;
 
-	// Point to top left pixel of the extent
-	pixels = frame->data + frame->stride * e->top + e->left;
+	struct blob_bounds bounds = {seed_x, seed_y, seed_x, seed_y};
+	uint32_t count = 0;
+	uint32_t peak_count = 0;
+	bool fits = true;
 
-	for (y = 0; y < height; y++) {
-		// Use 1...frame_width/height as coords, otherwise the first column never contributes anything
-		y_pos = e->top + y + 1;
-		x_pos = e->left + 1;
+	uint32_t stack_size = 0;
+	bw->scratch.stack[stack_size++] = (uint32_t)seed_y << 16 | seed_x;
+	visited[seed_y * width + seed_x] = generation;
 
-		for (x = 0; x < width; x++) {
-			// Subtract by the pixel threshold, clamping at 0 if it's below the threshold.
-			// @note The reason we do this is so that the greysum is weighted by the values above our noise
-			//       floor, as we know all values passed into this function are going to be above it, which
-			//       means without this we would naturally be weighted towards the geometric center rather
-			//       than the true greysum of the observable values.
-			uint32_t pix = (pixels[x] - MIN(pixels[x], bw->params.pixel_threshold));
+	while (stack_size > 0) {
+		const uint32_t packed = bw->scratch.stack[--stack_size];
+		const uint16_t x = packed & 0xFFFF;
+		const uint16_t y = packed >> 16;
+		const uint8_t value = frame->data[y * frame->stride + x];
 
-			greysum_total += pix;
-			greysum_x += x_pos * pix;
-			greysum_y += y_pos * pix;
-			x_pos++;
+		if (fits) {
+			bounds.left = MIN(bounds.left, x);
+			bounds.top = MIN(bounds.top, y);
+			bounds.right = MAX(bounds.right, x);
+			bounds.bottom = MAX(bounds.bottom, y);
+
+			if (bounds.right - bounds.left > max_width || bounds.bottom - bounds.top > max_width ||
+			    count == bw->scratch.capacity) {
+				fits = false;
+			} else {
+				bw->scratch.pixels[count++] = (struct blob_pixel){
+				    .x = x,
+				    .y = y,
+				    .value = value,
+				    .peak = 0,
+				};
+			}
 		}
 
-		pixels += frame->stride;
+		// Keep marking the rest of a blob that doesn't fit, so its other extents don't collect a part of it
+		const int32_t neighbour_x[4] = {x - 1, x + 1, x, x};
+		const int32_t neighbour_y[4] = {y, y, y - 1, y + 1};
+		const bool neighbour_earlier[4] = {true, false, true, false};
+		bool is_peak = value >= bw->params.blob_required_threshold;
+		for (int i = 0; i < 4; i++) {
+			const int32_t nx = neighbour_x[i];
+			const int32_t ny = neighbour_y[i];
+			if (nx < 0 || ny < 0 || nx >= (int32_t)width || ny >= (int32_t)height) {
+				continue;
+			}
+
+			const uint8_t neighbour_value = frame->data[ny * frame->stride + nx];
+			if (neighbour_value > value || (neighbour_value == value && neighbour_earlier[i])) {
+				is_peak = false;
+			}
+
+			const uint32_t neighbour = ny * width + nx;
+			if (visited[neighbour] == generation || neighbour_value <= threshold) {
+				continue;
+			}
+
+			if (stack_size == bw->scratch.stack_capacity) {
+				bw->scratch.stack_capacity = MAX(bw->scratch.stack_capacity * 2, 1);
+				U_ARRAY_REALLOC_OR_FREE(bw->scratch.stack, uint32_t, bw->scratch.stack_capacity);
+			}
+
+			visited[neighbour] = generation;
+			bw->scratch.stack[stack_size++] = (uint32_t)ny << 16 | nx;
+		}
+
+		if (is_peak) {
+			peak_count++;
+		}
 	}
 
-	if (greysum_total == 0) {
-		// Fallback to geometric center to avoid NaN from division by zero
-		*led_x = e->left + (width - 1) / 2.0f;
-		*led_y = e->top + (height - 1) / 2.0f;
-		return 0;
+	*out_count = count;
+	*out_peak_count = peak_count;
+	*out_bounds = bounds;
+
+	return fits;
+}
+
+static uint8_t
+find_peak_root(const uint8_t *parent, uint8_t peak)
+{
+	while (parent[peak] != peak) {
+		peak = parent[peak];
 	}
 
-	// @note We don't try to "center" onto the pixel because in OpenCV distortion parameters integer
-	//       coordinates already refer to the correct real-world ray.
-	//       It's hard to measure this real-world (it's like well under 1% of the measurements), but it seems likely
-	//       that this is the case for Rift as well since it uses OpenCV distortion algorithms.
-
-	// Subtract 1 to convert from 1-based to 0-based coordinates
-	*led_x = ((float)(greysum_x) / greysum_total - 1);
-	*led_y = ((float)(greysum_y) / greysum_total - 1);
-
-	return greysum_total;
+	return peak;
 }
 
 /*
- * Stores blob information collected in the last extent e into the blob
- * array b at the given index.
+ * Assigns each scratch pixel of a blob to an LED peak, by visiting the pixels brightest first and merging the peaks
+ * they connect. A dimmer peak is kept as its own LED when the pixel connecting it to a brighter one, the saddle
+ * between them, is much darker than it. Each pixel goes to the peak its brightest neighbour leads to. Returns the
+ * number of peaks, the pixels' peak indices are compacted to that range.
  */
-static inline void
-store_blob(struct extent *e, //
-           struct blob *b,   //
-           uint16_t end_y,   //
-           uint32_t blob_id, //
-           float led_x,      //
-           float led_y,      //
-           uint32_t greysum) //
+static uint32_t
+split_blob_peaks(struct t_rift_blobwatch *bw, uint32_t count, const struct blob_bounds *bounds)
 {
-	b->blob_id = blob_id;
-	b->x = led_x;
-	b->y = led_y;
+	struct blob_pixel *pixels = bw->scratch.pixels;
+	uint32_t *pixel_index = bw->scratch.pixel_index;
+	uint32_t *order = bw->scratch.order;
+	const uint32_t bounds_width = bounds->right - bounds->left + 1;
+	const uint32_t bounds_height = bounds->bottom - bounds->top + 1;
+	const float threshold = bw->params.pixel_threshold;
+
+	for (uint32_t i = 0; i < bounds_width * bounds_height; i++) {
+		pixel_index[i] = UINT32_MAX;
+	}
+	for (uint32_t i = 0; i < count; i++) {
+		pixel_index[(pixels[i].y - bounds->top) * bounds_width + (pixels[i].x - bounds->left)] = i;
+		pixels[i].peak = PEAK_NONE;
+	}
+
+	// Counting sort, brightest first, equal pixels stay in flood order
+	uint32_t histogram[256] = {0};
+	for (uint32_t i = 0; i < count; i++) {
+		histogram[pixels[i].value]++;
+	}
+	uint32_t start = 0;
+	for (int value = 255; value >= 0; value--) {
+		const uint32_t value_count = histogram[value];
+		histogram[value] = start;
+		start += value_count;
+	}
+	for (uint32_t i = 0; i < count; i++) {
+		order[histogram[pixels[i].value]++] = i;
+	}
+
+	uint8_t parent[MAX_PEAKS_PER_BLOB];
+	uint8_t peak_value[MAX_PEAKS_PER_BLOB];
+	bool kept[MAX_PEAKS_PER_BLOB] = {0};
+	uint32_t peak_count = 0;
+
+	for (uint32_t n = 0; n < count; n++) {
+		struct blob_pixel *p = &pixels[order[n]];
+
+		uint32_t neighbours[4];
+		uint32_t neighbour_count = 0;
+		const int32_t neighbour_x[4] = {p->x - 1, p->x + 1, p->x, p->x};
+		const int32_t neighbour_y[4] = {p->y, p->y, p->y - 1, p->y + 1};
+		for (int i = 0; i < 4; i++) {
+			const int32_t bx = neighbour_x[i] - bounds->left;
+			const int32_t by = neighbour_y[i] - bounds->top;
+			if (bx < 0 || by < 0 || bx >= (int32_t)bounds_width || by >= (int32_t)bounds_height) {
+				continue;
+			}
+
+			const uint32_t index = pixel_index[by * bounds_width + bx];
+			if (index == UINT32_MAX || pixels[index].peak == PEAK_NONE) {
+				continue;
+			}
+
+			neighbours[neighbour_count++] = index;
+		}
+
+		// No brighter neighbours, this is a new peak
+		if (neighbour_count == 0) {
+			if (peak_count == MAX_PEAKS_PER_BLOB) {
+				// Too many to tell apart, keep the blob whole
+				for (uint32_t i = 0; i < count; i++) {
+					pixels[i].peak = 0;
+				}
+				return 1;
+			}
+
+			parent[peak_count] = peak_count;
+			peak_value[peak_count] = p->value;
+			p->peak = peak_count++;
+			continue;
+		}
+
+		uint32_t brightest = neighbours[0];
+		for (uint32_t i = 1; i < neighbour_count; i++) {
+			if (pixels[neighbours[i]].value > pixels[brightest].value) {
+				brightest = neighbours[i];
+			}
+		}
+		p->peak = pixels[brightest].peak;
+
+		// This pixel is the saddle between any peaks its neighbours lead to, merge the dimmer into the brighter
+		uint8_t root = find_peak_root(parent, p->peak);
+		for (uint32_t i = 0; i < neighbour_count; i++) {
+			uint8_t other = find_peak_root(parent, pixels[neighbours[i]].peak);
+			if (other == root) {
+				continue;
+			}
+
+			if (peak_value[other] > peak_value[root]) {
+				const uint8_t tmp = root;
+				root = other;
+				other = tmp;
+			}
+
+			if (peak_value[other] >= bw->params.blob_required_threshold &&
+			    (p->value - threshold) <= BLOB_SPLIT_SADDLE_RATIO * (peak_value[other] - threshold)) {
+				kept[other] = true;
+			}
+			parent[other] = root;
+		}
+	}
+
+	// The brightest peak is always kept
+	kept[find_peak_root(parent, 0)] = true;
+
+	uint8_t kept_index[MAX_PEAKS_PER_BLOB];
+	uint32_t kept_count = 0;
+	for (uint32_t i = 0; i < peak_count; i++) {
+		if (kept[i]) {
+			kept_index[i] = kept_count++;
+		}
+	}
+
+	// Merged peaks go to the closest kept peak above them
+	for (uint32_t i = 0; i < count; i++) {
+		uint8_t peak = pixels[i].peak;
+		while (!kept[peak]) {
+			peak = parent[peak];
+		}
+		pixels[i].peak = kept_index[peak];
+	}
+
+	return kept_count;
+}
+
+/*
+ * Stores the scratch pixels of the given peak as a blob, at the weighted greysum centre of the pixels.
+ */
+static void
+store_blob(struct t_rift_blobwatch *bw, struct blobservation *ob, uint32_t count, uint8_t peak)
+{
+	const struct blob_pixel *pixels = bw->scratch.pixels;
+	const uint8_t threshold = bw->params.pixel_threshold;
+
+	struct blob_bounds bounds = {UINT16_MAX, UINT16_MAX, 0, 0};
+	uint32_t area = 0;
+	uint32_t greysum_total = 0, greysum_x = 0, greysum_y = 0;
+
+	for (uint32_t i = 0; i < count; i++) {
+		const struct blob_pixel *p = &pixels[i];
+		if (p->peak != peak) {
+			continue;
+		}
+
+		bounds.left = MIN(bounds.left, p->x);
+		bounds.top = MIN(bounds.top, p->y);
+		bounds.right = MAX(bounds.right, p->x);
+		bounds.bottom = MAX(bounds.bottom, p->y);
+		area++;
+
+		// Subtract by the pixel threshold, clamping at 0 if it's below the threshold.
+		// @note The reason we do this is so that the greysum is weighted by the values above our noise
+		//       floor, as we know all values passed into this function are going to be above it, which
+		//       means without this we would naturally be weighted towards the geometric center rather
+		//       than the true greysum of the observable values.
+		const uint32_t pix = p->value - MIN(p->value, threshold);
+
+		// Use 1...frame_width/height as coords, otherwise the first column never contributes anything
+		greysum_total += pix;
+		greysum_x += (p->x + 1) * pix;
+		greysum_y += (p->y + 1) * pix;
+	}
+
+	// Don't store 1x1 blobs
+	if (area <= 1) {
+		return;
+	}
+
+	struct blob *b = &ob->blobs[ob->num_blobs++];
+	b->blob_id = bw->next_blob_id++;
+
+	if (greysum_total == 0) {
+		// Fallback to geometric center to avoid NaN from division by zero
+		b->x = (bounds.left + bounds.right) / 2.0f;
+		b->y = (bounds.top + bounds.bottom) / 2.0f;
+	} else {
+		// @note We don't try to "center" onto the pixel because in OpenCV distortion parameters integer
+		//       coordinates already refer to the correct real-world ray.
+		//       It's hard to measure this real-world (it's like well under 1% of the measurements), but it
+		//       seems likely that this is the case for Rift as well since it uses OpenCV distortion algorithms.
+
+		// Subtract 1 to convert from 1-based to 0-based coordinates
+		b->x = ((float)(greysum_x) / greysum_total - 1);
+		b->y = ((float)(greysum_y) / greysum_total - 1);
+	}
 	b->vx = 0;
 	b->vy = 0;
 
-	b->left = e->left;
-	b->top = e->top;
-	b->width = e->right - e->left + 1;
-	b->height = end_y - e->top + 1;
-	b->area = e->area;
+	b->left = bounds.left;
+	b->top = bounds.top;
+	b->width = bounds.right - bounds.left + 1;
+	b->height = bounds.bottom - bounds.top + 1;
+	b->area = area;
 	b->age = 0;
 	b->track_index = -1;
 	b->id_age = 0;
 	b->prev_led_id = b->led_id = LED_INVALID_ID;
-	b->greysum = greysum;
+	b->greysum = greysum_total;
 }
 
 static void
@@ -298,7 +585,6 @@ extent_to_blobs(
     struct t_rift_blobwatch *bw, struct blobservation *ob, struct extent *e, uint16_t y, struct xrt_frame *frame)
 {
 	const uint32_t max_blobs = XRT_CONSTELLATION_MAX_BLOBS_PER_FRAME;
-	struct blob *blobs = ob->blobs;
 
 	// Don't store unless there was at least one "bright enough" pixel in the blob
 	if (e->max_pixel < bw->params.blob_required_threshold) {
@@ -316,14 +602,25 @@ extent_to_blobs(
 		return;
 	}
 
-	// In the future we could generate multiple blobs from one extent if we detect it as multiple LEDs
-	while (ob->num_blobs < max_blobs) {
-		float led_x, led_y;
+	// Another extent of the same blob already collected it, the scanline pass splits blobs into several extents
+	// when their rows don't overlap enough, such as two touching LEDs
+	if (bw->scratch.visited[e->top * frame->width + e->seed_x] == bw->scratch.generation) {
+		return;
+	}
 
-		uint32_t greysum = compute_greysum(bw, frame, e, y, &led_x, &led_y);
+	uint32_t count;
+	uint32_t peak_count;
+	struct blob_bounds bounds;
+	if (!collect_blob_pixels(bw, frame, e->seed_x, e->top, &count, &peak_count, &bounds)) {
+		return;
+	}
 
-		store_blob(e, blobs + (ob->num_blobs++), y, bw->next_blob_id++, led_x, led_y, greysum);
-		break;
+	// Touching LEDs threshold into one blob, split it at each clear peak, the pixels all start on the first peak
+	if (peak_count > 1) {
+		peak_count = split_blob_peaks(bw, count, &bounds);
+	}
+	for (uint32_t peak = 0; peak < peak_count && ob->num_blobs < max_blobs; peak++) {
+		store_blob(bw, ob, count, peak);
 	}
 }
 
@@ -425,6 +722,7 @@ process_scanline(uint8_t *line,
 			// A previous extent with significant overlap is considered to be part of the same blob.
 			if (le < le_end && le->start <= center && le->end >= center) {
 				extent->top = le->top;
+				extent->seed_x = le->seed_x;
 				extent->left = MIN(extent->start, le->left);
 				extent->right = MAX(extent->end, le->right);
 				if (le->max_pixel > extent->max_pixel)
@@ -438,6 +736,7 @@ process_scanline(uint8_t *line,
 		// If this extent is not part of a previous blob, increment the blob index.
 		if (is_new_extent) {
 			extent->top = y;
+			extent->seed_x = start;
 			extent->left = extent->start;
 			extent->right = extent->end;
 		}
@@ -467,6 +766,56 @@ process_scanline(uint8_t *line,
 	}
 }
 
+//! Ensures the scratch space is large enough for this particular frame
+static void
+ensure_scratch(struct t_rift_blobwatch *bw, struct xrt_frame *frame)
+{
+	if (bw->scratch.width != frame->width || bw->scratch.height != frame->height) {
+		free(bw->scratch.visited);
+		bw->scratch.visited = U_TYPED_ARRAY_CALLOC(uint8_t, frame->width * frame->height);
+		bw->scratch.generation = 0;
+		bw->scratch.width = frame->width;
+		bw->scratch.height = frame->height;
+	}
+
+	// Wrapping around would make stale marks from 256 frames ago look current
+	if (++bw->scratch.generation == 0) {
+		memset(bw->scratch.visited, 0, bw->scratch.width * bw->scratch.height);
+		bw->scratch.generation = 1;
+	}
+
+	/*
+	 * If this is too big then this current data structure is quite poor on memory usage,
+	 * so find some better way of handling this if we want to have full-screen blobs.
+	 */
+	assert(bw->params.max_blob_width <= 256);
+
+	// A blob that fits the maximum width fits this many pixels
+	bw->scratch.max_blob_width = bw->params.max_blob_width;
+	const uint32_t capacity = (bw->scratch.max_blob_width + 1U) * (bw->scratch.max_blob_width + 1U);
+	if (bw->scratch.capacity != capacity) {
+		U_ARRAY_REALLOC_OR_FREE(bw->scratch.pixels, struct blob_pixel, capacity);
+		U_ARRAY_REALLOC_OR_FREE(bw->scratch.pixel_index, uint32_t, capacity);
+		U_ARRAY_REALLOC_OR_FREE(bw->scratch.order, uint32_t, capacity);
+		bw->scratch.capacity = capacity;
+	}
+	if (bw->scratch.stack_capacity < capacity) {
+		U_ARRAY_REALLOC_OR_FREE(bw->scratch.stack, uint32_t, capacity);
+		bw->scratch.stack_capacity = capacity;
+	}
+}
+
+//! Frees the scratch memory used by this blobwatch
+static void
+free_scratch(struct t_rift_blobwatch *bw)
+{
+	free(bw->scratch.visited);
+	free(bw->scratch.stack);
+	free(bw->scratch.pixels);
+	free(bw->scratch.pixel_index);
+	free(bw->scratch.order);
+}
+
 /*
  * Processes extents from all scanlines in a frame and stores the
  * resulting blobs in ob->blobs.
@@ -478,6 +827,9 @@ process_frame(struct t_rift_blobwatch *bw, struct blobservation *ob, struct xrt_
 	struct extent_line el2;
 
 	assert(frame->format == XRT_FORMAT_L8);
+
+	// Ensure the scratch space is good for this frame
+	ensure_scratch(bw, frame);
 
 	ob->num_blobs = 0;
 	ob->dropped_dark_blobs = 0;
@@ -784,6 +1136,7 @@ t_rift_blobwatch_node_destroy(struct xrt_frame_node *node)
 
 	u_var_remove_root(bw);
 
+	free_scratch(bw);
 	free(bw);
 }
 
