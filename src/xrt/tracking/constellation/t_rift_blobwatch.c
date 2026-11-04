@@ -360,20 +360,45 @@ process_scanline(uint8_t *line,
 	// @todo Support full xrt_frame widths.
 	assert(frame->width < UINT16_MAX);
 
-	for (x = 0; x < (uint16_t)frame->width; x++) {
+	// Read once, the compiler can't keep them in registers across the extent_to_blobs calls otherwise
+	const uint16_t width = (uint16_t)frame->width;
+	const uint8_t threshold = bw->params.pixel_threshold;
+
+	// Dark pixels are skipped 8 at a time, adding 127 - threshold to a byte sets its top bit if it's above the
+	// threshold. A carry out of a byte only happens when that byte is above the threshold too, so no bright pixel
+	// is skipped.
+	const bool skip_words = threshold <= 127;
+	const uint64_t skip_add = 0x0101010101010101ull * (uint8_t)(127 - threshold);
+	const uint64_t top_bits = 0x8080808080808080ull;
+
+	for (x = 0; x < width; x++) {
 		uint16_t start, end;
 		bool is_new_extent = true;
 		uint8_t max_pixel = 0;
 
+		if (skip_words) {
+			while (x + 8 <= width) {
+				uint64_t pixels;
+				memcpy(&pixels, line + x, sizeof(pixels));
+				if (((pixels + skip_add) | pixels) & top_bits) {
+					break;
+				}
+				x += 8;
+			}
+			if (x >= width) {
+				break;
+			}
+		}
+
 		// Loop until pixel value exceeds threshold
-		if (line[x] <= bw->params.pixel_threshold) {
+		if (line[x] <= threshold) {
 			continue;
 		}
 
 		start = x++;
 
 		// Loop until pixel value falls below threshold
-		while (x < (uint16_t)frame->width && line[x] > bw->params.pixel_threshold) {
+		while (x < width && line[x] > threshold) {
 			if (line[x] > max_pixel) {
 				max_pixel = line[x];
 			}
