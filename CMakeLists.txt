@@ -229,10 +229,6 @@ set(ILLIXR_PATH
 # This one is named differently because that's what CTest uses
 option(BUILD_TESTING "Enable building of the test suite?" ON)
 
-if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
-	set(XRT_HAVE_INTERNAL_HID ON)
-endif()
-
 # cmake-format: off
 option_with_deps(CMAKE_INTERPROCEDURAL_OPTIMIZATION "Enable inter-procedural (link-time) optimization" DEFAULT OFF DEPENDS HAS_IPO)
 option(XRT_HAVE_TRACY "Enable Tracy support for tracing, make sure to set XRT_FEATURE_TRACING as well." OFF)
@@ -343,13 +339,18 @@ option_with_deps(XRT_INSTALL_ABSOLUTE_SYSTEMD_UNIT_FILES "Use an absolute path t
 # Driver deps to use (sorted, though there are some internal dependencies)
 option_with_deps(XRT_HAVE_BLUETOOTH "Enable Bluetooth (legacy, non-ble)" DEPENDS BLUETOOTH_FOUND)
 option_with_deps(XRT_HAVE_GST "Enable gstreamer" DEPENDS GST_FOUND)
-option_with_deps(XRT_HAVE_HIDAPI "Enable libhidapi (used for PSVR)" DEPENDS HIDAPI_FOUND)
+option_with_deps(XRT_HAVE_HIDAPI "Enable libhidapi" DEPENDS HIDAPI_FOUND)
 option_with_deps(XRT_HAVE_JPEG "Enable jpeg code (used for some video drivers)" DEPENDS JPEG_FOUND)
 option_with_deps(XRT_HAVE_LIBUSB "Enable libusb (used for most drivers)" DEPENDS LIBUSB1_FOUND)
 option_with_deps(XRT_HAVE_LIBUVC "Enable libuvc video driver" DEPENDS LIBUVC_FOUND XRT_HAVE_LIBUSB)
 option_with_deps(XRT_HAVE_REALSENSE "Enable RealSense support" DEPENDS realsense2_FOUND)
 option_with_deps(XRT_HAVE_OPENVR "Enable OpenVR support" DEPENDS OPENVR_FOUND)
 option_with_deps(XRT_BUILD_DRIVER_UVC "Enable userspace UVC driver" DEPENDS XRT_HAVE_LIBUSB)
+
+# aux_hid uses hidraw on Linux, and hidapi elsewhere for the devices the prober finds with libusb
+if(XRT_HAVE_LINUX OR (XRT_HAVE_HIDAPI AND XRT_HAVE_LIBUSB AND NOT ANDROID))
+	set(XRT_HAVE_INTERNAL_HID ON)
+endif()
 
 # Drivers to build (sorted)
 option_with_deps(XRT_BUILD_DRIVER_ANDROID "Enable Android sensors driver" DEPENDS ANDROID)
@@ -367,14 +368,14 @@ option_with_deps(XRT_BUILD_DRIVER_ILLIXR "Enable ILLIXR driver" DEPENDS ILLIXR_P
 option_with_deps(XRT_BUILD_DRIVER_NS "Enable North Star driver" "NOT ANDROID")
 option_with_deps(XRT_BUILD_DRIVER_OHMD "Enable OpenHMD driver" DEPENDS OPENHMD_FOUND)
 option_with_deps(XRT_BUILD_DRIVER_OPENGLOVES "Enable OpenGloves driver" DEPENDS XRT_HAVE_LIBUDEV XRT_HAVE_BLUETOOTH)
-option_with_deps(XRT_BUILD_DRIVER_PSMV "Enable Playstation Move driver" DEPENDS XRT_HAVE_INTERNAL_HID "NOT MSVC")
-option_with_deps(XRT_BUILD_DRIVER_PSSENSE "Enable PlayStation Sense driver" DEPENDS XRT_HAVE_INTERNAL_HID XRT_MODULE_CONSTELLATION_TRACKING)
+option_with_deps(XRT_BUILD_DRIVER_PSMV "Enable Playstation Move driver" DEPENDS XRT_HAVE_LINUX XRT_HAVE_INTERNAL_HID)
+option_with_deps(XRT_BUILD_DRIVER_PSSENSE "Enable PlayStation Sense driver" DEPENDS XRT_HAVE_LINUX XRT_HAVE_INTERNAL_HID XRT_MODULE_CONSTELLATION_TRACKING)
 option_with_deps(XRT_BUILD_DRIVER_PSVR "Enable PSVR HMD driver" DEPENDS XRT_HAVE_HIDAPI)
-option_with_deps(XRT_BUILD_DRIVER_PSVR2 "Enable PS VR2 HMD driver" DEPENDS XRT_HAVE_INTERNAL_HID XRT_HAVE_LIBUSB)
+option_with_deps(XRT_BUILD_DRIVER_PSVR2 "Enable PS VR2 HMD driver" DEPENDS XRT_HAVE_LINUX XRT_HAVE_INTERNAL_HID XRT_HAVE_LIBUSB)
 option_with_deps(XRT_BUILD_DRIVER_QWERTY "Enable Qwerty driver" DEPENDS XRT_HAVE_SDL2)
 option_with_deps(XRT_BUILD_DRIVER_REALSENSE "Enable RealSense device driver" DEPENDS XRT_HAVE_REALSENSE)
 option_with_deps(XRT_BUILD_DRIVER_REMOTE "Enable remote debugging driver" DEPENDS "XRT_HAVE_LINUX OR ANDROID OR WIN32")
-option_with_deps(XRT_BUILD_DRIVER_RIFT "Enable Oculus Rift (DK2/CV1) device driver" DEPENDS XRT_HAVE_INTERNAL_HID XRT_MODULE_CONSTELLATION_TRACKING)
+option_with_deps(XRT_BUILD_DRIVER_RIFT "Enable Oculus Rift (DK2/CV1) device driver" DEPENDS XRT_HAVE_LINUX XRT_HAVE_INTERNAL_HID XRT_MODULE_CONSTELLATION_TRACKING)
 option_with_deps(XRT_BUILD_DRIVER_RIFT_SENSOR "Enable Oculus Rift Sensor (DK2/CV1) device driver" DEPENDS XRT_BUILD_DRIVER_RIFT XRT_BUILD_DRIVER_UVC XRT_HAVE_LIBUSB)
 option_with_deps(XRT_BUILD_DRIVER_RIFT_S "Enable Oculus Rift S device driver" DEPENDS XRT_HAVE_V4L2)
 option_with_deps(XRT_BUILD_DRIVER_ROKID "Enable Rokid driver" DEPENDS "XRT_HAVE_LIBUSB")
