@@ -12,6 +12,7 @@
 #pragma once
 
 #include "xrt/xrt_config_os.h"
+#include "xrt/xrt_config_have.h"
 #include <stdint.h>
 #include <stddef.h>
 
@@ -153,6 +154,17 @@ h_hid_destroy(struct h_hid_device *hid_dev)
  */
 int
 h_hid_open_hidraw(const char *path, struct h_hid_device **out_hid);
+#endif
+
+#if defined(XRT_HAVE_HIDAPI) && !defined(XRT_OS_LINUX)
+/*!
+ * Open the given path, as listed by hidapi's hid_enumerate, as a hidapi device.
+ *
+ * @see hid_hidapi
+ * @public @memberof h_hid_device
+ */
+int
+h_hid_open_hidapi(const char *path, struct h_hid_device **out_hid);
 #endif
 
 #ifdef __cplusplus
