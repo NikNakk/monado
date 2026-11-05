@@ -44,6 +44,14 @@ if(XRT_HAVE_LIBUVC)
 	target_link_libraries(st_prober PRIVATE ${LIBUVC_LIBRARIES})
 endif()
 
+# Add hidapi where there is no hidraw
+if(XRT_HAVE_HIDAPI
+   AND NOT XRT_HAVE_LINUX
+   AND NOT ANDROID
+	)
+	target_link_libraries(st_prober PRIVATE HIDAPI::hidapi)
+endif()
+
 if(XRT_HAVE_V4L2)
 	# Uses v4l2_fs_create
 	target_link_libraries(st_prober PRIVATE drv_v4l2)
