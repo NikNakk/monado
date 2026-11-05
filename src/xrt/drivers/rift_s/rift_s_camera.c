@@ -135,7 +135,7 @@ struct rift_s_camera *
 rift_s_camera_create(struct xrt_prober *xp,
                      struct xrt_frame_context *xfctx,
                      const char *hmd_serial_no,
-                     struct os_hid_device *hid,
+                     struct h_hid_device *hid,
                      struct rift_s_tracker *tracker,
                      struct rift_s_camera_calibration_block *camera_calibration)
 {
@@ -464,7 +464,7 @@ update_expgain(struct rift_s_camera *cam, struct xrt_frame *xf)
 /* Called from the Rift S system device USB loop, so we can check
  * and send an exposure/gain change command if needed */
 void
-rift_s_camera_update(struct rift_s_camera *cam, struct os_hid_device *hid)
+rift_s_camera_update(struct rift_s_camera *cam, struct h_hid_device *hid)
 {
 	bool need_update = false;
 	int i;

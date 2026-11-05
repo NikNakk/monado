@@ -1489,7 +1489,7 @@ HmdDevice::init_vive_pro_2(struct xrt_prober *xp)
 
 		if (dev->vendor_id == VP2_VID && dev->product_id == VP2_PID) {
 			DEV_INFO("Found Vive Pro 2 HID device");
-			struct os_hid_device *hid_dev = nullptr;
+			struct h_hid_device *hid_dev = nullptr;
 			ret = xrt_prober_open_hid_interface(xp, dev, 0, &hid_dev);
 			if (ret != 0) {
 				DEV_ERR("Failed to open Vive Pro 2 HID interface");

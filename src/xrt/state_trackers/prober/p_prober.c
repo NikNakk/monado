@@ -22,7 +22,7 @@
 #include "util/u_pretty_print.h"
 #include "util/u_trace_marker.h"
 
-#include "os/os_hid.h"
+#include "hid/h_hid.h"
 #include "os/os_serial.h"
 
 #include "p_prober.h"
@@ -107,7 +107,7 @@ static int
 p_open_hid_interface(struct xrt_prober *xp,
                      struct xrt_prober_device *xpdev,
                      int hid_iface,
-                     struct os_hid_device **out_hid_dev);
+                     struct h_hid_device **out_hid_dev);
 
 static int
 p_open_serial_device(struct xrt_prober *xp,
@@ -1206,7 +1206,7 @@ static int
 p_open_hid_interface(struct xrt_prober *xp,
                      struct xrt_prober_device *xpdev,
                      int hid_iface,
-                     struct os_hid_device **out_hid_dev)
+                     struct h_hid_device **out_hid_dev)
 {
 	XRT_TRACE_MARKER();
 
@@ -1221,7 +1221,7 @@ p_open_hid_interface(struct xrt_prober *xp,
 			continue;
 		}
 
-		ret = os_hid_open_hidraw(hidraw->path, out_hid_dev);
+		ret = h_hid_open_hidraw(hidraw->path, out_hid_dev);
 		if (ret != 0) {
 			U_LOG_E("Failed to open device '%s' got '%i'", hidraw->path, ret);
 			return ret;

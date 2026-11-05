@@ -78,7 +78,7 @@ struct rift_s_system
 
 	/* Packet processing thread */
 	struct os_thread_helper oth;
-	struct os_hid_device *handles[3];
+	struct h_hid_device *handles[3];
 	uint64_t last_keep_alive;
 
 	/* state tracking for tracked devices on our radio link */
@@ -112,11 +112,11 @@ struct rift_s_system
 struct rift_s_system *
 rift_s_system_create(struct xrt_prober *xp,
                      const unsigned char *hmd_serial_no,
-                     struct os_hid_device *hid_hmd,
-                     struct os_hid_device *hid_status,
-                     struct os_hid_device *hid_controllers);
+                     struct h_hid_device *hid_hmd,
+                     struct h_hid_device *hid_status,
+                     struct h_hid_device *hid_controllers);
 
-struct os_hid_device *
+struct h_hid_device *
 rift_s_system_hid_handle(struct rift_s_system *sys);
 rift_s_radio_state *
 rift_s_system_radio(struct rift_s_system *sys);

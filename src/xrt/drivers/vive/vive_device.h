@@ -33,9 +33,9 @@ extern "C" {
 struct vive_device
 {
 	struct xrt_device base;
-	struct os_hid_device *mainboard_dev;
-	struct os_hid_device *sensors_dev;
-	struct os_hid_device *watchman_dev;
+	struct h_hid_device *mainboard_dev;
+	struct h_hid_device *sensors_dev;
+	struct h_hid_device *watchman_dev;
 
 	struct lighthouse_watchman watchman;
 
@@ -153,9 +153,9 @@ void
 vive_set_trackers_status(struct vive_device *d, struct vive_tracking_status status);
 
 struct vive_device *
-vive_device_create(struct os_hid_device *mainboard_dev,
-                   struct os_hid_device *sensors_dev,
-                   struct os_hid_device *watchman_dev,
+vive_device_create(struct h_hid_device *mainboard_dev,
+                   struct h_hid_device *sensors_dev,
+                   struct h_hid_device *watchman_dev,
                    enum VIVE_VARIANT variant,
                    struct vive_tracking_status tstatus,
                    struct vive_source *vs);

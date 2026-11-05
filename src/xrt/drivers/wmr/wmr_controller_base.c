@@ -10,7 +10,7 @@
  */
 
 #include "os/os_time.h"
-#include "os/os_hid.h"
+#include "hid/h_hid.h"
 
 #include "math/m_mathinclude.h"
 #include "math/m_api.h"

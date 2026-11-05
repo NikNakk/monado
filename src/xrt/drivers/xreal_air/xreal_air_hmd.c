@@ -9,7 +9,7 @@
 
 #include "xrt/xrt_compiler.h"
 
-#include "os/os_hid.h"
+#include "hid/h_hid.h"
 #include "os/os_time.h"
 #include "os/os_threading.h"
 
@@ -51,10 +51,10 @@ struct xreal_air_hmd
 	struct xrt_device base;
 
 	//! Owned by the @ref oth thread.
-	struct os_hid_device *hid_sensor;
+	struct h_hid_device *hid_sensor;
 
 	//! Owned and protected by the device_mutex.
-	struct os_hid_device *hid_control;
+	struct h_hid_device *hid_control;
 	struct os_mutex device_mutex;
 
 	//! Used to read sensor packets.
@@ -212,7 +212,7 @@ send_payload_to_sensor(struct xreal_air_hmd *hmd, uint8_t msgid, const uint8_t *
 	payload[3] = ((checksum >> 16u) & 0xFFu);
 	payload[4] = ((checksum >> 24u) & 0xFFu);
 
-	return os_hid_write(hmd->hid_sensor, payload, payload_len);
+	return h_hid_write(hmd->hid_sensor, payload, payload_len);
 }
 
 static void
@@ -603,7 +603,7 @@ sensor_clear_queue(struct xreal_air_hmd *hmd)
 		buffer_size = hmd->max_sensor_buffer_size;
 	}
 
-	while (os_hid_read(hmd->hid_sensor, buffer, buffer_size, 0) > 0) {
+	while (h_hid_read(hmd->hid_sensor, buffer, buffer_size, 0) > 0) {
 		// Just drop the packets.
 	}
 }
@@ -618,7 +618,7 @@ sensor_read_one_packet(struct xreal_air_hmd *hmd)
 		buffer_size = hmd->max_sensor_buffer_size;
 	}
 
-	int size = os_hid_read(hmd->hid_sensor, buffer, buffer_size, 0);
+	int size = h_hid_read(hmd->hid_sensor, buffer, buffer_size, 0);
 	if (size <= 0) {
 		return size;
 	}
@@ -702,7 +702,7 @@ send_payload_to_control(struct xreal_air_hmd *hmd, uint16_t msgid, const uint8_t
 	payload[3] = ((checksum >> 16u) & 0xFFu);
 	payload[4] = ((checksum >> 24u) & 0xFFu);
 
-	return os_hid_write(hmd->hid_control, payload, payload_len);
+	return h_hid_write(hmd->hid_control, payload, payload_len);
 }
 
 static void
@@ -884,7 +884,7 @@ control_clear_queue(struct xreal_air_hmd *hmd)
 {
 	uint8_t buffer[CONTROL_BUFFER_SIZE];
 
-	while (os_hid_read(hmd->hid_control, buffer, CONTROL_BUFFER_SIZE, 0) > 0) {
+	while (h_hid_read(hmd->hid_control, buffer, CONTROL_BUFFER_SIZE, 0) > 0) {
 		// Just drop the packets.
 	}
 }
@@ -895,7 +895,7 @@ read_one_control_packet(struct xreal_air_hmd *hmd)
 	static uint8_t buffer[CONTROL_BUFFER_SIZE];
 	int size = 0;
 
-	size = os_hid_read(hmd->hid_control, buffer, CONTROL_BUFFER_SIZE, 0);
+	size = h_hid_read(hmd->hid_control, buffer, CONTROL_BUFFER_SIZE, 0);
 	if (size == 0) {
 		return 0;
 	}
@@ -1032,12 +1032,12 @@ teardown(struct xreal_air_hmd *hmd)
 	os_thread_helper_stop_and_wait(&hmd->oth);
 
 	if (hmd->hid_control != NULL) {
-		os_hid_destroy(hmd->hid_control);
+		h_hid_destroy(hmd->hid_control);
 		hmd->hid_control = NULL;
 	}
 
 	if (hmd->hid_sensor != NULL) {
-		os_hid_destroy(hmd->hid_sensor);
+		h_hid_destroy(hmd->hid_sensor);
 		hmd->hid_sensor = NULL;
 	}
 
@@ -1173,8 +1173,8 @@ xreal_air_hmd_destroy(struct xrt_device *xdev)
  */
 
 struct xrt_device *
-xreal_air_hmd_create_device(struct os_hid_device *sensor_device,
-                            struct os_hid_device *control_device,
+xreal_air_hmd_create_device(struct h_hid_device *sensor_device,
+                            struct h_hid_device *control_device,
                             enum u_logging_level log_level,
                             uint16_t max_sensor_buffer_size)
 {

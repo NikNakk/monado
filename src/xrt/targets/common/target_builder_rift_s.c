@@ -13,7 +13,7 @@
 #include <stdlib.h>
 #include <wchar.h>
 
-#include "os/os_hid.h"
+#include "hid/h_hid.h"
 
 #include "xrt/xrt_config_drivers.h"
 #include "xrt/xrt_prober.h"
@@ -119,26 +119,26 @@ rift_s_open_system_impl(struct xrt_builder *xb,
 		goto unlock_and_fail;
 	}
 
-	struct os_hid_device *hid_hmd = NULL;
+	struct h_hid_device *hid_hmd = NULL;
 	int result = xrt_prober_open_hid_interface(xp, dev_hmd, RIFT_S_INTF_HMD, &hid_hmd);
 	if (result != 0) {
 		RIFT_S_ERROR("Failed to open Rift S HMD interface");
 		goto unlock_and_fail;
 	}
 
-	struct os_hid_device *hid_status = NULL;
+	struct h_hid_device *hid_status = NULL;
 	result = xrt_prober_open_hid_interface(xp, dev_hmd, RIFT_S_INTF_STATUS, &hid_status);
 	if (result != 0) {
-		os_hid_destroy(hid_hmd);
+		h_hid_destroy(hid_hmd);
 		RIFT_S_ERROR("Failed to open Rift S status interface");
 		goto unlock_and_fail;
 	}
 
-	struct os_hid_device *hid_controllers = NULL;
+	struct h_hid_device *hid_controllers = NULL;
 	result = xrt_prober_open_hid_interface(xp, dev_hmd, RIFT_S_INTF_CONTROLLERS, &hid_controllers);
 	if (result != 0) {
-		os_hid_destroy(hid_hmd);
-		os_hid_destroy(hid_status);
+		h_hid_destroy(hid_hmd);
+		h_hid_destroy(hid_status);
 		RIFT_S_ERROR("Failed to open Rift S controllers interface");
 		goto unlock_and_fail;
 	}

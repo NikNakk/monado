@@ -12,7 +12,7 @@
 #include "xrt/xrt_tracking.h"
 
 #include "os/os_threading.h"
-#include "os/os_hid.h"
+#include "hid/h_hid.h"
 #include "os/os_time.h"
 
 #include "math/m_api.h"
@@ -455,7 +455,7 @@ struct psmv_device
 {
 	struct xrt_device base;
 
-	struct os_hid_device *hid;
+	struct h_hid_device *hid;
 
 	struct xrt_tracked_psmv *ball;
 
@@ -623,7 +623,7 @@ psmv_send_led_control_locked(
 	msg.blue = blue;
 	msg.rumble = rumble;
 
-	return os_hid_write(psmv->hid, (uint8_t *)&msg, sizeof(msg));
+	return h_hid_write(psmv->hid, (uint8_t *)&msg, sizeof(msg));
 }
 
 static void
@@ -706,7 +706,7 @@ psmv_read_one_packet(struct psmv_device *psmv, uint8_t *buffer, size_t size)
 
 		os_thread_helper_unlock(&psmv->oth);
 
-		int ret = os_hid_read(psmv->hid, buffer, size, 1000);
+		int ret = h_hid_read(psmv->hid, buffer, size, 1000);
 
 		if (ret == 0) {
 			PSMV_DEBUG(psmv, "Timeout");
@@ -740,7 +740,7 @@ psmv_run_thread(void *ptr)
 
 	struct psmv_parsed_input input = {0};
 
-	while (os_hid_read(psmv->hid, data.buffer, sizeof(data), 0) > 0) {
+	while (h_hid_read(psmv->hid, data.buffer, sizeof(data), 0) > 0) {
 		// Empty queue first
 	}
 
@@ -846,7 +846,7 @@ psmv_device_destroy(struct xrt_device *xdev)
 	if (psmv->hid != NULL) {
 		psmv_send_led_control_locked(psmv, 0x00, 0x00, 0x00, 0x00);
 
-		os_hid_destroy(psmv->hid);
+		h_hid_destroy(psmv->hid);
 		psmv->hid = NULL;
 	}
 
@@ -1049,7 +1049,7 @@ psmv_found(struct xrt_prober *xp,
 struct xrt_device *
 psmv_device_create(struct xrt_prober *xp, struct xrt_prober_device *xpdev, struct xrt_tracked_psmv *tracker)
 {
-	struct os_hid_device *hid = NULL;
+	struct h_hid_device *hid = NULL;
 	int ret = 0;
 
 	ret = xrt_prober_open_hid_interface(xp, xpdev, 0, &hid);
@@ -1340,9 +1340,9 @@ psmv_get_calibration_zcm1(struct psmv_device *psmv)
 
 		part.id = 0x10;
 
-		ret = os_hid_get_feature(psmv->hid, 0x10, src, sizeof(part));
+		ret = h_hid_get_feature(psmv->hid, 0x10, src, sizeof(part));
 		if (ret < 0) {
-			PSMV_ERROR(psmv, "os_hid_get_feature returned %i", ret);
+			PSMV_ERROR(psmv, "h_hid_get_feature returned %i", ret);
 			return ret;
 		}
 
@@ -1557,9 +1557,9 @@ psmv_get_calibration_zcm2(struct psmv_device *psmv)
 
 		part.id = 0x10;
 
-		ret = os_hid_get_feature(psmv->hid, 0x10, src, sizeof(part));
+		ret = h_hid_get_feature(psmv->hid, 0x10, src, sizeof(part));
 		if (ret < 0) {
-			PSMV_ERROR(psmv, "os_hid_get_feature returned %i", ret);
+			PSMV_ERROR(psmv, "h_hid_get_feature returned %i", ret);
 			return ret;
 		}
 

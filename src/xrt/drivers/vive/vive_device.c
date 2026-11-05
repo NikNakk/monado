@@ -26,7 +26,7 @@
 #include "math/m_api.h"
 #include "math/m_predict.h"
 
-#include "os/os_hid.h"
+#include "hid/h_hid.h"
 #include "os/os_time.h"
 
 #include "vive.h"
@@ -71,17 +71,17 @@ vive_device_destroy(struct xrt_device *xdev)
 	os_mutex_destroy(&d->fusion.mutex);
 
 	if (d->mainboard_dev != NULL) {
-		os_hid_destroy(d->mainboard_dev);
+		h_hid_destroy(d->mainboard_dev);
 		d->mainboard_dev = NULL;
 	}
 
 	if (d->sensors_dev != NULL) {
-		os_hid_destroy(d->sensors_dev);
+		h_hid_destroy(d->sensors_dev);
 		d->sensors_dev = NULL;
 	}
 
 	if (d->watchman_dev != NULL) {
-		os_hid_destroy(d->watchman_dev);
+		h_hid_destroy(d->watchman_dev);
 		d->watchman_dev = NULL;
 	}
 
@@ -255,7 +255,7 @@ vive_mainboard_get_device_info(struct vive_device *d)
 	uint16_t type;
 	int ret;
 
-	ret = os_hid_get_feature(d->mainboard_dev, report.id, (uint8_t *)&report, sizeof(report));
+	ret = h_hid_get_feature(d->mainboard_dev, report.id, (uint8_t *)&report, sizeof(report));
 	if (ret < 0)
 		return ret;
 
@@ -281,7 +281,7 @@ static bool
 vive_mainboard_power_on(struct vive_device *d)
 {
 	int ret;
-	ret = os_hid_set_feature(d->mainboard_dev, (const uint8_t *)&power_on_report, sizeof(power_on_report));
+	ret = h_hid_set_feature(d->mainboard_dev, (const uint8_t *)&power_on_report, sizeof(power_on_report));
 	VIVE_DEBUG(d, "Power on: %d", ret);
 	return true;
 }
@@ -290,7 +290,7 @@ static bool
 vive_mainboard_power_off(struct vive_device *d)
 {
 	int ret;
-	ret = os_hid_set_feature(d->mainboard_dev, (const uint8_t *)&power_off_report, sizeof(power_off_report));
+	ret = h_hid_set_feature(d->mainboard_dev, (const uint8_t *)&power_off_report, sizeof(power_off_report));
 	VIVE_DEBUG(d, "Power off: %d", ret);
 
 	return true;
@@ -552,7 +552,7 @@ vive_mainboard_read_one_msg(struct vive_device *d)
 {
 	uint8_t buffer[64];
 
-	int ret = os_hid_read(d->mainboard_dev, buffer, sizeof(buffer), 1000);
+	int ret = h_hid_read(d->mainboard_dev, buffer, sizeof(buffer), 1000);
 	if (ret == 0) {
 		// Time out
 		return true;
@@ -615,7 +615,7 @@ vive_sensors_enable_watchman(struct vive_device *d, bool enable_sensors)
 
 	/* Enable vsync timestamps, enable/disable sensor reports */
 	buf[1] = enable_sensors ? 0x00 : 0x01;
-	ret = os_hid_set_feature(d->sensors_dev, buf, sizeof(buf));
+	ret = h_hid_set_feature(d->sensors_dev, buf, sizeof(buf));
 	if (ret < 0)
 		return ret;
 
@@ -625,7 +625,7 @@ vive_sensors_enable_watchman(struct vive_device *d, bool enable_sensors)
 	 */
 	buf[0] = 0x07;
 	buf[1] = 0x02;
-	return os_hid_set_feature(d->sensors_dev, buf, sizeof(buf));
+	return h_hid_set_feature(d->sensors_dev, buf, sizeof(buf));
 }
 
 static void
@@ -712,14 +712,14 @@ _is_report_size_valid(struct vive_device *d, int size, int report_size, int repo
 
 static bool
 vive_sensors_read_one_msg(struct vive_device *d,
-                          struct os_hid_device *dev,
+                          struct h_hid_device *dev,
                           uint32_t report_id,
                           int report_size,
                           void (*process_cb)(struct vive_device *d, const void *buffer))
 {
 	uint8_t buffer[64];
 
-	int ret = os_hid_read(dev, buffer, sizeof(buffer), 1000);
+	int ret = h_hid_read(dev, buffer, sizeof(buffer), 1000);
 	if (ret == 0) {
 		VIVE_ERROR(d, "Device %p timeout.", (void *)dev);
 		// Time out
@@ -806,7 +806,7 @@ vive_sensors_read_lighthouse_msg(struct vive_device *d)
 {
 	uint8_t buffer[64];
 
-	int ret = os_hid_read(d->watchman_dev, buffer, sizeof(buffer), 1000);
+	int ret = h_hid_read(d->watchman_dev, buffer, sizeof(buffer), 1000);
 	if (ret == 0) {
 		// basestations not present/powered off
 		VIVE_TRACE(d, "Watchman device timed out.");
@@ -1093,9 +1093,9 @@ vive_device_get_compositor_info(struct xrt_device *xdev,
 }
 
 struct vive_device *
-vive_device_create(struct os_hid_device *mainboard_dev,
-                   struct os_hid_device *sensors_dev,
-                   struct os_hid_device *watchman_dev,
+vive_device_create(struct h_hid_device *mainboard_dev,
+                   struct h_hid_device *sensors_dev,
+                   struct h_hid_device *watchman_dev,
                    enum VIVE_VARIANT variant,
                    struct vive_tracking_status tstatus,
                    struct vive_source *vs)

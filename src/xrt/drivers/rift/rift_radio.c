@@ -908,7 +908,7 @@ rift_radio_handle_read(struct rift_hmd *hmd)
 	int length;
 
 	// 1ms so the radio thread is ticking at 1khz for haptics.
-	length = os_hid_read(hmd->radio_dev, buf, sizeof(buf), 1);
+	length = h_hid_read(hmd->radio_dev, buf, sizeof(buf), 1);
 
 	timepoint_ns receive_ns = os_monotonic_get_ns() - RIFT_USB_LATENCY_BIAS;
 

@@ -22,7 +22,7 @@
 #include "xrt/xrt_tracking.h"
 
 #include "os/os_time.h"
-#include "os/os_hid.h"
+#include "hid/h_hid.h"
 
 #include "math/m_api.h"
 #include "math/m_mathinclude.h"
@@ -494,11 +494,11 @@ hololens_sensors_read_packets(struct wmr_hmd *wh)
 
 	// Block for 100ms
 	os_mutex_lock(&wh->hid_lock);
-	int size = os_hid_read(wh->hid_hololens_sensors_dev, buffer, sizeof(buffer), 100);
+	int size = h_hid_read(wh->hid_hololens_sensors_dev, buffer, sizeof(buffer), 100);
 	os_mutex_unlock(&wh->hid_lock);
 
 	if (size < 0) {
-		WMR_ERROR(wh, "Error reading from Hololens Sensors device. Call to os_hid_read returned %i", size);
+		WMR_ERROR(wh, "Error reading from Hololens Sensors device. Call to h_hid_read returned %i", size);
 		return false;
 	}
 	if (size == 0) {
@@ -579,11 +579,11 @@ control_read_packets(struct wmr_hmd *wh)
 
 	// Do not block
 	os_mutex_lock(&wh->hid_lock);
-	int size = os_hid_read(wh->hid_control_dev, buffer, sizeof(buffer), 0);
+	int size = h_hid_read(wh->hid_control_dev, buffer, sizeof(buffer), 0);
 	os_mutex_unlock(&wh->hid_lock);
 
 	if (size < 0) {
-		WMR_ERROR(wh, "Error reading from companion (HMD control) device. Call to os_hid_read returned %i",
+		WMR_ERROR(wh, "Error reading from companion (HMD control) device. Call to h_hid_read returned %i",
 		          size);
 		return false;
 	}
@@ -695,7 +695,7 @@ hololens_sensors_enable_imu(struct wmr_hmd *wh)
 	DRV_TRACE_MARKER();
 
 	os_mutex_lock(&wh->hid_lock);
-	int size = os_hid_write(wh->hid_hololens_sensors_dev, hololens_sensors_imu_on, sizeof(hololens_sensors_imu_on));
+	int size = h_hid_write(wh->hid_hololens_sensors_dev, hololens_sensors_imu_on, sizeof(hololens_sensors_imu_on));
 	os_mutex_unlock(&wh->hid_lock);
 
 	if (size <= 0) {
@@ -707,7 +707,7 @@ hololens_sensors_enable_imu(struct wmr_hmd *wh)
 #define HID_SEND(hmd, HID, DATA, STR)                                                                                  \
 	do {                                                                                                           \
 		os_mutex_lock(&hmd->hid_lock);                                                                         \
-		int _ret = os_hid_set_feature(HID, DATA, sizeof(DATA));                                                \
+		int _ret = h_hid_set_feature(HID, DATA, sizeof(DATA));                                                 \
 		os_mutex_unlock(&hmd->hid_lock);                                                                       \
 		if (_ret < 0) {                                                                                        \
 			WMR_ERROR(wh, "Send (%s): %i", STR, _ret);                                                     \
@@ -717,7 +717,7 @@ hololens_sensors_enable_imu(struct wmr_hmd *wh)
 #define HID_GET(hmd, HID, DATA, STR)                                                                                   \
 	do {                                                                                                           \
 		os_mutex_lock(&hmd->hid_lock);                                                                         \
-		int _ret = os_hid_get_feature(HID, DATA[0], DATA, sizeof(DATA));                                       \
+		int _ret = h_hid_get_feature(HID, DATA[0], DATA, sizeof(DATA));                                        \
 		os_mutex_unlock(&hmd->hid_lock);                                                                       \
 		if (_ret < 0) {                                                                                        \
 			WMR_ERROR(wh, "Get (%s): %i", STR, _ret);                                                      \
@@ -732,7 +732,7 @@ wmr_hmd_activate_reverb(struct wmr_hmd *wh)
 {
 	DRV_TRACE_MARKER();
 
-	struct os_hid_device *hid = wh->hid_control_dev;
+	struct h_hid_device *hid = wh->hid_control_dev;
 
 	WMR_TRACE(wh, "Activating HP Reverb G1/G2 HMD...");
 
@@ -806,7 +806,7 @@ wmr_hmd_screen_enable_reverb(struct wmr_hmd *wh, bool enable)
 {
 	DRV_TRACE_MARKER();
 
-	struct os_hid_device *hid = wh->hid_control_dev;
+	struct h_hid_device *hid = wh->hid_control_dev;
 
 	unsigned char cmd[2] = {0x04, 0x00};
 	if (enable) {
@@ -826,7 +826,7 @@ wmr_hmd_activate_odyssey_plus(struct wmr_hmd *wh)
 {
 	DRV_TRACE_MARKER();
 
-	struct os_hid_device *hid = wh->hid_control_dev;
+	struct h_hid_device *hid = wh->hid_control_dev;
 
 	WMR_TRACE(wh, "Activating Odyssey HMD...");
 
@@ -872,7 +872,7 @@ wmr_hmd_screen_enable_odyssey_plus(struct wmr_hmd *wh, bool enable)
 {
 	DRV_TRACE_MARKER();
 
-	struct os_hid_device *hid = wh->hid_control_dev;
+	struct h_hid_device *hid = wh->hid_control_dev;
 
 	unsigned char cmd[2] = {0x12, 0x00};
 	if (enable) {
@@ -907,13 +907,13 @@ wmr_config_command_sync(struct wmr_hmd *wh, unsigned char type, unsigned char *b
 {
 	DRV_TRACE_MARKER();
 
-	struct os_hid_device *hid = wh->hid_hololens_sensors_dev;
+	struct h_hid_device *hid = wh->hid_hololens_sensors_dev;
 
 	unsigned char cmd[64] = {0x02, type};
-	os_hid_write(hid, cmd, sizeof(cmd));
+	h_hid_write(hid, cmd, sizeof(cmd));
 
 	do {
-		int size = os_hid_read(hid, buf, len, 100);
+		int size = h_hid_read(hid, buf, len, 100);
 		if (size < 1) {
 			return -1;
 		}
@@ -1214,7 +1214,7 @@ wmr_hmd_destroy(struct xrt_device *xdev)
 	os_cond_destroy(&wh->controller_status_cond);
 
 	if (wh->hid_hololens_sensors_dev != NULL) {
-		os_hid_destroy(wh->hid_hololens_sensors_dev);
+		h_hid_destroy(wh->hid_hololens_sensors_dev);
 		wh->hid_hololens_sensors_dev = NULL;
 	}
 
@@ -1223,7 +1223,7 @@ wmr_hmd_destroy(struct xrt_device *xdev)
 		if (wh->hmd_desc && wh->hmd_desc->deinit_func) {
 			wh->hmd_desc->deinit_func(wh);
 		}
-		os_hid_destroy(wh->hid_control_dev);
+		h_hid_destroy(wh->hid_control_dev);
 		wh->hid_control_dev = NULL;
 	}
 
@@ -1811,8 +1811,8 @@ get_compositor_info_wmr(struct xrt_device *xdev,
 
 void
 wmr_hmd_create(enum wmr_headset_type hmd_type,
-               struct os_hid_device *hid_holo,
-               struct os_hid_device *hid_ctrl,
+               struct h_hid_device *hid_holo,
+               struct h_hid_device *hid_ctrl,
                struct xrt_prober_device *dev_holo,
                enum u_logging_level log_level,
                struct xrt_device **out_hmd,
@@ -2056,7 +2056,7 @@ bool
 wmr_hmd_send_controller_packet(struct wmr_hmd *hmd, const uint8_t *buffer, uint32_t buf_size)
 {
 	os_mutex_lock(&hmd->hid_lock);
-	int ret = os_hid_write(hmd->hid_hololens_sensors_dev, buffer, buf_size);
+	int ret = h_hid_write(hmd->hid_hololens_sensors_dev, buffer, buf_size);
 	os_mutex_unlock(&hmd->hid_lock);
 
 	return ret != -1 && (uint32_t)(ret) == buf_size;
@@ -2068,7 +2068,7 @@ int
 wmr_hmd_read_sync_from_controller(struct wmr_hmd *hmd, uint8_t *buffer, uint32_t buf_size, int timeout_ms)
 {
 	os_mutex_lock(&hmd->hid_lock);
-	int res = os_hid_read(hmd->hid_hololens_sensors_dev, buffer, buf_size, timeout_ms);
+	int res = h_hid_read(hmd->hid_hololens_sensors_dev, buffer, buf_size, timeout_ms);
 	os_mutex_unlock(&hmd->hid_lock);
 
 	return res;

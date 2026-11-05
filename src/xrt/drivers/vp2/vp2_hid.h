@@ -11,7 +11,7 @@
 
 #include "xrt/xrt_defines.h"
 
-#include "os/os_hid.h"
+#include "hid/h_hid.h"
 
 #include <assert.h>
 
@@ -81,7 +81,7 @@ vp2_resolution_get_refresh_rate(enum vp2_resolution res)
 struct vp2_hid;
 
 int
-vp2_hid_open(struct os_hid_device *hid_dev, struct vp2_hid **out_hid);
+vp2_hid_open(struct h_hid_device *hid_dev, struct vp2_hid **out_hid);
 
 enum vp2_resolution
 vp2_get_resolution(struct vp2_hid *vp2);

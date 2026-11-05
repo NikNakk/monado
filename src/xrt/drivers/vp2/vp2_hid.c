@@ -10,7 +10,7 @@
 #include "xrt/xrt_byte_order.h"
 #include "xrt/xrt_compiler.h"
 
-#include "os/os_hid.h"
+#include "hid/h_hid.h"
 #include "os/os_time.h"
 #include "os/os_threading.h"
 
@@ -45,7 +45,7 @@ struct vp2_hid
 {
 	enum u_logging_level log_level;
 
-	struct os_hid_device *hid;
+	struct h_hid_device *hid;
 	enum vp2_resolution resolution;
 
 	struct vp2_config config;
@@ -84,7 +84,7 @@ vp2_write(struct vp2_hid *vp2, uint8_t id, const uint8_t *data, size_t size)
 	}
 
 	memcpy(&buffer[1], data, size);
-	int ret = os_hid_write(vp2->hid, buffer, sizeof(buffer));
+	int ret = h_hid_write(vp2->hid, buffer, sizeof(buffer));
 
 	os_nanosleep(VP2_WRITE_DELAY_NS);
 
@@ -108,7 +108,7 @@ vp2_write_feature(struct vp2_hid *vp2, uint8_t id, uint16_t sub_id, const uint8_
 	}
 
 	memcpy(&buffer[sizeof(header)], data, size);
-	int ret = os_hid_set_feature(vp2->hid, buffer, sizeof(buffer));
+	int ret = h_hid_set_feature(vp2->hid, buffer, sizeof(buffer));
 
 	os_nanosleep(VP2_WRITE_DELAY_NS);
 
@@ -152,7 +152,7 @@ static int
 vp2_read(struct vp2_hid *vp2, uint8_t id, const uint8_t *prefix, size_t prefix_size, uint8_t *out_data, size_t out_size)
 {
 	uint8_t buffer[VP2_DATA_SIZE] = {0};
-	int ret = os_hid_read(vp2->hid, buffer, sizeof(buffer), 1000);
+	int ret = h_hid_read(vp2->hid, buffer, sizeof(buffer), 1000);
 	if (ret < 0) {
 		VP2_ERROR(vp2, "Failed to read from HID device.");
 		return ret;
@@ -194,7 +194,7 @@ vp2_drain_reads(struct vp2_hid *vp2)
 	// Bounded in case the reports never stop.
 	for (int i = 0; i < 128; i++) {
 		// Longer than the 50ms between status reports.
-		if (os_hid_read(vp2->hid, buffer, sizeof(buffer), 100) <= 0) {
+		if (h_hid_read(vp2->hid, buffer, sizeof(buffer), 100) <= 0) {
 			return;
 		}
 	}
@@ -523,7 +523,7 @@ vp2_set_power_state(struct vp2_hid *vp2, enum vp2_power_state state)
 static int
 vp2_get_feature_state(struct vp2_hid *vp2, struct vp2_feature_state *out_state)
 {
-	int ret = os_hid_get_feature(vp2->hid, VP2_REPORT_ID_FEATURE, (uint8_t *)out_state, sizeof(*out_state));
+	int ret = h_hid_get_feature(vp2->hid, VP2_REPORT_ID_FEATURE, (uint8_t *)out_state, sizeof(*out_state));
 	if (ret < 0) {
 		VP2_ERROR(vp2, "Failed to get feature state, got %d.", ret);
 		return ret;
@@ -758,7 +758,7 @@ status_thread_runner(void *ptr)
 		}
 
 		struct vp2_status_report report;
-		ret = os_hid_read(vp2->hid, (uint8_t *)&report, sizeof(report), 500);
+		ret = h_hid_read(vp2->hid, (uint8_t *)&report, sizeof(report), 500);
 		if (ret < 0) {
 			VP2_ERROR(vp2, "Failed to read from HID, got %d.", ret);
 			os_thread_helper_lock(&vp2->thread);
@@ -809,7 +809,7 @@ status_thread_runner(void *ptr)
  */
 
 int
-vp2_hid_open(struct os_hid_device *hid_dev, struct vp2_hid **out_hid)
+vp2_hid_open(struct h_hid_device *hid_dev, struct vp2_hid **out_hid)
 {
 	int ret;
 
@@ -1022,7 +1022,7 @@ vp2_hid_destroy(struct vp2_hid *vp2)
 	}
 
 	if (vp2->hid != NULL) {
-		os_hid_destroy(vp2->hid);
+		h_hid_destroy(vp2->hid);
 		vp2->hid = NULL;
 	}
 

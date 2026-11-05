@@ -25,7 +25,7 @@
 #include "tracking/t_imu.h"
 #include "tracking/t_constellation.h"
 
-#include "os/os_hid.h"
+#include "hid/h_hid.h"
 #include "os/os_threading.h"
 
 #include "tracking/t_time_sync.h"
@@ -899,8 +899,8 @@ struct rift_hmd
 
 	bool use_constellation_poses;
 
-	struct os_hid_device *hmd_dev;
-	struct os_hid_device *radio_dev;
+	struct h_hid_device *hmd_dev;
+	struct h_hid_device *radio_dev;
 
 	struct os_thread_helper sensor_thread;
 

@@ -31,7 +31,7 @@ enum HDK_VARIANT
 struct hdk_device
 {
 	struct xrt_device base;
-	struct os_hid_device *dev;
+	struct h_hid_device *dev;
 	enum HDK_VARIANT variant;
 
 	struct os_thread_helper imu_thread;
@@ -52,7 +52,7 @@ hdk_device(struct xrt_device *xdev)
 }
 
 struct hdk_device *
-hdk_device_create(struct os_hid_device *dev, enum HDK_VARIANT variant);
+hdk_device_create(struct h_hid_device *dev, enum HDK_VARIANT variant);
 
 
 /*

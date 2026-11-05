@@ -25,7 +25,7 @@
 
 #include "xrt/xrt_device.h"
 
-#include "os/os_hid.h"
+#include "hid/h_hid.h"
 #include "os/os_time.h"
 
 #include "math/m_api.h"
@@ -103,7 +103,7 @@ hdk_device_destroy(struct xrt_device *xdev)
 	os_mutex_destroy(&hd->lock);
 
 	if (hd->dev != NULL) {
-		os_hid_destroy(hd->dev);
+		h_hid_destroy(hd->dev);
 		hd->dev = NULL;
 	}
 
@@ -118,7 +118,7 @@ hdk_device_update(struct hdk_device *hd)
 {
 	uint8_t buffer[MSG_LEN_LARGE]{};
 
-	auto bytesRead = os_hid_read(hd->dev, buffer, sizeof(buffer), 100);
+	auto bytesRead = h_hid_read(hd->dev, buffer, sizeof(buffer), 100);
 	if (bytesRead == -1) {
 		if (!hd->disconnect_notified) {
 			HDK_ERROR(hd,
@@ -139,7 +139,7 @@ hdk_device_update(struct hdk_device *hd)
 			hd->quat_valid = false;
 			return 1;
 		}
-		bytesRead = os_hid_read(hd->dev, buffer, sizeof(buffer), 0);
+		bytesRead = h_hid_read(hd->dev, buffer, sizeof(buffer), 0);
 	}
 
 	uint8_t *buf = &(buffer[0]);
@@ -281,7 +281,7 @@ hdk_device_run_thread(void *ptr)
 	HDK_DEBUG(hd, "\t%s = {%f, %f} {%f, %f}", name, rot.v[0], rot.v[1], rot.v[2], rot.v[3])
 
 struct hdk_device *
-hdk_device_create(struct os_hid_device *dev, enum HDK_VARIANT variant)
+hdk_device_create(struct h_hid_device *dev, enum HDK_VARIANT variant)
 {
 	enum u_device_alloc_flags flags =
 	    (enum u_device_alloc_flags)(U_DEVICE_ALLOC_HMD | U_DEVICE_ALLOC_TRACKING_NONE);

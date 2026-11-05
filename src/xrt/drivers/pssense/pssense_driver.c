@@ -12,7 +12,7 @@
 
 #include "xrt/xrt_prober.h"
 
-#include "os/os_hid.h"
+#include "hid/h_hid.h"
 #include "os/os_threading.h"
 #include "os/os_time.h"
 
@@ -164,7 +164,7 @@ struct pssense_device
 	struct t_constellation_tracker_device constellation_device;
 
 	bool usb;
-	struct os_hid_device *hid;
+	struct h_hid_device *hid;
 	struct os_thread_helper controller_thread;
 
 	struct
@@ -408,7 +408,7 @@ static int
 pssense_read_packet_data(struct pssense_device *pssense, uint8_t *buffer, size_t size)
 {
 	// Poll, don't block. Outer thread needs to run quick
-	int ret = os_hid_read(pssense->hid, buffer, size, 0);
+	int ret = h_hid_read(pssense->hid, buffer, size, 0);
 
 	// No data yet
 	if (ret == 0) {
@@ -780,7 +780,7 @@ pssense_send_bluetooth_output_report_locked(struct pssense_device *pssense)
 	              "samples: %zu",
 	              pssense->output.vibration_amplitude, pssense->output.vibration_mode,
 	              pssense->output.trigger_feedback_mode, pssense->output.next_seq_no, read_pcm_samples);
-	int ret = os_hid_write(pssense->hid, (uint8_t *)&report, sizeof(report));
+	int ret = h_hid_write(pssense->hid, (uint8_t *)&report, sizeof(report));
 	if (ret != sizeof(report)) {
 		PSSENSE_WARN(pssense, "Failed to send output report: %d", ret);
 		return ret < 0 ? ret : -EIO;
@@ -804,7 +804,7 @@ pssense_send_usb_report_locked(struct pssense_device *pssense)
 
 	pssense_set_output_report_settings_locked(pssense, &report.settings, true, timestamp_ns);
 
-	int ret = os_hid_write(pssense->hid, (uint8_t *)&report, sizeof(report));
+	int ret = h_hid_write(pssense->hid, (uint8_t *)&report, sizeof(report));
 	if (ret != sizeof(report)) {
 		PSSENSE_WARN(pssense, "Failed to send output report: %d", ret);
 		return ret < 0 ? ret : -EIO;
@@ -841,7 +841,7 @@ pssense_set_pc_polling_rate(struct pssense_device *pssense)
 	crc = crc32_le(crc, (uint8_t *)&report, sizeof(struct pssense_set_polling_rate_feature_report) - 4);
 	report.crc = __cpu_to_le32(crc);
 
-	int ret = os_hid_set_feature(pssense->hid, (uint8_t *)&report, sizeof report);
+	int ret = h_hid_set_feature(pssense->hid, (uint8_t *)&report, sizeof report);
 	if (ret < 0) {
 		PSSENSE_ERROR(pssense, "Failed to set PC polling rate, reason %d", ret);
 		return false;
@@ -1031,8 +1031,8 @@ pssense_get_calibration_data(struct pssense_device *pssense)
 		// Calibration has to be read in two parts with two feature reads.
 		for (int i = 0; i < 2; i++) {
 			struct pssense_feature_report report_buffer = {.report_id = CALIBRATION_DATA_FEATURE_REPORT_ID};
-			int ret = os_hid_get_feature(pssense->hid, report_buffer.report_id, (uint8_t *)&report_buffer,
-			                             sizeof(report_buffer));
+			int ret = h_hid_get_feature(pssense->hid, report_buffer.report_id, (uint8_t *)&report_buffer,
+			                            sizeof(report_buffer));
 
 			if (ret < 0) {
 				PSSENSE_ERROR(pssense, "Failed to retrieve calibration report: %d", ret);
@@ -1126,7 +1126,7 @@ pssense_node_destroy(struct xrt_frame_node *node)
 	m_imu_3dof_close(&pssense->tracking.fusion);
 
 	if (pssense->hid != NULL) {
-		os_hid_destroy(pssense->hid);
+		h_hid_destroy(pssense->hid);
 		pssense->hid = NULL;
 	}
 
@@ -1658,7 +1658,7 @@ pssense_create(struct xrt_prober *xp,
                struct xrt_frame_context *xfctx,
                struct t_timing_event_sink **out_timing_sink)
 {
-	struct os_hid_device *hid = NULL;
+	struct h_hid_device *hid = NULL;
 	int ret;
 
 	// On USB, we need to use interface 2, rather than 0 like on Bluetooth.

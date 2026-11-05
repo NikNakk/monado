@@ -13,8 +13,6 @@ add_library(
 	aux_os STATIC
 	os_documentation.h
 	os_fd.h
-	os_hid.h
-	os_hid_hidraw.c
 	os_serial.h
 	os_threading.h
 	os_time.cpp

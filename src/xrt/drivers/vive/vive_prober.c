@@ -79,8 +79,8 @@ init_vive1(struct xrt_prober *xp,
 		return;
 	}
 
-	struct os_hid_device *sensors_dev = NULL;
-	struct os_hid_device *watchman_dev = NULL;
+	struct h_hid_device *sensors_dev = NULL;
+	struct h_hid_device *watchman_dev = NULL;
 
 	for (uint32_t i = 0; i < device_count; i++) {
 		struct xrt_prober_device *d = devices[i];
@@ -115,7 +115,7 @@ init_vive1(struct xrt_prober *xp,
 		return;
 	}
 
-	struct os_hid_device *mainboard_dev = NULL;
+	struct h_hid_device *mainboard_dev = NULL;
 
 	int result = xrt_prober_open_hid_interface(xp, dev, 0, &mainboard_dev);
 	if (result != 0) {
@@ -156,8 +156,8 @@ init_vive_pro(struct xrt_prober *xp,
 		return;
 	}
 
-	struct os_hid_device *sensors_dev = NULL;
-	struct os_hid_device *watchman_dev = NULL;
+	struct h_hid_device *sensors_dev = NULL;
+	struct h_hid_device *watchman_dev = NULL;
 
 	for (uint32_t i = 0; i < device_count; i++) {
 		struct xrt_prober_device *d = devices[i];
@@ -192,7 +192,7 @@ init_vive_pro(struct xrt_prober *xp,
 		return;
 	}
 
-	struct os_hid_device *mainboard_dev = NULL;
+	struct h_hid_device *mainboard_dev = NULL;
 
 	int result = xrt_prober_open_hid_interface(xp, dev, 0, &mainboard_dev);
 	if (result != 0) {
@@ -233,8 +233,8 @@ init_vive_pro2(struct xrt_prober *xp,
 		return;
 	}
 
-	struct os_hid_device *sensors_dev = NULL;
-	struct os_hid_device *watchman_dev = NULL;
+	struct h_hid_device *sensors_dev = NULL;
+	struct h_hid_device *watchman_dev = NULL;
 
 	for (uint32_t i = 0; i < device_count; i++) {
 		struct xrt_prober_device *d = devices[i];
@@ -269,7 +269,7 @@ init_vive_pro2(struct xrt_prober *xp,
 		return;
 	}
 
-	struct os_hid_device *mainboard_dev = NULL;
+	struct h_hid_device *mainboard_dev = NULL;
 
 	int result = xrt_prober_open_hid_interface(xp, dev, 0, &mainboard_dev);
 	if (result != 0) {
@@ -311,8 +311,8 @@ init_valve_index(struct xrt_prober *xp,
 		return;
 	}
 
-	struct os_hid_device *sensors_dev = NULL;
-	struct os_hid_device *watchman_dev = NULL;
+	struct h_hid_device *sensors_dev = NULL;
+	struct h_hid_device *watchman_dev = NULL;
 
 	int result = xrt_prober_open_hid_interface(xp, dev, 0, &sensors_dev);
 	if (result != 0) {
@@ -416,7 +416,7 @@ vive_controller_found(struct xrt_prober *xp,
 
 	static int controller_num = 0;
 
-	struct os_hid_device *controller_hid = NULL;
+	struct h_hid_device *controller_hid = NULL;
 	ret = xp->open_hid_interface(xp, dev, 0, &controller_hid);
 	if (ret != 0) {
 		U_LOG_E("Could not open Vive controller device.");

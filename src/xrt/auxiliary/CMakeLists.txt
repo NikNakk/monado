@@ -31,6 +31,9 @@ add_subdirectory(math)
 # OS library.
 add_subdirectory(os)
 
+# HID library.
+add_subdirectory(hid)
+
 # GStreamer library.
 if(XRT_HAVE_GST)
 	add_subdirectory(gstreamer)

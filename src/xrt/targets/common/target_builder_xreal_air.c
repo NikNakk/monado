@@ -14,7 +14,7 @@
 #include <stdlib.h>
 #include <wchar.h>
 
-#include "os/os_hid.h"
+#include "hid/h_hid.h"
 
 #include "xrt/xrt_config_drivers.h"
 #include "xrt/xrt_prober.h"
@@ -161,7 +161,7 @@ xreal_air_open_system_impl(struct xrt_builder *xb,
 		goto unlock_and_fail;
 	}
 
-	struct os_hid_device *hid_handle = NULL;
+	struct h_hid_device *hid_handle = NULL;
 	int result = xrt_prober_open_hid_interface(xp, dev_hmd, driver_handle_ifaces[product_index], &hid_handle);
 
 	if (result != 0) {
@@ -169,11 +169,11 @@ xreal_air_open_system_impl(struct xrt_builder *xb,
 		goto unlock_and_fail;
 	}
 
-	struct os_hid_device *hid_control = NULL;
+	struct h_hid_device *hid_control = NULL;
 	result = xrt_prober_open_hid_interface(xp, dev_hmd, driver_control_ifaces[product_index], &hid_control);
 
 	if (result != 0) {
-		os_hid_destroy(hid_handle);
+		h_hid_destroy(hid_handle);
 		XREAL_AIR_ERROR("Failed to open Xreal Air control interface");
 		goto unlock_and_fail;
 	}

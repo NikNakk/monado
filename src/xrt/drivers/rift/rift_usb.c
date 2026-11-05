@@ -37,7 +37,7 @@ rift_send_report(struct rift_hmd *hmd, bool radio_hid, uint8_t report_id, void *
 	buffer[0] = report_id;
 	memcpy(buffer + 1, data, data_length);
 
-	result = os_hid_set_feature(radio_hid ? hmd->radio_dev : hmd->hmd_dev, buffer, data_length + 1);
+	result = h_hid_set_feature(radio_hid ? hmd->radio_dev : hmd->hmd_dev, buffer, data_length + 1);
 	if (result < 0) {
 		return result;
 	}
@@ -52,7 +52,7 @@ rift_get_report(struct rift_hmd *hmd, bool radio_hid, uint8_t report_id, uint8_t
 		assert(hmd->radio_dev != NULL);
 	}
 
-	return os_hid_get_feature(radio_hid ? hmd->radio_dev : hmd->hmd_dev, report_id, out, out_len);
+	return h_hid_get_feature(radio_hid ? hmd->radio_dev : hmd->hmd_dev, report_id, out, out_len);
 }
 
 int

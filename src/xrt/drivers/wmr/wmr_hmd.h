@@ -83,7 +83,7 @@ struct wmr_hmd
 	 * protected by the hid_lock
 	 */
 
-	struct os_hid_device *hid_hololens_sensors_dev;
+	struct h_hid_device *hid_hololens_sensors_dev;
 	struct os_mutex hid_lock;
 
 	/*!
@@ -92,7 +92,7 @@ struct wmr_hmd
 	 * sensor status of the headset. It also allows enabling/disabling the HMD
 	 * screen on Reverb G1/G2.
 	 */
-	struct os_hid_device *hid_control_dev;
+	struct h_hid_device *hid_control_dev;
 
 	//! Current desired HMD screen state.
 	bool hmd_screen_enable;
@@ -190,8 +190,8 @@ wmr_hmd(struct xrt_device *p)
 
 void
 wmr_hmd_create(enum wmr_headset_type hmd_type,
-               struct os_hid_device *hid_holo,
-               struct os_hid_device *hid_ctrl,
+               struct h_hid_device *hid_holo,
+               struct h_hid_device *hid_ctrl,
                struct xrt_prober_device *dev_holo,
                enum u_logging_level log_level,
                struct xrt_device **out_hmd,
