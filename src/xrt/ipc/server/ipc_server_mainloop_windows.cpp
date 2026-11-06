@@ -233,15 +233,20 @@ ipc_server_mainloop_poll(struct ipc_server *vs, struct ipc_server_mainloop *ml)
 	}
 
 	if (ConnectNamedPipe(ml->pipe_handle, nullptr)) {
-		DWORD err = GetLastError();
-		U_LOG_E("ConnectNamedPipe unexpected return TRUE treating as failure: %lu %s", err, ipc_winerror(err));
-		ipc_server_handle_failure(vs);
-		return;
+		return; // PIPE_NOWAIT: TRUE means listening again after DisconnectNamedPipe.
 	}
 
 	switch (DWORD err = GetLastError()) {
 	case ERROR_PIPE_LISTENING: return;
 	case ERROR_PIPE_CONNECTED: handle_connected_client(vs, ml); return;
+	case ERROR_NO_DATA:
+		U_LOG_I("A client closed the pipe before it was accepted.");
+		if (!DisconnectNamedPipe(ml->pipe_handle)) {
+			err = GetLastError();
+			U_LOG_E("DisconnectNamedPipe failed: %lu %s", err, ipc_winerror(err));
+			ipc_server_handle_failure(vs);
+		}
+		return;
 	default:
 		U_LOG_E("ConnectNamedPipe failed: %lu %s", err, ipc_winerror(err));
 		ipc_server_handle_failure(vs);
