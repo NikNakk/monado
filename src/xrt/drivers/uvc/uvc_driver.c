@@ -11,6 +11,13 @@
  * @ingroup drv_uvc
  */
 
+#include "xrt/xrt_config_os.h"
+
+#if defined(XRT_OS_WINDOWS)
+// libusb.h stopped bringing in struct timeval via winsock.h in 1.0.30.
+#include <winsock2.h>
+#endif
+
 #include "util/u_debug.h"
 #include "util/u_frameserver.h"
 #include "util/u_time.h"
