@@ -20,6 +20,8 @@
 #include "xrt/xrt_config_os.h"
 #include "xrt/xrt_config_android.h"
 
+#include "os/os_time.h"
+
 #include "util/u_var.h"
 #include "util/u_misc.h"
 #include "util/u_file.h"
@@ -90,10 +92,24 @@ ipc_client_socket_connect(struct ipc_connection *ipc_c, struct _JavaVM *vm, void
 
 #elif defined(XRT_OS_WINDOWS)
 
+/*!
+ * Opens the pipe, retrying every 10 ms while all instances are busy (the service adds one after accepting a client).
+ */
+static HANDLE
+ipc_open_pipe(const char *pipe_name)
+{
+	HANDLE pipe_inst = CreateFileA(pipe_name, GENERIC_READ | GENERIC_WRITE, 0, NULL, OPEN_EXISTING, 0, NULL);
+	for (int i = 0; i < 500 && pipe_inst == INVALID_HANDLE_VALUE && GetLastError() == ERROR_PIPE_BUSY; i++) {
+		Sleep(10);
+		pipe_inst = CreateFileA(pipe_name, GENERIC_READ | GENERIC_WRITE, 0, NULL, OPEN_EXISTING, 0, NULL);
+	}
+	return pipe_inst;
+}
+
 static HANDLE
 ipc_connect_pipe(struct ipc_connection *ipc_c, const char *pipe_name, const char *service_executable)
 {
-	HANDLE pipe_inst = CreateFileA(pipe_name, GENERIC_READ | GENERIC_WRITE, 0, NULL, OPEN_EXISTING, 0, NULL);
+	HANDLE pipe_inst = ipc_open_pipe(pipe_name);
 	if (pipe_inst != INVALID_HANDLE_VALUE) {
 		return pipe_inst;
 	}
@@ -154,10 +170,12 @@ ipc_connect_pipe(struct ipc_connection *ipc_c, const char *pipe_name, const char
 	}
 	IPC_INFO(ipc_c, "Launched %s (pid %lu)... Waiting for %s...", service_path, pi.dwProcessId, pipe_name);
 	CloseHandle(pi.hThread);
+	int64_t start_ns = os_monotonic_get_ns();
 	for (int i = 0;; i++) {
-		pipe_inst = CreateFileA(pipe_name, GENERIC_READ | GENERIC_WRITE, 0, NULL, OPEN_EXISTING, 0, NULL);
+		pipe_inst = ipc_open_pipe(pipe_name);
 		if (pipe_inst != INVALID_HANDLE_VALUE) {
-			IPC_INFO(ipc_c, "Connected to %s after %d msec on try %d!", pipe_name, i * 100, i + 1);
+			IPC_INFO(ipc_c, "Connected to %s after %.1f msec on try %d!", pipe_name,
+			         time_ns_to_ms_f(os_monotonic_get_ns() - start_ns), i + 1);
 			break;
 		}
 		err = GetLastError();
