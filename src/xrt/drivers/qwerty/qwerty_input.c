@@ -92,7 +92,8 @@ qwerty_process_input(struct qwerty_system *qsys,
 	if (event->type == U_DESKTOP_INPUT_FOCUS_LOST) {
 		qsys->ctrl_pressed = false;
 		qsys->alt_pressed = false;
-		if (using_qhmd) qwerty_release_all(qd_hmd);
+		if (using_qhmd)
+			qwerty_release_all(qd_hmd);
 		qwerty_release_all(qd_right);
 		qwerty_release_all(qd_left);
 		release_controller_buttons(qright);

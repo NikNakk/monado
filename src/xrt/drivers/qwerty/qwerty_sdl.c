@@ -163,8 +163,8 @@ qwerty_process_event(struct xrt_device **xdevs, size_t xdev_count, SDL_Event eve
 		}
 		input.type =
 		    event.type == SDL_MOUSEBUTTONDOWN ? U_DESKTOP_INPUT_BUTTON_DOWN : U_DESKTOP_INPUT_BUTTON_UP;
-		input.button =
-		    event.button.button == SDL_BUTTON_LEFT ? U_DESKTOP_INPUT_BUTTON_LEFT : U_DESKTOP_INPUT_BUTTON_MIDDLE;
+		input.button = event.button.button == SDL_BUTTON_LEFT ? U_DESKTOP_INPUT_BUTTON_LEFT
+		                                                      : U_DESKTOP_INPUT_BUTTON_MIDDLE;
 		break;
 	default: return;
 	}

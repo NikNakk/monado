@@ -474,8 +474,9 @@ JointProcessor::process(JointExposure &exposure)
 				}
 				OrientedBootstrapResult prior_result;
 				ok = timed([&] {
-					return prior_reacquire(cameras, need_bootstrap[i]->params.led_model, orientation,
-					                       position, PriorReacquireParams{}, prior_result);
+					return prior_reacquire(cameras, need_bootstrap[i]->params.led_model,
+					                       orientation, position, PriorReacquireParams{},
+					                       prior_result);
 				});
 				if (ok) {
 					result.refined = prior_result.refined;
@@ -512,8 +513,9 @@ JointProcessor::process(JointExposure &exposure)
 			const xrt_vec3 &a = state.Tcv_world_device.position;
 			const xrt_vec3 &b = best_result.refined.Tcv_world_device.position;
 			float dx = a.x - b.x, dy = a.y - b.y, dz = a.z - b.z;
-			bootstrapped = !(state.tracking && exposure.timestamp_ns - state.last_solved_ns < kPriorContinueNs &&
-			                 std::sqrt(dx * dx + dy * dy + dz * dz) < kPriorContinueM);
+			bootstrapped =
+			    !(state.tracking && exposure.timestamp_ns - state.last_solved_ns < kPriorContinueNs &&
+			      std::sqrt(dx * dx + dy * dy + dz * dz) < kPriorContinueM);
 			this->device_prior++;
 			if (!bootstrapped) {
 				this->device_prior_continued++;
@@ -622,9 +624,8 @@ JointProcessor::process(JointExposure &exposure)
 		        " mean_solve_us=%.0f max_solve_us=%.0f pose_age_ms_p50=%.2f pose_age_ms_p95=%.2f",
 		        assembled, this->processed, skipped, late, this->device_tracked, this->device_bootstrapped,
 		        this->device_oriented, this->device_prior, this->device_prior_continued, this->device_failed,
-		        this->unconfirmed_dropped,
-		        solves ? this->solve_us_total / (double)solves : 0.0, this->solve_us_max, (double)age_p50,
-		        (double)age_p95);
+		        this->unconfirmed_dropped, solves ? this->solve_us_total / (double)solves : 0.0,
+		        this->solve_us_max, (double)age_p50, (double)age_p95);
 		this->last_status_ns = exposure.timestamp_ns;
 		this->solve_us_max = 0.0;
 	}

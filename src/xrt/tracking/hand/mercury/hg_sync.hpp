@@ -121,7 +121,7 @@ namespace ROIProvenance {
 		HAND_DETECTION,
 		POSE_PREDICTION
 	};
-}
+} // namespace ROIProvenance
 
 
 // Forward declaration for ht_view

@@ -145,9 +145,9 @@ cv_tick(void *context, uint64_t now_host_ns, uint64_t output_host_ns, bool now_i
 	}
 	// CADisplayLink's timestamp is the previous refresh; projecting its target back
 	// with a rounded period could land one refresh early.
-	uint64_t vblank_ns = now_is_vblank ? (uint64_t)now_ns
-	                                   : comp_macos_last_vblank_ns((uint64_t)output_ns, (uint64_t)now_ns,
-	                                                               (uint64_t)w->period_ns);
+	uint64_t vblank_ns =
+	    now_is_vblank ? (uint64_t)now_ns
+	                  : comp_macos_last_vblank_ns((uint64_t)output_ns, (uint64_t)now_ns, (uint64_t)w->period_ns);
 	if (vblank_ns > 0) {
 		atomic_store_explicit(&w->latest_vblank_ns, vblank_ns, memory_order_release);
 	}
@@ -317,8 +317,11 @@ check_ready(struct comp_target *ct)
 	struct comp_window_macos_wsi *w = from_target(ct);
 	if (w->display_lost || !CGDisplayIsActive(w->frontend_info.display_id)) {
 		if (!w->display_lost) {
-			COMP_ERROR(ct->c, "WSI display %u is inactive (online=%d, main=%u); restart the target after reconnecting",
-			           w->frontend_info.display_id, CGDisplayIsOnline(w->frontend_info.display_id), CGMainDisplayID());
+			COMP_ERROR(
+			    ct->c,
+			    "WSI display %u is inactive (online=%d, main=%u); restart the target after reconnecting",
+			    w->frontend_info.display_id, CGDisplayIsOnline(w->frontend_info.display_id),
+			    CGMainDisplayID());
 			w->display_lost = true;
 		}
 		return false;
@@ -338,8 +341,8 @@ wake_display(struct comp_target *ct, CGDirectDisplayID display)
 		return true;
 	}
 	IOPMAssertionID activity = kIOPMNullAssertionID;
-	IOReturn ret = IOPMAssertionDeclareUserActivity(CFSTR("Monado: XR application starting"),
-	                                                kIOPMUserActiveLocal, &activity);
+	IOReturn ret =
+	    IOPMAssertionDeclareUserActivity(CFSTR("Monado: XR application starting"), kIOPMUserActiveLocal, &activity);
 	if (ret != kIOReturnSuccess) {
 		COMP_ERROR(ct->c, "Headset display %u is asleep and could not be woken (0x%x)", display, ret);
 		return false;
@@ -501,8 +504,8 @@ destroy(struct comp_target *ct)
 	comp_macos_frontend_destroy(&w->frontend);
 	u_macos_hosted_client_release(w->hosted_client);
 
-	FILE *files[] = {w->feedback, w->acquire, w->gpu,           w->refresh,
-	                 w->vblank,   w->offset,  w->adaptive_trace, w->drain_trace};
+	FILE *files[] = {w->feedback, w->acquire,        w->gpu,        w->refresh, w->vblank,
+	                 w->offset,   w->adaptive_trace, w->drain_trace};
 	for (uint32_t i = 0; i < ARRAY_SIZE(files); ++i) {
 		if (files[i] != NULL) {
 			fclose(files[i]);
@@ -785,7 +788,8 @@ present_wait_calibrate(struct comp_window_macos_wsi *w, int64_t now, const bool 
 	bool accepted = sample_ns > 0 && sample_ns <= w->period_ns * 4;
 	if (accepted) {
 		// Same filter as the display-timing calibration above.
-		w->calibrated_offset_ns = w->offset_samples == 0 ? sample_ns : (w->calibrated_offset_ns * 7 + sample_ns) / 8;
+		w->calibrated_offset_ns =
+		    w->offset_samples == 0 ? sample_ns : (w->calibrated_offset_ns * 7 + sample_ns) / 8;
 		if (w->offset_samples < UINT32_MAX) {
 			w->offset_samples++;
 		}
@@ -835,8 +839,8 @@ present_wait_check(struct comp_window_macos_wsi *w)
 	// Holding the compositor for a refresh leaves one refresh without a new present.
 	os_nanosleep(period);
 	if (w->drain_trace != NULL) {
-		fprintf(w->drain_trace, "%" PRIi64 ",%" PRIi64 ",%" PRIi64 ",%" PRIi64 ",%u\n", w->base.current_frame_id,
-		        now, now - since, period, w->drain.drains);
+		fprintf(w->drain_trace, "%" PRIi64 ",%" PRIi64 ",%" PRIi64 ",%" PRIi64 ",%u\n",
+		        w->base.current_frame_id, now, now - since, period, w->drain.drains);
 	}
 #else
 	(void)w;

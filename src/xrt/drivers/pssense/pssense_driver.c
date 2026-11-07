@@ -1128,8 +1128,8 @@ pssense_update_fusion(struct pssense_device *pssense)
 			struct xrt_space_relation filter_rel;
 			if (debug_get_bool_option_pssense_coast_position() &&
 			    t_imu_optical_filter_get_relation(pssense->tracking.filter, host_ns, &filter_rel)) {
-				pssense_position_coast_step(&pssense->tracking.position_hold, host_ns, &filter_rel, gyro,
-				                            accel);
+				pssense_position_coast_step(&pssense->tracking.position_hold, host_ns, &filter_rel,
+				                            gyro, accel);
 			}
 		}
 	}

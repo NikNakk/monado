@@ -123,7 +123,8 @@ on_tick(CVDisplayLinkRef cv,
 		dispatch_semaphore_signal(_ready);
 		while (_created && !_stop) {
 			@autoreleasepool {
-				[[NSRunLoop currentRunLoop] runMode:NSDefaultRunLoopMode beforeDate:[NSDate distantFuture]];
+				[[NSRunLoop currentRunLoop] runMode:NSDefaultRunLoopMode
+				                         beforeDate:[NSDate distantFuture]];
 			}
 		}
 		[_link invalidate];

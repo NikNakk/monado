@@ -1050,11 +1050,12 @@ ConstellationTracker::ConstellationTracker(t_constellation_tracker_params *param
 		bool oriented = debug_get_bool_option_constellation_tracker_oriented_bootstrap();
 		this->joint = std::make_unique<JointProcessor>(this, this->mosaics[0]->cameras.size(), oriented);
 		this->joint->prior_reacquire_enabled = debug_get_bool_option_constellation_tracker_prior_reacquire();
-		CT_INFO(this,
-		        "Constellation tracker joint multi-camera path enabled (%zu cameras, oriented bootstrap %s, prior "
-		        "re-acquisition %s)",
-		        this->mosaics[0]->cameras.size(), oriented ? "on" : "off",
-		        this->joint->prior_reacquire_enabled ? "on" : "off");
+		CT_INFO(
+		    this,
+		    "Constellation tracker joint multi-camera path enabled (%zu cameras, oriented bootstrap %s, prior "
+		    "re-acquisition %s)",
+		    this->mosaics[0]->cameras.size(), oriented ? "on" : "off",
+		    this->joint->prior_reacquire_enabled ? "on" : "off");
 	}
 
 	std::string data_recorder_output = debug_get_option_constellation_tracker_data_recorder_output();

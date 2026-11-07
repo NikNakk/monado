@@ -2083,9 +2083,9 @@ comp_renderer_draw(struct comp_renderer *r)
 		    rsci->image,               //
 		    // A mark capture keeps the stored (sRGB-encoded) bytes.
 		    u_session_mark_capture_pending() ? rsci->unorm_view : rsci->srgb_view, //
-		    clamp_to_edge,             //
-		    extent,                    //
-		    rect);                     //
+		    clamp_to_edge,                                                         //
+		    extent,                                                                //
+		    rect);                                                                 //
 	}
 
 	/*

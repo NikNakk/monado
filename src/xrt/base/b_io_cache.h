@@ -23,9 +23,7 @@ extern "C" {
  * @ingroup base
  */
 xrt_result_t
-b_io_cache_create(struct xrt_system_devices *xsysd,
-                  struct xrt_space_overseer *xso,
-                  struct xrt_io_cache **out_xic);
+b_io_cache_create(struct xrt_system_devices *xsysd, struct xrt_space_overseer *xso, struct xrt_io_cache **out_xic);
 
 #ifdef __cplusplus
 }

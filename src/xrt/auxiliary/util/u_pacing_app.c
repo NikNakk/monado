@@ -87,7 +87,7 @@ DEBUG_GET_ONCE_BOOL_OPTION(align_predicted_display_time_to_app_period,
  * and falls slowly, never below U_PACING_APP_MIN_MARGIN_MS or above
  * U_PACING_APP_MAX_MARGIN_MS.
  */
-#define ADAPTIVE_WINDOW (360)            // About four seconds at 90 Hz.
+#define ADAPTIVE_WINDOW (360) // About four seconds at 90 Hz.
 #define ADAPTIVE_MIN_SAMPLES (30)
 #define ADAPTIVE_PAD_NS (U_TIME_1MS_IN_NS / 4)
 #define ADAPTIVE_FALL_NS (U_TIME_1MS_IN_NS / 50) // Per completed frame.
