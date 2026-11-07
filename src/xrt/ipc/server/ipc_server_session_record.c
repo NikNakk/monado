@@ -4,14 +4,17 @@
  * @file
  * @brief Records a session's head and controller state, and playtest marks.
  *
- * With XRT_SESSION_RECORD_DIR set, a thread samples the head pose and views and
+ * With XRT_SESSION_RECORD_DIR set in the service's environment, or when a client
+ * asks with system_session_record_start, a thread samples the head pose and views and
  * every pose and input of the left and right controllers at up to 60 Hz (once per
  * compositor frame) into
  * session.jsonl, in the space overseer's root space. Inputs are written only
  * when they change. Holding both thumbsticks clicked for 0.8 s adds a mark: a
  * line in the recording and the log, and the next composited frame as
  * mark_<n>.ppm. Creating <dir>/mark-request also adds a mark (the file is
- * removed). The recording can be replayed into the remote driver.
+ * removed). The recording can be replayed into the remote driver. A recording a
+ * client asked for stops when that client disconnects; one started from the
+ * service's environment runs until the service stops.
  * @ingroup ipc_server
  */
 
@@ -72,6 +75,8 @@ struct ipc_server_session_record
 	int64_t both_since_ns;
 	bool mark_armed;
 	uint32_t mark_count;
+	//! The client that asked for this recording, NULL when started by the service.
+	volatile struct ipc_client_state *owner;
 };
 
 static void
@@ -296,13 +301,9 @@ run_session_record(void *ptr)
 	return NULL;
 }
 
-void
-ipc_server_session_record_start(struct ipc_server *s)
+static struct ipc_server_session_record *
+record_open(struct ipc_server *s, const char *dir)
 {
-	const char *dir = debug_get_option_session_record_dir();
-	if (dir == NULL || dir[0] == '\0' || s->session_record != NULL || s->xso == NULL || s->xsysd == NULL) {
-		return;
-	}
 	struct ipc_server_session_record *rec = U_TYPED_CALLOC(struct ipc_server_session_record);
 	rec->server = s;
 	snprintf(rec->dir, sizeof(rec->dir), "%s", dir);
@@ -317,7 +318,7 @@ ipc_server_session_record_start(struct ipc_server *s)
 	if (rec->file == NULL) {
 		U_LOG_E("Session record: cannot open '%s'", path);
 		free(rec);
-		return;
+		return NULL;
 	}
 
 	struct xrt_device *head = s->xsysd->static_roles.head;
@@ -340,19 +341,15 @@ ipc_server_session_record_start(struct ipc_server *s)
 		fclose(rec->file);
 		xrt_space_reference(&rec->head_space, NULL);
 		free(rec);
-		return;
+		return NULL;
 	}
-	s->session_record = rec;
 	U_LOG_W("Session record: writing '%s' at 60 Hz; hold both thumbsticks 0.8 s to mark a moment.", path);
+	return rec;
 }
 
-void
-ipc_server_session_record_stop(struct ipc_server *s)
+static void
+record_close(struct ipc_server_session_record *rec)
 {
-	struct ipc_server_session_record *rec = s->session_record;
-	if (rec == NULL) {
-		return;
-	}
 	os_thread_helper_destroy(&rec->oth);
 	for (int h = 0; h < 2; h++) {
 		for (uint32_t i = 0; i < rec->hands[h].pose_count; i++) {
@@ -362,5 +359,74 @@ ipc_server_session_record_stop(struct ipc_server *s)
 	xrt_space_reference(&rec->head_space, NULL);
 	fclose(rec->file);
 	free(rec);
+}
+
+void
+ipc_server_session_record_start(struct ipc_server *s)
+{
+	const char *dir = debug_get_option_session_record_dir();
+	if (dir == NULL || dir[0] == '\0' || s->session_record != NULL || s->xso == NULL || s->xsysd == NULL) {
+		return;
+	}
+	s->session_record = record_open(s, dir);
+}
+
+xrt_result_t
+ipc_server_session_record_start_for_client(volatile struct ipc_client_state *ics, const char *dir)
+{
+	struct ipc_server *s = ics->server;
+	xrt_result_t xret = XRT_SUCCESS;
+
+	os_mutex_lock(&s->global_state.lock);
+	if (s->xso == NULL || s->xsysd == NULL) {
+		U_LOG_W("Session record: a client asked to record before the system exists.");
+		xret = XRT_ERROR_IPC_FAILURE;
+	} else if (s->session_record != NULL) {
+		// The same directory is already being recorded, e.g. from the service's environment.
+		if (strcmp(s->session_record->dir, dir) != 0) {
+			U_LOG_W("Session record: already writing '%s'; not starting '%s'.", s->session_record->dir,
+			        dir);
+			xret = XRT_ERROR_IPC_FAILURE;
+		}
+	} else {
+		s->session_record = record_open(s, dir);
+		if (s->session_record == NULL) {
+			xret = XRT_ERROR_IPC_FAILURE;
+		} else {
+			s->session_record->owner = ics;
+		}
+	}
+	os_mutex_unlock(&s->global_state.lock);
+	return xret;
+}
+
+void
+ipc_server_session_record_client_gone(volatile struct ipc_client_state *ics)
+{
+	struct ipc_server *s = ics->server;
+	struct ipc_server_session_record *rec = NULL;
+
+	os_mutex_lock(&s->global_state.lock);
+	if (s->session_record != NULL && s->session_record->owner == ics) {
+		rec = s->session_record;
+		s->session_record = NULL;
+	}
+	os_mutex_unlock(&s->global_state.lock);
+
+	// Join the recorder thread outside the lock.
+	if (rec != NULL) {
+		U_LOG_W("Session record: the client that asked for '%s' disconnected; stopping.", rec->dir);
+		record_close(rec);
+	}
+}
+
+void
+ipc_server_session_record_stop(struct ipc_server *s)
+{
+	struct ipc_server_session_record *rec = s->session_record;
+	if (rec == NULL) {
+		return;
+	}
 	s->session_record = NULL;
+	record_close(rec);
 }

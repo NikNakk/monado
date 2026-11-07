@@ -16,6 +16,9 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#ifndef _WIN32
+#include <sys/stat.h>
+#endif
 
 #include "os/os_time.h"
 #include "util/u_misc.h"
@@ -658,6 +661,25 @@ ipc_handle_session_poll_events(volatile struct ipc_client_state *ics, union xrt_
 	}
 
 	return xrt_session_poll_events(ics->xs, out_xse);
+}
+
+xrt_result_t
+ipc_handle_system_session_record_start(volatile struct ipc_client_state *ics,
+                                       const struct ipc_session_record_request *request)
+{
+	const char *dir = request->dir;
+	if (memchr(dir, '\0', sizeof(request->dir)) == NULL || dir[0] != '/') {
+		IPC_WARN(ics->server, "Session record: the requested directory must be an absolute path.");
+		return XRT_ERROR_IPC_FAILURE;
+	}
+#ifndef _WIN32
+	struct stat st;
+	if (stat(dir, &st) != 0 || !S_ISDIR(st.st_mode)) {
+		IPC_WARN(ics->server, "Session record: '%s' is not an existing directory.", dir);
+		return XRT_ERROR_IPC_FAILURE;
+	}
+#endif
+	return ipc_server_session_record_start_for_client(ics, dir);
 }
 
 xrt_result_t
