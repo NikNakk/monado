@@ -6,6 +6,12 @@ SPDX-License-Identifier: BSL-1.0
 
 # macOS / PS VR2 Port Status
 
+The [31 October acquisition-phase candidate](macos-wsi-acquire-phase.md)
+moved graphics WSI image acquisition from after submit to render entry. Desktop
+sessions passed, but headset pilots showed more source reuse and one
+unexplained game-side Metal abort, so it was not accepted and its code was
+removed on 7 November. Runtime defaults are unchanged.
+
 The [native ARM64 Alyx dual-Vulkan investigation](macos-alyx-kosmickrisp.md)
 (19-20 October, from `codex/alyx-dual-vulkan`) records isolated KosmicKrisp and
 MoltenVK selection, the [ARM64 static audit](macos-alyx-arm64-static-audit.md),

@@ -7,6 +7,11 @@ SPDX-License-Identifier: BSL-1.0
 
 # macOS Port Tracker
 
+The [31 October acquisition-phase candidate](macos-wsi-acquire-phase.md)
+tested render-entry rather than post-submit acquisition for graphics WSI.
+Headset pilots did not support it (more source reuse, one unexplained
+game-side Metal abort), and its code was removed on 7 November.
+
 The [native ARM64 Alyx dual-Vulkan investigation](macos-alyx-kosmickrisp.md)
 (19-20 October, from `codex/alyx-dual-vulkan`) records isolated KosmicKrisp and
 MoltenVK selection, the [ARM64 static audit](macos-alyx-arm64-static-audit.md),
