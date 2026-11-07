@@ -60,11 +60,23 @@ struct OrientedBootstrapParams
 	}();
 };
 
+/*!
+ * Another device that could have produced the same blobs, such as the other hand's mirror-image Sense ring, with
+ * its own (IMU) orientation in the same world.
+ */
+struct OrientedBootstrapRival
+{
+	const t_constellation_tracker_led_model *model;
+	xrt_quat Tcv_world_orientation;
+};
+
 struct OrientedBootstrapResult
 {
 	bool ok{false};
 	//! Index (into the cameras passed in) of the camera whose hypothesis was accepted, or -1.
 	int camera{-1};
+	//! Index (into the rivals passed in) of a rival that explained the same blobs as well, or -1.
+	int ambiguous_rival{-1};
 	//! Blobs explained by the best hypothesis in its camera.
 	uint32_t inliers{0};
 	uint32_t hypotheses{0};
@@ -76,14 +88,21 @@ struct OrientedBootstrapResult
  * Find @p model in the cameras' free blobs given its orientation @p Tcv_world_orientation (device to the
  * OpenCV-convention world), searching each camera on its own.
  *
- * @return true if a hypothesis passed the joint refinement's acceptance tests.
+ * One camera and a fixed orientation leave room for a mirror-image ring to fit nearly as well as the real one: the
+ * other hand's ring at about this hand's orientation can pass the acceptance tests by a hair, so which way it falls
+ * depends on rounding. With @p rivals, each is bootstrapped at its own orientation once a hypothesis is accepted;
+ * if one explains at least half of the same blobs at least as well (by the tracker's contest rule), the sighting is
+ * ambiguous and that hypothesis is rejected.
+ *
+ * @return true if a hypothesis passed the joint refinement's acceptance tests and no rival explained it as well.
  */
 bool
 oriented_bootstrap(const std::vector<JointSolveCamera> &cameras,
                    const t_constellation_tracker_led_model &model,
                    const xrt_quat &Tcv_world_orientation,
                    const OrientedBootstrapParams &params,
-                   OrientedBootstrapResult &out);
+                   OrientedBootstrapResult &out,
+                   const std::vector<OrientedBootstrapRival> *rivals = nullptr);
 
 /*!
  * Re-acquisition near a known position (CONSTELLATION_TRACKER_PRIOR_REACQUIRE). With the orientation fixed, one
