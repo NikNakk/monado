@@ -622,6 +622,62 @@ ipc_compositor_end_session(struct xrt_compositor *xc)
 	IPC_CHK_ALWAYS_RET(icc->ipc_c, xret, "ipc_call_session_end");
 }
 
+#ifdef XRT_OS_OSX
+#include <errno.h>
+#include <mach/mach_time.h>
+#include <sys/event.h>
+
+/*
+ * The application's frame thread is not real-time, so a plain timed sleep on
+ * macOS is coalesced with other timers and wakes 1-3 ms late; the pacer then
+ * has to cover that with margin, which is latency. A kqueue timer with
+ * NOTE_CRITICAL and zero leeway is exempt from coalescing, so the thread wakes
+ * on time at its own priority and uses no extra CPU.
+ */
+static uint64_t
+client_ns_to_mach(uint64_t ns)
+{
+	static mach_timebase_info_data_t tb;
+	if (tb.numer == 0) {
+		mach_timebase_info(&tb);
+	}
+	return ns / tb.numer * tb.denom + ns % tb.numer * tb.denom / tb.numer;
+}
+
+static bool
+client_wait_critical(int64_t wake_up_time_ns)
+{
+	static _Thread_local int kq = -1;
+	if (kq < 0) {
+		kq = kqueue();
+		if (kq < 0) {
+			return false;
+		}
+	}
+	struct kevent64_s ev;
+	EV_SET64(&ev, 1, EVFILT_TIMER, EV_ADD | EV_ONESHOT, NOTE_MACHTIME | NOTE_ABSOLUTE | NOTE_CRITICAL | NOTE_LEEWAY,
+	         (int64_t)client_ns_to_mach((uint64_t)wake_up_time_ns), 0, 0, 0);
+	ev.ext[1] = 0; // Zero leeway.
+	struct kevent64_s out;
+	int ret;
+	do {
+		ret = kevent64(kq, &ev, 1, &out, 1, 0, NULL);
+	} while (ret < 0 && errno == EINTR && os_monotonic_get_ns() < wake_up_time_ns);
+	return ret >= 0;
+}
+
+static void
+client_wait_until(struct os_precise_sleeper *sleeper, int64_t wake_up_time_ns)
+{
+	if (os_monotonic_get_ns() >= wake_up_time_ns || client_wait_critical(wake_up_time_ns)) {
+		return;
+	}
+	u_wait_until(sleeper, wake_up_time_ns);
+}
+#else
+#define client_wait_until(sleeper, wake_up_time_ns) u_wait_until(sleeper, wake_up_time_ns)
+#endif
+
 static xrt_result_t
 ipc_compositor_wait_frame(struct xrt_compositor *xc,
                           int64_t *out_frame_id,
@@ -646,7 +702,7 @@ ipc_compositor_wait_frame(struct xrt_compositor *xc,
 	IPC_CHK_AND_RET(icc->ipc_c, xret, "ipc_call_compositor_predict_frame");
 
 	// Wait until the given wake up time.
-	u_wait_until(&icc->sleeper, wake_up_time_ns);
+	client_wait_until(&icc->sleeper, wake_up_time_ns);
 
 	// Signal that we woke up.
 	xret = ipc_call_compositor_wait_woke(icc->ipc_c, frame_id);
