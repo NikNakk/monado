@@ -728,7 +728,8 @@ TEST_CASE("Prior re-acquisition finds a sparsely seen ring near its prior")
 
 		xrt_quat orientation = perturbed_orientation(truth, 0.5, rng);
 		OrientedBootstrapResult oriented;
-		oriented_found += oriented_bootstrap(cams, ring.model, orientation, OrientedBootstrapParams{}, oriented);
+		oriented_found +=
+		    oriented_bootstrap(cams, ring.model, orientation, OrientedBootstrapParams{}, oriented);
 
 		OrientedBootstrapResult result;
 		if (!prior_reacquire(cams, ring.model, orientation, offset_position(truth, 0.04, rng),

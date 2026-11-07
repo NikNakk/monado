@@ -123,8 +123,9 @@ psvr2_replay_open(struct psvr2_builder *pb,
 	xsysd->static_xdevs[xsysd->static_xdev_count++] = right;
 
 	(void)psvr2_set_replay_head(head_xdev, remote_head);
-	U_LOG_W("PSVR2_REPLAY_REMOTE_PORT=%u: PS VR2 display with replayed head and controller poses; Sense and gaze off",
-	        port);
+	U_LOG_W(
+	    "PSVR2_REPLAY_REMOTE_PORT=%u: PS VR2 display with replayed head and controller poses; Sense and gaze off",
+	    port);
 
 	*out_left = left;
 	*out_right = right;

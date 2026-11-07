@@ -389,21 +389,27 @@ fill_in_external_object_properties(struct vk_bundle *vk)
 #endif
 #if defined(XRT_GRAPHICS_SYNC_HANDLE_IS_FD)
 
-	vk->external.fence_sync_fd = vk->has_KHR_external_fence_fd && is_fence_bit_supported( //
-	    vk, VK_EXTERNAL_FENCE_HANDLE_TYPE_SYNC_FD_BIT);
-	vk->external.fence_opaque_fd = vk->has_KHR_external_fence_fd && is_fence_bit_supported( //
-	    vk, VK_EXTERNAL_FENCE_HANDLE_TYPE_OPAQUE_FD_BIT);
+	vk->external.fence_sync_fd =
+	    vk->has_KHR_external_fence_fd && is_fence_bit_supported( //
+	                                         vk, VK_EXTERNAL_FENCE_HANDLE_TYPE_SYNC_FD_BIT);
+	vk->external.fence_opaque_fd =
+	    vk->has_KHR_external_fence_fd && is_fence_bit_supported( //
+	                                         vk, VK_EXTERNAL_FENCE_HANDLE_TYPE_OPAQUE_FD_BIT);
 
-	vk->external.binary_semaphore_sync_fd = vk->has_KHR_external_semaphore_fd && is_binary_semaphore_bit_supported( //
-	    vk, VK_EXTERNAL_SEMAPHORE_HANDLE_TYPE_SYNC_FD_BIT);
-	vk->external.binary_semaphore_opaque_fd = vk->has_KHR_external_semaphore_fd && is_binary_semaphore_bit_supported( //
-	    vk, VK_EXTERNAL_SEMAPHORE_HANDLE_TYPE_OPAQUE_FD_BIT);
+	vk->external.binary_semaphore_sync_fd =
+	    vk->has_KHR_external_semaphore_fd && is_binary_semaphore_bit_supported( //
+	                                             vk, VK_EXTERNAL_SEMAPHORE_HANDLE_TYPE_SYNC_FD_BIT);
+	vk->external.binary_semaphore_opaque_fd =
+	    vk->has_KHR_external_semaphore_fd && is_binary_semaphore_bit_supported( //
+	                                             vk, VK_EXTERNAL_SEMAPHORE_HANDLE_TYPE_OPAQUE_FD_BIT);
 
 	//! @todo Is this safe to assume working, do we need to check an extension?
-	vk->external.timeline_semaphore_sync_fd = vk->has_KHR_external_semaphore_fd && is_timeline_semaphore_bit_supported( //
-	    vk, VK_EXTERNAL_SEMAPHORE_HANDLE_TYPE_SYNC_FD_BIT);
-	vk->external.timeline_semaphore_opaque_fd = vk->has_KHR_external_semaphore_fd && is_timeline_semaphore_bit_supported( //
-	    vk, VK_EXTERNAL_SEMAPHORE_HANDLE_TYPE_OPAQUE_FD_BIT);
+	vk->external.timeline_semaphore_sync_fd =
+	    vk->has_KHR_external_semaphore_fd && is_timeline_semaphore_bit_supported( //
+	                                             vk, VK_EXTERNAL_SEMAPHORE_HANDLE_TYPE_SYNC_FD_BIT);
+	vk->external.timeline_semaphore_opaque_fd =
+	    vk->has_KHR_external_semaphore_fd && is_timeline_semaphore_bit_supported( //
+	                                             vk, VK_EXTERNAL_SEMAPHORE_HANDLE_TYPE_OPAQUE_FD_BIT);
 
 #elif defined(XRT_GRAPHICS_SYNC_HANDLE_IS_WIN32_HANDLE)
 

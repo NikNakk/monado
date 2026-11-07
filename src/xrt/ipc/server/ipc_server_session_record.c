@@ -133,8 +133,9 @@ write_hand(struct ipc_server_session_record *rec, struct record_hand *hand, int6
 	fprintf(f, ",\"%s\":{\"dev\":\"%s\",\"poses\":{", hand->key, xdev->str);
 	for (uint32_t i = 0; i < hand->pose_count; i++) {
 		struct xrt_space_relation rel = XRT_SPACE_RELATION_ZERO;
-		xrt_space_overseer_locate_space(rec->server->xso, rec->server->xso->semantic.root, &(struct xrt_pose)XRT_POSE_IDENTITY,
-		                                now_ns, hand->pose_spaces[i], &(struct xrt_pose)XRT_POSE_IDENTITY, &rel);
+		xrt_space_overseer_locate_space(rec->server->xso, rec->server->xso->semantic.root,
+		                                &(struct xrt_pose)XRT_POSE_IDENTITY, now_ns, hand->pose_spaces[i],
+		                                &(struct xrt_pose)XRT_POSE_IDENTITY, &rel);
 		fprintf(f, "%s\"%s\":", i ? "," : "", u_str_xrt_input_name(hand->pose_names[i]));
 		write_pose(f, &rel);
 	}
@@ -205,7 +206,8 @@ write_sample(struct ipc_server_session_record *rec)
 	if (s->xso->semantic.stage != NULL) {
 		struct xrt_space_relation stage = XRT_SPACE_RELATION_ZERO;
 		xrt_space_overseer_locate_space(s->xso, s->xso->semantic.root, &(struct xrt_pose)XRT_POSE_IDENTITY,
-		                                now_ns, s->xso->semantic.stage, &(struct xrt_pose)XRT_POSE_IDENTITY, &stage);
+		                                now_ns, s->xso->semantic.stage, &(struct xrt_pose)XRT_POSE_IDENTITY,
+		                                &stage);
 		fprintf(f, ",\"stage\":");
 		write_pose(f, &stage);
 	}
@@ -213,8 +215,8 @@ write_sample(struct ipc_server_session_record *rec)
 	struct xrt_device *head = xsysd->static_roles.head;
 	if (head != NULL && rec->head_space != NULL) {
 		struct xrt_space_relation rel = XRT_SPACE_RELATION_ZERO;
-		xrt_space_overseer_locate_space(s->xso, s->xso->semantic.root, &(struct xrt_pose)XRT_POSE_IDENTITY, now_ns,
-		                                rec->head_space, &(struct xrt_pose)XRT_POSE_IDENTITY, &rel);
+		xrt_space_overseer_locate_space(s->xso, s->xso->semantic.root, &(struct xrt_pose)XRT_POSE_IDENTITY,
+		                                now_ns, rec->head_space, &(struct xrt_pose)XRT_POSE_IDENTITY, &rel);
 		fprintf(f, ",\"head\":");
 		write_pose(f, &rel);
 
@@ -227,11 +229,12 @@ write_sample(struct ipc_server_session_record *rec)
 			fprintf(f, ",\"views\":[");
 			for (int i = 0; i < 2; i++) {
 				fprintf(f,
-				        "%s{\"fov\":[%.5f,%.5f,%.5f,%.5f],\"p\":[%.5f,%.5f,%.5f],\"q\":[%.6f,%.6f,%.6f,%.6f]}",
+				        "%s{\"fov\":[%.5f,%.5f,%.5f,%.5f],\"p\":[%.5f,%.5f,%.5f],\"q\":[%.6f,%.6f,%.6f,"
+				        "%.6f]}",
 				        i ? "," : "", fovs[i].angle_left, fovs[i].angle_right, fovs[i].angle_up,
-				        fovs[i].angle_down, poses[i].position.x, poses[i].position.y, poses[i].position.z,
-				        poses[i].orientation.x, poses[i].orientation.y, poses[i].orientation.z,
-				        poses[i].orientation.w);
+				        fovs[i].angle_down, poses[i].position.x, poses[i].position.y,
+				        poses[i].position.z, poses[i].orientation.x, poses[i].orientation.y,
+				        poses[i].orientation.z, poses[i].orientation.w);
 			}
 			fprintf(f, "]");
 		}
@@ -266,7 +269,8 @@ write_sample(struct ipc_server_session_record *rec)
 		snprintf(path, sizeof(path), "%s/mark_%u.ppm", rec->dir, n);
 		u_session_mark_request_capture(path);
 		fprintf(f, ",\"mark\":%u", n);
-		U_LOG_W("SESSION_MARK %u at %.1f s (%s); frame '%s'", n, time_ns_to_s(now_ns - rec->start_ns), how, path);
+		U_LOG_W("SESSION_MARK %u at %.1f s (%s); frame '%s'", n, time_ns_to_s(now_ns - rec->start_ns), how,
+		        path);
 	}
 
 	fprintf(f, "}\n");
@@ -333,7 +337,9 @@ record_open(struct ipc_server *s, const char *dir)
 	localtime_r(&wall.tv_sec, &tm_local);
 	char stamp[64];
 	strftime(stamp, sizeof(stamp), "%Y-%m-%dT%H:%M:%S", &tm_local);
-	fprintf(rec->file, "{\"format\":\"monado-session-record\",\"version\":2,\"pose_space\":\"root\",\"start_wall\":\"%s.%03ld\",\"head\":\"%s\"}\n",
+	fprintf(rec->file,
+	        "{\"format\":\"monado-session-record\",\"version\":2,\"pose_space\":\"root\",\"start_wall\":\"%s.%"
+	        "03ld\",\"head\":\"%s\"}\n",
 	        stamp, wall.tv_nsec / 1000000, head != NULL ? head->str : "");
 
 	if (os_thread_helper_init(&rec->oth) != 0 || os_thread_helper_start(&rec->oth, run_session_record, rec) != 0) {

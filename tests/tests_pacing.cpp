@@ -462,9 +462,8 @@ TEST_CASE("Fake pacing exposes the acquire placement deadline tradeoff", "[pacin
 	u_pc_update_vblank_from_display_control(pc, previous_present);
 	CompositorPredictions early, late;
 	auto predict = [&](int64_t now, CompositorPredictions &p) {
-		u_pc_predict(pc, now, &p.frame_id, &p.wake_up_time_ns, &p.desired_present_time_ns,
-		             &p.present_slop_ns, &p.predicted_display_time_ns, &p.predicted_display_period_ns,
-		             &p.min_display_period_ns);
+		u_pc_predict(pc, now, &p.frame_id, &p.wake_up_time_ns, &p.desired_present_time_ns, &p.present_slop_ns,
+		             &p.predicted_display_time_ns, &p.predicted_display_period_ns, &p.min_display_period_ns);
 	};
 	predict(previous_present + 1000000, early);
 	REQUIRE(early.desired_present_time_ns == previous_present + period);
@@ -635,9 +634,7 @@ TEST_CASE("u_pacing_app keeps a steady divisor for GPU-bound apps")
 	} cases[] = {
 	    {6 * ms, 1},  // fits a single refresh
 	    {10 * ms, 2}, // Alyx-like heavy scene: should hold 60 fps
-	    {12 * ms, 2},
-	    {15 * ms, 2},
-	    {18 * ms, 3},
+	    {12 * ms, 2}, {15 * ms, 2}, {18 * ms, 3},
 	};
 
 	for (const Case &c : cases) {
@@ -661,8 +658,8 @@ TEST_CASE("u_pacing_app holds 60 Hz on a 120 Hz display with jittery GPU-bound f
 	for (int64_t gpu_ms : {10, 11, 12}) {
 		for (int64_t post_ms : {1, 2, 3, 4}) {
 			// Up to 1.5 ms of extra CPU, GPU and post-frame time per frame.
-			AppCadenceResult r =
-			    run_app_cadence(period_ns, 5 * ms, 3 * ms, ms / 2, gpu_ms * ms, post_ms * ms, 2, 3 * ms / 2);
+			AppCadenceResult r = run_app_cadence(period_ns, 5 * ms, 3 * ms, ms / 2, gpu_ms * ms,
+			                                     post_ms * ms, 2, 3 * ms / 2);
 			INFO("gpu " << gpu_ms << " ms, post " << post_ms << " ms: " << r.off_cadence << "/" << r.frames
 			            << " frames off cadence, steps " << r.min_step << ".." << r.max_step);
 			CHECK(r.off_cadence <= r.frames / 20);

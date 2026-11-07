@@ -210,12 +210,13 @@ desktop_hid_usage(unsigned short key_code)
 	case 0x7C: return 79; // Right arrow
 	case 0x7B: return 80; // Left arrow
 	case 0x7D: return 81; // Down arrow
-	case 0x7E: return 82; // Up arrow
+	case 0x7E:
+		return 82; // Up arrow
 	// A laptop has no keypad: - and = stand in for keypad - and +.
 	case 0x4E:
 	case 0x1B: return 86; // Keypad minus
 	case 0x45:
-	case 0x18: return 87; // Keypad plus
+	case 0x18: return 87;  // Keypad plus
 	case 0x3B: return 224; // Left control
 	case 0x38: return 225; // Left shift
 	case 0x3A: return 226; // Left option (alt)
@@ -793,11 +794,12 @@ macos_window_frontend_set_title(struct comp_macos_frontend *cwm, const char *tit
 {
 	NSString *text = [NSString stringWithUTF8String:title];
 	if (cwm->desktop) {
-		NSString *help = u_desktop_input_active()
-		                     ? @" - click to capture; WASD/QE or two fingers move, pointer looks, click triggers, "
-		                       @"hold Ctrl/Option for the left/right controller, R brings the controllers back, "
-		                       @"Esc frees the pointer"
-		                     : @" - click to look, two fingers to move, R resets, Esc frees the pointer";
+		NSString *help =
+		    u_desktop_input_active()
+		        ? @" - click to capture; WASD/QE or two fingers move, pointer looks, click triggers, "
+		          @"hold Ctrl/Option for the left/right controller, R brings the controllers back, "
+		          @"Esc frees the pointer"
+		        : @" - click to look, two fingers to move, R resets, Esc frees the pointer";
 		text = [text stringByAppendingString:help];
 	}
 	[cwm->window setTitle:text];

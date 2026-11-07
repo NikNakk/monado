@@ -1334,10 +1334,11 @@ replay_filter(const DatasetReader &dataset, const char *tracker_csv, double imu_
 
 	FILE *out = out_csv ? std::fopen(out_csv, "w") : nullptr;
 	if (out) {
-		std::fprintf(out,
-		             "timestamp_ns,device,hidden,raw_px,raw_py,raw_pz,raw_qx,raw_qy,raw_qz,raw_qw,"
-		             "filt_px,filt_py,filt_pz,filt_qx,filt_qy,filt_qz,filt_qw,gap_age_ms,hold_px,hold_py,hold_pz,"
-		             "damp_px,damp_py,damp_pz\n");
+		std::fprintf(
+		    out,
+		    "timestamp_ns,device,hidden,raw_px,raw_py,raw_pz,raw_qx,raw_qy,raw_qz,raw_qw,"
+		    "filt_px,filt_py,filt_pz,filt_qx,filt_qy,filt_qz,filt_qw,gap_age_ms,hold_px,hold_py,hold_pz,"
+		    "damp_px,damp_py,damp_pz\n");
 	}
 
 	for (auto &[device, list] : poses) {
@@ -1409,9 +1410,11 @@ replay_filter(const DatasetReader &dataset, const char *tracker_csv, double imu_
 						damp_active = true;
 					} else {
 						double dt = (double)(s->timestamp_ns - last_imu_t) * 1e-9;
-						double w = std::exp(-(double)gap_age_ns(s->timestamp_ns) * 1e-6 / damp_ms);
-						// FILTER_STILL_GATE=1: integrate the filter velocity only while the IMU shows
-						// motion (|gyro| above 0.3 rad/s or |accel| more than 0.5 m/s^2 from 1 g).
+						double w =
+						    std::exp(-(double)gap_age_ns(s->timestamp_ns) * 1e-6 / damp_ms);
+						// FILTER_STILL_GATE=1: integrate the filter velocity only while the IMU
+						// shows motion (|gyro| above 0.3 rad/s or |accel| more than 0.5 m/s^2
+						// from 1 g).
 						if (std::getenv("FILTER_STILL_GATE") != nullptr) {
 							double gl = std::sqrt(g.x * g.x + g.y * g.y + g.z * g.z);
 							double al = std::sqrt(a.x * a.x + a.y * a.y + a.z * a.z);
@@ -1488,10 +1491,10 @@ replay_filter(const DatasetReader &dataset, const char *tracker_csv, double imu_
 					    tp.pose.orientation.z, tp.pose.orientation.w, rel.pose.position.x,
 					    rel.pose.position.y, rel.pose.position.z, rel.pose.orientation.x,
 					    rel.pose.orientation.y, rel.pose.orientation.z, rel.pose.orientation.w,
-					    is_hidden ? (double)gap_age_ns(tp.t) * 1e-6 : -1.0, last_delivered.position.x,
-					    last_delivered.position.y, last_delivered.position.z,
-					    damp_active ? damp_pos.x : NAN, damp_active ? damp_pos.y : NAN,
-					    damp_active ? damp_pos.z : NAN);
+					    is_hidden ? (double)gap_age_ns(tp.t) * 1e-6 : -1.0,
+					    last_delivered.position.x, last_delivered.position.y,
+					    last_delivered.position.z, damp_active ? damp_pos.x : NAN,
+					    damp_active ? damp_pos.y : NAN, damp_active ? damp_pos.z : NAN);
 				}
 			}
 		}
