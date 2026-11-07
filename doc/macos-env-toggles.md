@@ -152,6 +152,15 @@ internal scratch images in Vulkan device-local allocations and disables their
 native-handle debug-viewer output. It does not change application swapchains or
 presenter sharing. See [compatibility evidence](macos-kk-compositor-followup.md).
 
+## WSI acquisition-phase candidate (31 October 2026, removed)
+
+`XRT_MACOS_WSI_ACQUIRE_AT_RENDER=1` used the renderer's render-entry
+acquisition instead of its post-submit fallback acquisition, for graphics `wsi`
+without present-completion waits. Headset pilots did not support it (more
+source reuse and compositor GPU time, one unexplained game-side Metal abort),
+so the option was removed on 7 November 2026 and is now ignored. See
+[the experiment record](macos-wsi-acquire-phase.md).
+
 ## Historical audit
 
 Audit of every `DEBUG_GET_ONCE_*` option and raw `getenv()` added on

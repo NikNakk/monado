@@ -6,6 +6,17 @@ SPDX-License-Identifier: BSL-1.0
 
 # macOS PS VR2 timing diagnostics
 
+## Graphics WSI acquire phase (31 October 2026, removed 7 November)
+
+The isolated [acquisition-phase experiment](macos-wsi-acquire-phase.md) follows
+an Alyx recording in which post-submit image acquisition delayed later software
+targets. It retains three images, source reuse protection, deferred query
+readback and fresh warp poses. Five simulated desktop sessions pass; physical
+presentation and smoothness remain unvalidated. The first headset candidate
+aborted in the game's Metal encoder and is not accepted; causality is unresolved.
+A matched follow-up showed more source reuse with it on, so its code was removed.
+Historical native defaults below remain unchanged.
+
 > **Buffering correction, 2026-10-03:** earlier captures described as fully
 > buffered set the option, but several compositor, app-pacing and IPC CSV writers
 > still flushed periodically. Their matched comparisons remain useful, but those
