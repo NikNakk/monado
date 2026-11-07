@@ -24,10 +24,13 @@
 #include "main/comp_macos_display.h"
 #include "main/comp_macos_display_timing.h"
 #include "main/comp_present_feedback_correction.h"
+#include "main/comp_latency_drain.h"
+#include "main/comp_present_wait_delay.h"
 #include "util/u_debug.h"
 #include "util/u_misc.h"
 #include "util/u_pacing.h"
 #include "util/u_timing_trace.h"
+#include "util/u_time.h"
 #include "os/os_time.h"
 #include <inttypes.h>
 #include <stdio.h>
@@ -35,6 +38,32 @@
 DEBUG_GET_ONCE_NUM_OPTION(macos_generic_refresh, "XRT_MACOS_REFRESH_RATE_HZ", 0)
 
 DEBUG_GET_ONCE_BOOL_OPTION(macos_wsi_passthrough, "XRT_MACOS_WSI_PASSTHROUGH", false)
+
+/*
+ * Opt-in: when frames keep reaching the display a refresh later than usual,
+ * skip one refresh to drain the extra queued frame. Needs present-wait.
+ */
+DEBUG_GET_ONCE_BOOL_OPTION(macos_wsi_latency_drain, "XRT_MACOS_WSI_LATENCY_DRAIN", false)
+DEBUG_GET_ONCE_NUM_OPTION(macos_wsi_latency_drain_sustain_ms, "XRT_MACOS_WSI_LATENCY_DRAIN_SUSTAIN_MS", 500)
+DEBUG_GET_ONCE_NUM_OPTION(macos_wsi_latency_drain_cooldown_ms, "XRT_MACOS_WSI_LATENCY_DRAIN_COOLDOWN_MS", 1000)
+
+/*
+ * Opt-in: without VK_GOOGLE_display_timing, measure the present-to-display
+ * delay with non-blocking present-waits on recent frames and feed it to the
+ * pacer, so predicted display times (and so poses) match the real display.
+ */
+DEBUG_GET_ONCE_BOOL_OPTION(macos_wsi_present_wait_calibration, "XRT_MACOS_WSI_PRESENT_WAIT_CALIBRATION", false)
+
+/*
+ * Presents between the frame being presented and the one checked. Frames
+ * normally reach the display about 2 refreshes after their desired time, so by
+ * the next present the frame 3 presents back has been shown for most of a
+ * refresh; one refresh later than that and it has not.
+ */
+#define WSI_LATENCY_DRAIN_LOOKBACK 3
+
+//! Recent frames checked after each present, newest first.
+#define WSI_PRESENT_WAIT_LOOKBACK 4
 
 
 // Keep the validated CV source opt-in while comparing Apple's replacement APIs.
@@ -80,9 +109,13 @@ struct comp_window_macos_wsi
 		bool valid, has_gpu_end;
 	} history[WSI_TIMING_HISTORY];
 
+	bool drain_enabled;
+	struct comp_latency_drain drain;
+	bool wait_calibration;
+
 	// Experiment instrumentation; never write files from the display-link callback.
 	struct comp_target ops;
-	FILE *feedback, *acquire, *gpu, *refresh, *vblank, *offset, *adaptive_trace;
+	FILE *feedback, *acquire, *gpu, *refresh, *vblank, *offset, *adaptive_trace, *drain_trace;
 };
 
 static struct comp_window_macos_wsi *
@@ -94,7 +127,7 @@ from_target(struct comp_target *ct)
 // Mirror the native target's host-clock conversion and output-phase projection.
 // Only publish a timestamp here: the compositor thread owns the pacer and traces.
 static void
-cv_tick(void *context, uint64_t now_host_ns, uint64_t output_host_ns)
+cv_tick(void *context, uint64_t now_host_ns, uint64_t output_host_ns, bool now_is_vblank)
 {
 	struct comp_window_macos_wsi *w = context;
 	if (now_host_ns == 0 || output_host_ns == 0 || w->period_ns <= 0) {
@@ -109,7 +142,11 @@ cv_tick(void *context, uint64_t now_host_ns, uint64_t output_host_ns)
 	if (now_ns <= 0 || output_ns <= 0) {
 		return;
 	}
-	uint64_t vblank_ns = comp_macos_last_vblank_ns((uint64_t)output_ns, (uint64_t)now_ns, (uint64_t)w->period_ns);
+	// CADisplayLink's timestamp is the previous refresh; projecting its target back
+	// with a rounded period could land one refresh early.
+	uint64_t vblank_ns = now_is_vblank ? (uint64_t)now_ns
+	                                   : comp_macos_last_vblank_ns((uint64_t)output_ns, (uint64_t)now_ns,
+	                                                               (uint64_t)w->period_ns);
 	if (vblank_ns > 0) {
 		atomic_store_explicit(&w->latest_vblank_ns, vblank_ns, memory_order_release);
 	}
@@ -279,7 +316,8 @@ check_ready(struct comp_target *ct)
 	struct comp_window_macos_wsi *w = from_target(ct);
 	if (w->display_lost || !CGDisplayIsActive(w->frontend_info.display_id)) {
 		if (!w->display_lost) {
-			COMP_ERROR(ct->c, "WSI display is inactive; restart the target after reconnecting");
+			COMP_ERROR(ct->c, "WSI display %u is inactive (online=%d, main=%u); restart the target after reconnecting",
+			           w->frontend_info.display_id, CGDisplayIsOnline(w->frontend_info.display_id), CGMainDisplayID());
 			w->display_lost = true;
 		}
 		return false;
@@ -425,7 +463,8 @@ destroy(struct comp_target *ct)
 	comp_macos_frontend_destroy(&w->frontend);
 	u_macos_hosted_client_release(w->hosted_client);
 
-	FILE *files[] = {w->feedback, w->acquire, w->gpu, w->refresh, w->vblank, w->offset, w->adaptive_trace};
+	FILE *files[] = {w->feedback, w->acquire, w->gpu,           w->refresh,
+	                 w->vblank,   w->offset,  w->adaptive_trace, w->drain_trace};
 	for (uint32_t i = 0; i < ARRAY_SIZE(files); ++i) {
 		if (files[i] != NULL) {
 			fclose(files[i]);
@@ -495,6 +534,57 @@ trace_feedback(struct comp_target_swapchain *cts, VkPastPresentationTimingGOOGLE
 	}
 }
 
+static FILE *
+open_trace(const char *name, const char *header);
+
+static void
+present_wait_calibration_setup(struct comp_window_macos_wsi *w)
+{
+	if (!debug_get_bool_option_macos_wsi_present_wait_calibration() || w->wait_calibration) {
+		return;
+	}
+	if (w->calibrate || w->adaptive) {
+		COMP_WARN(w->base.base.c, "WSI present-wait calibration not needed: display timing feedback is in use");
+		return;
+	}
+#ifdef VK_KHR_present_wait2
+	if (w->base.surface.present_wait2_supported) {
+		w->wait_calibration = true;
+		w->offset_samples = 0;
+		if (w->offset == NULL) {
+			w->offset = open_trace("cv_offset", "frame_id,sample_ns,filtered_ns,sample_count,accepted");
+		}
+		COMP_WARN(w->base.base.c, "WSI present-wait calibration on");
+		return;
+	}
+#endif
+	COMP_WARN(w->base.base.c, "WSI present-wait calibration requested, but present-wait is unavailable");
+}
+
+static void
+latency_drain_setup(struct comp_window_macos_wsi *w)
+{
+	present_wait_calibration_setup(w);
+	if (!debug_get_bool_option_macos_wsi_latency_drain() || w->drain_enabled) {
+		return;
+	}
+#ifdef VK_KHR_present_wait2
+	if (w->base.surface.present_wait2_supported) {
+		int64_t sustain_ms = debug_get_num_option_macos_wsi_latency_drain_sustain_ms();
+		int64_t cooldown_ms = debug_get_num_option_macos_wsi_latency_drain_cooldown_ms();
+		sustain_ms = sustain_ms < 0 ? 0 : sustain_ms;
+		cooldown_ms = cooldown_ms < 0 ? 0 : cooldown_ms;
+		comp_latency_drain_init(&w->drain, sustain_ms * U_TIME_1MS_IN_NS, cooldown_ms * U_TIME_1MS_IN_NS);
+		w->drain_enabled = true;
+		w->drain_trace = open_trace("latency_drain", "frame_id,event_ns,backlog_ns,skip_ns,drains");
+		COMP_WARN(w->base.base.c, "WSI latency drain on: sustain %" PRIi64 " ms, cooldown %" PRIi64 " ms",
+		          sustain_ms, cooldown_ms);
+		return;
+	}
+#endif
+	COMP_WARN(w->base.base.c, "WSI latency drain requested, but present-wait is unavailable; leaving it off");
+}
+
 static void
 create_images(struct comp_target *ct, const struct comp_target_create_images_info *info, struct vk_bundle_queue *queue)
 {
@@ -520,6 +610,7 @@ create_images(struct comp_target *ct, const struct comp_target_create_images_inf
 	if (w->base.swapchain.handle == VK_NULL_HANDLE) {
 		return;
 	}
+	latency_drain_setup(w);
 	if (private_output) {
 		VkImageView destinations[XRT_MAX_SWAPCHAIN_IMAGES];
 		if (ct->image_count > ARRAY_SIZE(destinations)) {
@@ -636,6 +727,84 @@ acquire(struct comp_target *ct, uint32_t *index)
 	return ret;
 }
 
+static void
+present_wait_calibrate(struct comp_window_macos_wsi *w, int64_t now, const bool *shown)
+{
+	int64_t desired[WSI_PRESENT_WAIT_LOOKBACK];
+	bool flags[WSI_PRESENT_WAIT_LOOKBACK];
+	uint32_t count = 0;
+	for (int64_t k = 1; k <= WSI_PRESENT_WAIT_LOOKBACK; k++) {
+		int64_t id = w->base.current_frame_id - k;
+		uint32_t slot = (uint64_t)id % WSI_TIMING_HISTORY;
+		if (w->history[slot].id != id || w->history[slot].desired_ns <= 0) {
+			continue;
+		}
+		desired[count] = w->history[slot].desired_ns;
+		flags[count] = shown[k - 1];
+		count++;
+	}
+	int64_t sample_ns = comp_present_wait_delay_estimate(now, w->period_ns, desired, flags, count);
+	bool accepted = sample_ns > 0 && sample_ns <= w->period_ns * 4;
+	if (accepted) {
+		// Same filter as the display-timing calibration above.
+		w->calibrated_offset_ns = w->offset_samples == 0 ? sample_ns : (w->calibrated_offset_ns * 7 + sample_ns) / 8;
+		if (w->offset_samples < UINT32_MAX) {
+			w->offset_samples++;
+		}
+		if (w->offset_samples >= 8 && w->base.upc != NULL) {
+			u_pc_update_present_offset(w->base.upc, w->base.current_frame_id, w->calibrated_offset_ns);
+		}
+	}
+	if (w->offset != NULL) {
+		fprintf(w->offset, "%" PRIi64 ",%" PRIi64 ",%" PRIi64 ",%u,%d\n", w->base.current_frame_id, sample_ns,
+		        w->calibrated_offset_ns, w->offset_samples, accepted);
+	}
+}
+
+static void
+present_wait_check(struct comp_window_macos_wsi *w)
+{
+#ifdef VK_KHR_present_wait2
+	if ((!w->drain_enabled && !w->wait_calibration) || w->base.current_frame_id <= WSI_PRESENT_WAIT_LOOKBACK) {
+		return;
+	}
+	struct vk_bundle *vk = &w->base.base.c->base.vk;
+	bool shown[WSI_PRESENT_WAIT_LOOKBACK];
+	for (int64_t k = 1; k <= WSI_PRESENT_WAIT_LOOKBACK; k++) {
+		VkPresentWait2InfoKHR info = {
+		    .sType = VK_STRUCTURE_TYPE_PRESENT_WAIT_2_INFO_KHR,
+		    .presentId = (uint64_t)(w->base.current_frame_id - k),
+		    .timeout = 0,
+		};
+		VkResult ret = vk->vkWaitForPresent2KHR(vk->device, w->base.swapchain.handle, &info);
+		if (ret != VK_SUCCESS && ret != VK_TIMEOUT) {
+			return;
+		}
+		shown[k - 1] = ret == VK_SUCCESS;
+	}
+	int64_t now = os_monotonic_get_ns();
+	if (w->wait_calibration) {
+		present_wait_calibrate(w, now, shown);
+	}
+	if (!w->drain_enabled) {
+		return;
+	}
+	int64_t since = w->drain.backlog_since_ns;
+	if (!comp_latency_drain_observe(&w->drain, now, !shown[WSI_LATENCY_DRAIN_LOOKBACK - 1])) {
+		return;
+	}
+	int64_t period = w->period_ns > 0 ? w->period_ns : (int64_t)w->base.base.c->frame_interval_ns;
+	// Holding the compositor for a refresh leaves one refresh without a new present.
+	os_nanosleep(period);
+	if (w->drain_trace != NULL) {
+		fprintf(w->drain_trace, "%" PRIi64 ",%" PRIi64 ",%" PRIi64 ",%" PRIi64 ",%u\n", w->base.current_frame_id,
+		        now, now - since, period, w->drain.drains);
+	}
+#else
+	(void)w;
+#endif
+}
+
 static VkResult
 present(struct comp_target *ct,
         struct vk_bundle_queue *queue,
@@ -697,6 +866,9 @@ present(struct comp_target *ct,
 		fprintf(w->feedback, "submit,%" PRIi64 ",%llu,%" PRIi64 ",0,%llu,%llu,0,0,%d,0,0,%" PRIi64 "\n",
 		        w->base.current_frame_id, (unsigned long long)end, desired, (unsigned long long)begin,
 		        (unsigned long long)end, ret, slop);
+	}
+	if (ret == VK_SUCCESS || ret == VK_SUBOPTIMAL_KHR) {
+		present_wait_check(w);
 	}
 	return ret;
 }
