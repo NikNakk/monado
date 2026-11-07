@@ -42,10 +42,12 @@ struct comp_latency_drain
 static inline void
 comp_latency_drain_init(struct comp_latency_drain *d, int64_t sustain_ns, int64_t cooldown_ns)
 {
-	*d = (struct comp_latency_drain){
-	    .sustain_ns = sustain_ns,
-	    .cooldown_ns = cooldown_ns,
-	};
+	// Field assignment rather than a compound literal: the tests include this from C++.
+	d->sustain_ns = sustain_ns;
+	d->cooldown_ns = cooldown_ns;
+	d->backlog_since_ns = 0;
+	d->last_drain_ns = 0;
+	d->drains = 0;
 }
 
 /*!

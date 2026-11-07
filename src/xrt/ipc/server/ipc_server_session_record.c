@@ -119,8 +119,8 @@ bind_hand(struct ipc_server_session_record *rec, struct record_hand *hand, struc
 			hand->thumbstick_click = (int)i;
 		}
 	}
-	U_LOG_I("Session record: %s hand is '%s' (%u poses, %u inputs)", hand->key, xdev->str, hand->pose_count,
-	        xdev->input_count);
+	U_LOG_I("Session record: %s hand is '%s' (%u poses, %zu inputs)", hand->key, xdev->str, hand->pose_count,
+	        (size_t)xdev->input_count);
 }
 
 static bool

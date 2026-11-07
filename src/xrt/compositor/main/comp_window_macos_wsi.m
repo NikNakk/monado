@@ -346,7 +346,7 @@ wake_display(struct comp_target *ct, CGDirectDisplayID display)
 	}
 	COMP_WARN(ct->c, "Headset display %u was asleep; waking it", display);
 	bool awake = false;
-	int64_t deadline = os_monotonic_get_ns() + 5 * U_TIME_1S_IN_NS;
+	int64_t deadline = os_monotonic_get_ns() + 5 * (int64_t)U_TIME_1S_IN_NS;
 	while (!awake && os_monotonic_get_ns() < deadline) {
 		awake = CGDisplayIsActive(display) && !CGDisplayIsAsleep(display);
 		if (!awake) {
