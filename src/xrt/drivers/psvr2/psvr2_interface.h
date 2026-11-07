@@ -174,6 +174,14 @@ bool
 psvr2_set_teardown_hook(struct xrt_device *xdev, void (*hook)(void *data), void *data);
 
 /*!
+ * Replay mode for repeatable tests: the headset keeps driving its display (refresh, distortion, brightness), but its
+ * head pose is taken from @p replay_head (for example the remote driver's HMD fed by a recorded session). Eye gaze is
+ * reported untracked so foveation is the same every run. Call before the system is in use.
+ */
+bool
+psvr2_set_replay_head(struct xrt_device *xdev, struct xrt_device *replay_head);
+
+/*!
  * Probing function for PlayStation VR2 devices.
  *
  * @ingroup drv_psvr2

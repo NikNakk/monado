@@ -345,6 +345,8 @@ struct psvr2_hmd
 	//! Run first in destroy, while every other device still exists (psvr2_set_teardown_hook).
 	void (*teardown_hook)(void *data);
 	void *teardown_hook_data;
+	//! Replay mode: head pose comes from this device (psvr2_set_replay_head); gaze is reported untracked.
+	struct xrt_device *replay_head;
 	uint32_t last_camera_event_vts_us;
 	uint32_t last_camera_event_sequence;
 

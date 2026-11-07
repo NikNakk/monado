@@ -164,6 +164,16 @@ psvr2_set_teardown_hook(struct xrt_device *xdev, void (*hook)(void *data), void 
 	return true;
 }
 
+bool
+psvr2_set_replay_head(struct xrt_device *xdev, struct xrt_device *replay_head)
+{
+	if (xdev == NULL || strstr(xdev->str, "PS VR2") == NULL) {
+		return false;
+	}
+	psvr2_hmd(xdev)->replay_head = replay_head;
+	return true;
+}
+
 
 int
 psvr2_found(struct xrt_prober *xp,
