@@ -1,3 +1,9 @@
+<!--
+Copyright 2026, Nick Kennedy
+
+SPDX-License-Identifier: BSL-1.0
+-->
+
 # Session recording and stage coordinates
 
 `XRT_SESSION_RECORD_DIR` enables the optional server-side JSONL input recorder.
