@@ -20,7 +20,7 @@ jobs:
       VCPKG_DEFAULT_BINARY_CACHE: ${{ github.workspace }}\vcpkg-binary-cache
       VCPKG_BINARY_SOURCES: clear;files,${{ github.workspace }}\vcpkg-binary-cache,readwrite
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       # vcpkg.json pins a builtin-baseline, which needs the vcpkg registry's
       # history.
@@ -33,7 +33,7 @@ jobs:
           New-Item -ItemType Directory -Force -Path $env:VCPKG_DEFAULT_BINARY_CACHE | Out-Null
 
       - name: Restore vcpkg binary cache
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: vcpkg-binary-cache
           key: vcpkg-windows-${{ hashFiles('vcpkg.json') }}
