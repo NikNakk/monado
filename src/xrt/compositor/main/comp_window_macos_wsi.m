@@ -6,6 +6,7 @@
  * @ingroup comp_main
  */
 #import <CoreVideo/CoreVideo.h>
+#include <IOKit/pwr_mgt/IOPMLib.h>
 #import <Metal/Metal.h>
 #include <mach/mach_time.h>
 #include <stdatomic.h>
@@ -325,12 +326,49 @@ check_ready(struct comp_target *ct)
 	return w->ops.check_ready(ct);
 }
 
+/*
+ * Idle display sleep also sleeps the headset's display, and an asleep display
+ * cannot change mode or present. When an application starts while the Mac's
+ * displays are asleep, wake them as user activity does.
+ */
+static bool
+wake_display(struct comp_target *ct, CGDirectDisplayID display)
+{
+	if (CGDisplayIsActive(display) && !CGDisplayIsAsleep(display)) {
+		return true;
+	}
+	IOPMAssertionID activity = kIOPMNullAssertionID;
+	IOReturn ret = IOPMAssertionDeclareUserActivity(CFSTR("Monado: XR application starting"),
+	                                                kIOPMUserActiveLocal, &activity);
+	if (ret != kIOReturnSuccess) {
+		COMP_ERROR(ct->c, "Headset display %u is asleep and could not be woken (0x%x)", display, ret);
+		return false;
+	}
+	COMP_WARN(ct->c, "Headset display %u was asleep; waking it", display);
+	bool awake = false;
+	int64_t deadline = os_monotonic_get_ns() + 5 * U_TIME_1S_IN_NS;
+	while (!awake && os_monotonic_get_ns() < deadline) {
+		awake = CGDisplayIsActive(display) && !CGDisplayIsAsleep(display);
+		if (!awake) {
+			os_nanosleep(50 * U_TIME_1MS_IN_NS);
+		}
+	}
+	IOPMAssertionRelease(activity);
+	if (!awake) {
+		COMP_ERROR(ct->c, "Headset display %u did not wake within 5 s", display);
+	}
+	return awake;
+}
+
 static bool
 init_window(struct comp_target *ct)
 {
 	struct comp_window_macos_wsi *w = from_target(ct);
 	w->frontend = comp_macos_frontend_create(ct->c, w->hosted_client, &w->frontend_info);
 	if (w->frontend == NULL) {
+		return false;
+	}
+	if (!wake_display(ct, w->frontend_info.display_id)) {
 		return false;
 	}
 	CAMetalLayer *layer = w->frontend_info.metal_layer;

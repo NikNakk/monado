@@ -85,6 +85,7 @@ if(APPLE)
 			"-framework AppKit"
 			"-framework CoreGraphics"
 			"-framework CoreVideo"
+			"-framework IOKit"
 			"-framework Metal"
 			"-framework MetalKit"
 			"-framework QuartzCore"
