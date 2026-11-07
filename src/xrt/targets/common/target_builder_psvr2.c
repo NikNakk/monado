@@ -22,6 +22,10 @@
 
 #include "psvr2/psvr2_interface.h"
 
+#ifdef XRT_BUILD_DRIVER_REMOTE
+#include "remote/r_interface.h"
+#endif
+
 #ifdef XRT_BUILD_DRIVER_PSSENSE
 #include "pssense/pssense_interface.h"
 #include "target_psvr2_sense_tracking.h"
@@ -56,6 +60,77 @@ DEBUG_GET_ONCE_LOG_OPTION(psvr2_log, "PSVR2_LOG", U_LOGGING_WARN)
 
 #define PSVR2_ERROR(p, ...) U_LOG_IFL_E(p->log_level, __VA_ARGS__)
 #define PSVR2_DEBUG(p, ...) U_LOG_IFL_D(p->log_level, __VA_ARGS__)
+
+/*!
+ * Replay on the real headset display: when set, the remote driver listens on this port (as with
+ * P_OVERRIDE_ACTIVE_CONFIG=remote) and supplies the head pose and both controllers, while the PS VR2 keeps its display,
+ * distortion and refresh. Sense controllers are not opened. Used for repeatable pacing comparisons.
+ */
+DEBUG_GET_ONCE_NUM_OPTION(psvr2_replay_remote_port, "PSVR2_REPLAY_REMOTE_PORT", 0)
+
+#ifdef XRT_BUILD_DRIVER_REMOTE
+static void
+psvr2_replay_teardown(void *data)
+{
+	struct xrt_system_devices *remote = data;
+	xrt_system_devices_destroy(&remote);
+}
+
+/*!
+ * Feed @p head_xdev's pose from a remote hub and put the hub's controllers into @p xsysd. The hub keeps its own HMD
+ * (pose source only) and is destroyed by the headset's teardown hook; the controllers move to @p xsysd and do not use
+ * the hub when destroyed.
+ */
+static bool
+psvr2_replay_open(struct psvr2_builder *pb,
+                  uint16_t port,
+                  struct xrt_device *head_xdev,
+                  struct xrt_system_devices *xsysd,
+                  struct xrt_device **out_left,
+                  struct xrt_device **out_right)
+{
+	struct xrt_system_devices *remote = NULL;
+	struct xrt_hmd_parts *parts = head_xdev->hmd;
+	uint32_t w = parts != NULL && parts->views[0].display.w_pixels > 0 ? parts->views[0].display.w_pixels : 2000;
+	uint32_t h = parts != NULL && parts->views[0].display.h_pixels > 0 ? parts->views[0].display.h_pixels : 2040;
+	if (r_create_devices(port, 2, w, h, 0.13f, 0.07f, &remote) != XRT_SUCCESS || remote == NULL) {
+		PSVR2_ERROR(pb, "PSVR2_REPLAY_REMOTE_PORT: could not start the remote hub on port %u", port);
+		return false;
+	}
+
+	struct xrt_device *remote_head = remote->static_roles.head;
+	struct xrt_device *left = remote->static_roles.hand_tracking.conforming.left;
+	struct xrt_device *right = remote->static_roles.hand_tracking.conforming.right;
+	if (remote_head == NULL || left == NULL || right == NULL ||
+	    xsysd->static_xdev_count + 2 > ARRAY_SIZE(xsysd->static_xdevs) ||
+	    !psvr2_set_teardown_hook(head_xdev, psvr2_replay_teardown, remote)) {
+		PSVR2_ERROR(pb, "PSVR2_REPLAY_REMOTE_PORT: could not attach the remote hub");
+		xrt_system_devices_destroy(&remote);
+		return false;
+	}
+
+	// Hand the controllers over; the hub must not destroy them.
+	for (uint32_t i = 0; i < remote->static_xdev_count; i++) {
+		if (remote->static_xdevs[i] == left || remote->static_xdevs[i] == right) {
+			remote->static_xdevs[i] = NULL;
+		}
+	}
+
+	// One tracking origin, so replayed head and controller poses stay in the same space.
+	left->tracking_origin = head_xdev->tracking_origin;
+	right->tracking_origin = head_xdev->tracking_origin;
+	xsysd->static_xdevs[xsysd->static_xdev_count++] = left;
+	xsysd->static_xdevs[xsysd->static_xdev_count++] = right;
+
+	(void)psvr2_set_replay_head(head_xdev, remote_head);
+	U_LOG_W("PSVR2_REPLAY_REMOTE_PORT=%u: PS VR2 display with replayed head and controller poses; Sense and gaze off",
+	        port);
+
+	*out_left = left;
+	*out_right = right;
+	return true;
+}
+#endif
 
 static const char *driver_list[] = {
     "psvr2",
@@ -156,6 +231,27 @@ psvr2_open_system_impl(struct xrt_builder *xb,
 	tbo->eyes = head_xdev;
 	if (head_xdev != NULL && head_xdev->supported.face_tracking) {
 		tbo->face = head_xdev;
+	}
+
+	int64_t replay_port = debug_get_num_option_psvr2_replay_remote_port();
+	if (replay_port != 0) {
+#ifdef XRT_BUILD_DRIVER_REMOTE
+		struct xrt_device *left = NULL;
+		struct xrt_device *right = NULL;
+		if (replay_port < 1 || replay_port > 65535 || head_xdev == NULL ||
+		    !psvr2_replay_open(psvr2_builder(xb), (uint16_t)replay_port, head_xdev, xsysd, &left, &right)) {
+			PSVR2_ERROR(psvr2_builder(xb), "PSVR2_REPLAY_REMOTE_PORT=%lld needs a PS VR2 and a free port",
+			            (long long)replay_port);
+			goto unlock_and_fail;
+		}
+		tbo->left = left;
+		tbo->right = right;
+		xret = xrt_prober_unlock_list(xp, &xpdevs);
+		return xret == XRT_SUCCESS ? XRT_SUCCESS : XRT_ERROR_DEVICE_CREATION_FAILED;
+#else
+		PSVR2_ERROR(psvr2_builder(xb), "PSVR2_REPLAY_REMOTE_PORT needs the remote driver");
+		goto unlock_and_fail;
+#endif
 	}
 
 #ifdef XRT_BUILD_DRIVER_PSSENSE
