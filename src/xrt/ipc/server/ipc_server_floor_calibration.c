@@ -146,6 +146,16 @@ run_floor_calibration(void *ptr)
 			// floor, so a calibration taken while seated can be redone standing.
 			float eye_height = fcal->fc.eye_height_m;
 			xrt_result_t ret = u_stage_recenter(fcal->xso, fcal->head, now_ns, eye_height);
+			if (ret == XRT_SUCCESS) {
+				// A user recenter moves LOCAL in OpenXR (and on Quest and
+				// SteamVR's seated origin). Apps that follow it there, as Unity
+				// does once recentering is allowed, need it moved too; STAGE
+				// users only see an extra LOCAL change event.
+				xrt_result_t local_ret = xrt_space_overseer_recenter_local_spaces(fcal->xso);
+				if (local_ret != XRT_SUCCESS) {
+					U_LOG_W("LOCAL recenter refused (%d); STAGE was still recentred.", local_ret);
+				}
+			}
 			if (ret == XRT_SUCCESS && eye_height > 0.0f) {
 				U_LOG_I("STAGE recentered from right Sense Options hold, floor %.2f m below the head.",
 				        eye_height);
