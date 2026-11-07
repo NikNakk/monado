@@ -171,3 +171,22 @@ Files: src/xrt/auxiliary/bindings/rebindings/*
 Copyright: 2026, NVIDIA CORPORATION.
 License: BSL-1.0 OR CC0-1.0
 Comment: JSON data files cannot carry SPDX headers cleanly.
+
+Files: doc/alyx-arm64-static-results/* doc/alyx-constrained-host-results/* doc/alyx-strict-vulkan-results/* doc/alyx-valve-lua-results/* doc/alyx-vulkan-results/*
+Copyright: No copyright
+License: CC0-1.0
+Comment: Generated logs, traces and measurements from native Alyx investigations.
+
+Files: experiments/alyx-vulkan/patches/klepton-*.patch experiments/alyx-vulkan/patches/verantyx-*.patch
+Copyright: 2026, Nick Kennedy
+License: MIT
+Comment: Patches against Klepton and VeRantyx, which are MIT licensed.
+
+Files: experiments/alyx-vulkan/patches/xrizer-*.patch
+Copyright: 2026, Nick Kennedy
+License: GPL-3.0-or-later
+Comment: Patches against xrizer, which is GPL-3.0-or-later.
+
+Files: experiments/alyx-vulkan/driver-benchmark/.gitignore experiments/alyx-vulkan/patches/.gitattributes
+Copyright: No copyright
+License: CC0-1.0
