@@ -37,7 +37,7 @@ jobs:
               -DXRT_FEATURE_OPENXR_LAYER_DEPTH=ON
               -DXRT_FEATURE_MACOS_TIMING_DIAGNOSTICS=ON
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Install dependencies
         run: >-
