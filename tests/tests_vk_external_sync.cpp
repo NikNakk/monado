@@ -30,6 +30,12 @@ queues(VkPhysicalDevice, uint32_t *count, VkQueueFamilyProperties *p)
 	}
 	*count = 1;
 }
+VKAPI_ATTR void VKAPI_CALL
+formats(VkPhysicalDevice, VkFormat, VkFormatProperties *p)
+{
+	// No features: the external-image probe on FD platforms stops early.
+	*p = {};
+}
 VKAPI_ATTR VkResult VKAPI_CALL
 images(VkPhysicalDevice, const VkPhysicalDeviceImageFormatInfo2 *, VkImageFormatProperties2 *)
 {
@@ -75,6 +81,7 @@ instance_proc(VkInstance, const char *name)
 	PROC("vkGetPhysicalDeviceProperties", properties);
 	PROC("vkGetPhysicalDeviceMemoryProperties", memory);
 	PROC("vkGetPhysicalDeviceQueueFamilyProperties", queues);
+	PROC("vkGetPhysicalDeviceFormatProperties", formats);
 	PROC("vkGetPhysicalDeviceImageFormatProperties2", images);
 	PROC("vkGetPhysicalDeviceImageFormatProperties2KHR", images);
 	PROC("vkGetPhysicalDeviceExternalFencePropertiesKHR", fences);
