@@ -64,8 +64,13 @@ u_session_mark_frame_tick(void)
 bool
 u_session_mark_wait_frame(int64_t timeout_ns)
 {
+	// pthread_cond_timedwait takes an absolute CLOCK_REALTIME deadline.
 	struct timespec deadline;
+#ifdef _WIN32
+	timespec_get(&deadline, TIME_UTC);
+#else
 	clock_gettime(CLOCK_REALTIME, &deadline);
+#endif
 	int64_t ns = deadline.tv_nsec + timeout_ns;
 	deadline.tv_sec += ns / 1000000000;
 	deadline.tv_nsec = ns % 1000000000;

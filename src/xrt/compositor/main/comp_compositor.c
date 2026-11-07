@@ -51,8 +51,8 @@
 #include "math/m_api.h"
 
 #include "os/os_time.h"
-#ifdef XRT_OS_OSX
 #include "util/u_session_mark.h"
+#ifdef XRT_OS_OSX
 #include "util/comp_metal_semaphore_probe.h"
 #endif
 

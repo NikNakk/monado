@@ -15,6 +15,11 @@
 #include <stdlib.h>
 #include <string.h>
 
+#ifdef _MSC_VER
+// MSVC's strtok_s has the POSIX strtok_r signature.
+#define strtok_r strtok_s
+#endif
+
 static pthread_mutex_t g_mutex = PTHREAD_MUTEX_INITIALIZER;
 static u_desktop_input_handler_t g_handler = NULL;
 static void *g_ctx = NULL;
