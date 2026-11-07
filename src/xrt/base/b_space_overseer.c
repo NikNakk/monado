@@ -926,6 +926,44 @@ ref_space_dec(struct xrt_space_overseer *xso, enum xrt_reference_space_type type
 	return XRT_SUCCESS;
 }
 
+/*!
+ * Put a LOCAL or LOCAL_FLOOR offset space under the head, facing the head's
+ * yaw, keeping its height. Computed in the space's own parent so it works for
+ * the shared spaces and per-application ones parented elsewhere.
+ */
+static bool
+recenter_local_space_locked(struct b_space_overseer *uso, struct u_space *us, struct u_space *uview, int64_t ns)
+{
+	if (us == NULL || us == uview || !space_is_offset_compatible(us) || us->next == NULL) {
+		return false;
+	}
+
+	struct xrt_relation_chain xrc = {0};
+	build_relation_chain_read_locked(uso, &xrc, us->next, uview, ns);
+
+	struct xrt_space_relation rel;
+	special_resolve(&xrc, &rel);
+
+	bool pos_valid = (rel.relation_flags & XRT_SPACE_RELATION_POSITION_VALID_BIT) != 0;
+	bool ori_valid = (rel.relation_flags & XRT_SPACE_RELATION_ORIENTATION_VALID_BIT) != 0;
+	if (!pos_valid || !ori_valid) {
+		return false;
+	}
+
+	// Only keep the rotation around the y axis.
+	rel.pose.orientation.x = 0;
+	rel.pose.orientation.z = 0;
+	math_quat_normalize(&rel.pose.orientation);
+
+	struct xrt_pose offset;
+	get_offset_or_ident_read_locked(us, &offset);
+	offset.orientation = rel.pose.orientation;
+	offset.position.x = rel.pose.position.x;
+	offset.position.z = rel.pose.position.z; // Keep y the same.
+	update_offset_write_locked(us, &offset);
+	return true;
+}
+
 static xrt_result_t
 recenter_local_spaces(struct xrt_space_overseer *xso)
 {
@@ -941,68 +979,31 @@ recenter_local_spaces(struct xrt_space_overseer *xso)
 	}
 
 
-	/*
-	 * We go from the view to the parent of local/local_view,
-	 * they must share the same parent.
-	 */
-
 	uint64_t new_ns = os_monotonic_get_ns();
 	struct u_space *uview = u_space(xso->semantic.view);
-	struct u_space *ulocal = u_space(xso->semantic.local);
-	struct u_space *ulocal_floor = u_space(xso->semantic.local_floor);
-	assert(uview != NULL);
-	assert(ulocal != NULL);
-	assert(ulocal_floor != NULL);
-
-	struct u_space *uparent = ulocal->next;
-	assert(uparent != NULL);
-	assert(uparent == ulocal_floor->next);
-
-
-	/*
-	 * Get the offset of view in the parent space of local and local_floor.
-	 */
-
-	struct xrt_relation_chain xrc = {0};
-	build_relation_chain_read_locked(uso, &xrc, uparent, uview, new_ns);
-
-	struct xrt_space_relation rel;
-	special_resolve(&xrc, &rel);
-
-	bool pos_valid = (rel.relation_flags & XRT_SPACE_RELATION_POSITION_VALID_BIT) != 0;
-	bool ori_valid = (rel.relation_flags & XRT_SPACE_RELATION_ORIENTATION_VALID_BIT) != 0;
-
-	if (!pos_valid || !ori_valid) {
+	if (uview == NULL) {
 		goto err_unlock;
 	}
 
+	/*
+	 * The shared spaces first: refuse the whole recenter if the head can't
+	 * be located, rather than moving some spaces and not others.
+	 */
+	if (!recenter_local_space_locked(uso, u_space(xso->semantic.local), uview, new_ns) ||
+	    !recenter_local_space_locked(uso, u_space(xso->semantic.local_floor), uview, new_ns)) {
+		goto err_unlock;
+	}
 
 	/*
-	 * Calculate new offsets for the spaces.
+	 * Per-application spaces are offset spaces of their own (LOCAL under
+	 * root, LOCAL_FLOOR under a managed stage), so each is moved in its own
+	 * parent. Without this a running application's LOCAL never follows a
+	 * recenter, though it receives the change event below.
 	 */
-
-	// Only save the rotation around y axis.
-	rel.pose.orientation.x = 0;
-	rel.pose.orientation.z = 0;
-	math_quat_normalize(&rel.pose.orientation);
-
-	struct xrt_pose local_offset, local_floor_offset;
-	get_offset_or_ident_read_locked(ulocal, &local_offset);
-	get_offset_or_ident_read_locked(ulocal_floor, &local_floor_offset);
-
-	// Take the "flat" rotations and apply to both.
-	local_offset.orientation = rel.pose.orientation;
-	local_floor_offset.orientation = rel.pose.orientation;
-
-	// Keep y offset the same.
-	local_offset.position.x = rel.pose.position.x;
-	local_offset.position.z = rel.pose.position.z;
-	local_floor_offset.position.x = rel.pose.position.x;
-	local_floor_offset.position.z = rel.pose.position.z;
-
-	// Update the offsets.
-	update_offset_write_locked(ulocal, &local_offset);
-	update_offset_write_locked(ulocal_floor, &local_floor_offset);
+	for (int id = 0; id < XRT_MAX_CLIENT_SPACES; id++) {
+		recenter_local_space_locked(uso, u_space(xso->localspace[id]), uview, new_ns);
+		recenter_local_space_locked(uso, u_space(xso->localfloorspace[id]), uview, new_ns);
+	}
 
 	// Push the events.
 	union xrt_session_event xse = XRT_STRUCT_INIT;
