@@ -50,6 +50,101 @@ the blocking Metal bridge and its `XRT_MACOS_WSI_PASSTHROUGH_VERIFY` /
 settings; see [the test procedure and default-switch plan](macos-wsi-migration.md#calibrated-wsi-passthrough-prepared-16-october-2026).
 Sleep/disconnect recovery requires restart.
 
+## Adaptive application margin (6 November 2026)
+
+On by default on macOS, opt-in elsewhere. The application pacer normally plans
+each frame from averaged CPU/draw/GPU times plus a fixed margin, so any frame
+that overruns the average by more than the margin misses its compositor latch.
+With the adaptive margin it becomes a quantile of recent overshoots (actual
+minus predicted GPU-done time, last 360 frames) plus 0.25 ms: it rises at once
+and falls by 0.02 ms per frame. The `app_pacing` timing trace records the
+margin in use (`margin_ns`). Set `U_PACING_APP_ADAPTIVE_MARGIN=0` for the old
+fixed margin.
+
+| Variable | Default | Effect |
+| --- | --- | --- |
+| `U_PACING_APP_ADAPTIVE_MARGIN` | `1` on macOS, `0` elsewhere | Enable the adaptive margin. |
+| `U_PACING_APP_ADAPTIVE_QUANTILE` | `0.98` | Share of frames the margin aims to cover (0.5–0.999). |
+| `U_PACING_APP_MIN_MARGIN_MS` | `2` | Floor for the adaptive margin (the fixed margin when disabled). |
+| `U_PACING_APP_MAX_MARGIN_MS` | `10` | Ceiling for the adaptive margin. |
+
+## Compositor GPU priority with KosmicKrisp (6 November 2026)
+
+On macOS `monado-service` sets `KK_GPU_QUEUE_PRIORITY=0` for its own process
+at startup unless the variable already has a value, so the compositor's
+KosmicKrisp Metal queues get the highest private GPU priority while
+applications keep theirs. `KK_GPU_QUEUE_PRIORITY=-1` keeps the driver default.
+KosmicKrisp logs `kk: GPU queue priority requested=0`. `XRT_MACOS_GPU_QUEUE_PRIORITY`
+cannot do this: it reaches MoltenVK's queue but not KosmicKrisp's.
+
+With Alyx on the PS VR2 priority 0 cut the compositor's GPU-time tail by about
+two thirds with no loss of game frames. It is untested with MoltenVK, which
+ignores the variable.
+
+## WSI display link and present-wait calibration (6 November 2026)
+
+The generic WSI presenter now takes vblank times from CADisplayLink by
+default, like the native presenter since October; `XRT_MACOS_DISPLAY_LINK=cv`
+keeps CVDisplayLink. CADisplayLink's timestamp is the previous refresh and is
+used directly; CVDisplayLink still supplies the exact nominal period. The
+service log says which is in use (`WSI display link: ...`).
+
+Without `VK_GOOGLE_display_timing` (KosmicKrisp has none) the WSI presenter
+predicts display at the desired present time plus the fixed 4 ms
+`U_PACING_COMP_PRESENT_TO_DISPLAY_OFFSET_MS`. On the PS VR2 frames actually
+reach the display 18–29 ms later than that, so timewarp and application poses
+are predicted too early. `XRT_MACOS_WSI_PRESENT_WAIT_CALIBRATION=1` measures
+the delay instead: after each present, non-blocking present-waits say which of
+the last four frames have been shown, which bounds the delay to a single whole
+number of refreshes (`comp_present_wait_delay.h`). That sample goes through the
+same 1/8 filter as the display-timing calibration and sets the pacer's present
+offset, so predicted display times follow the queue depth. Samples are traced
+to `cv_offset.csv`. It changes only predicted display times, not wake-up or
+present scheduling. Not used when display-timing feedback is available.
+
+## WSI latency drain (6 November 2026)
+
+Opt-in, generic WSI presenters with present-wait (KosmicKrisp has it).
+Measured with KosmicKrisp's `MESA_VK_WSI_METAL_PRESENT_TRACE`, frames on the
+PS VR2 reach the display 2 refreshes after their desired time, or 3 for long
+stretches after a display-side stall. The native presenter's October latency
+guard (see `macos-three-image-comparison.md`) showed that holding back one
+present recovers that refresh; this does the same for WSI.
+
+After each present the compositor checks, without blocking
+(`vkWaitForPresent2KHR`, timeout 0), whether the frame presented three
+presents earlier has been shown. Normally it has, by most of a refresh; in the
+backlog it has not. Once that lasts the sustain time, and the cooldown has
+passed since the last drain, the compositor thread sleeps one refresh, so one
+refresh gets no new present. Each drain costs one repeated refresh. Drains are
+traced to `latency_drain.csv` and the effective setting is logged.
+
+| Variable | Default | Effect |
+| --- | --- | --- |
+| `XRT_MACOS_WSI_LATENCY_DRAIN` | `0` | Enable the drain. |
+| `XRT_MACOS_WSI_LATENCY_DRAIN_SUSTAIN_MS` | `500` | How long the backlog must last first. |
+| `XRT_MACOS_WSI_LATENCY_DRAIN_COOLDOWN_MS` | `1000` | Minimum time between drains. |
+
+## Application frame wait (6 November 2026)
+
+No toggle. On macOS the application's frame thread waits for its `xrWaitFrame`
+wake-up time with a kqueue `EVFILT_TIMER` using `NOTE_CRITICAL` and zero
+leeway, falling back to `u_wait_until` if the timer cannot be armed. That
+thread is not real-time, and a plain timed sleep (`mach_wait_until`) is
+coalesced by the kernel and wakes 1-3 ms late, which the pacer then covers
+with margin (latency). The critical timer is exempt from coalescing, keeps the
+thread's own priority and uses no extra CPU.
+
+Alyx with KK on the PS VR2 (replayed motion, 90 Hz, adaptive margin, KK
+compositor GPU priority 0, 2 trials each): the median late wake fell from
+1.7 ms to 0.05 ms, and with the 2 ms floor the median adaptive margin from
+5.1 to 2.6 ms and wake-to-display from 24.4 to 21.5 ms, with the same frame
+delivery (87.5 fresh frames/s). Alternatives tried and removed: spinning the
+last 1.5 ms (0.65 ms late, costs CPU), a real-time helper thread (as good
+without the headset, not tried on it), and switching the thread to real-time
+for the wait (on time, but 82 fresh frames/s and 7% repeated frames on the
+headset).
+
 ## Private compositor scratch candidate (24 October 2026)
 
 `XRT_MACOS_COMPOSITOR_PRIVATE_SCRATCH=1` (default `0`, macOS only) keeps

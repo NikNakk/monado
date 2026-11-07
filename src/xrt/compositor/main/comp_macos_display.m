@@ -1,17 +1,47 @@
 // Copyright 2026, Nick Kennedy
 // SPDX-License-Identifier: BSL-1.0
 #include "main/comp_macos_display.h"
+#import <AppKit/AppKit.h>
 #import <CoreVideo/CoreVideo.h>
+#import <QuartzCore/QuartzCore.h>
 #include <mach/mach_time.h>
 #include <math.h>
 #include <stdlib.h>
+#include <string.h>
 #include "os/os_time.h"
+#include "util/u_debug.h"
+#include "util/u_logging.h"
+
+DEBUG_GET_ONCE_OPTION(macos_display_link_kind, "XRT_MACOS_DISPLAY_LINK", "ca")
+
+struct comp_macos_display_link;
+
+/*
+ * CADisplayLink source on a run-loop thread of its own. It only supplies
+ * timestamps; drawables and presentation are untouched.
+ */
+API_AVAILABLE(macos(14.0))
+@interface MonadoDisplayLinkCA : NSObject {
+@public
+	struct comp_macos_display_link *_owner;
+	CGDirectDisplayID _display;
+	NSThread *_thread;
+	CADisplayLink *_link;
+	dispatch_semaphore_t _ready;
+	dispatch_semaphore_t _finished;
+	BOOL _created;
+	BOOL _stop;
+	BOOL _running;
+}
+@end
 
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wdeprecated-declarations"
 struct comp_macos_display_link
 {
+	//! Also the nominal period source when CADisplayLink delivers the ticks.
 	CVDisplayLinkRef cv;
+	void *ca;
 	mach_timebase_info_data_t timebase;
 	comp_macos_display_tick tick;
 	void *ctx;
@@ -37,9 +67,106 @@ on_tick(CVDisplayLinkRef cv,
 	(void)flags_out;
 	struct comp_macos_display_link *link = ctx;
 	link->tick(link->ctx, (now->flags & kCVTimeStampHostTimeValid) ? host_ns(link, now->hostTime) : 0,
-	           (output->flags & kCVTimeStampHostTimeValid) ? host_ns(link, output->hostTime) : 0);
+	           (output->flags & kCVTimeStampHostTimeValid) ? host_ns(link, output->hostTime) : 0, false);
 	return kCVReturnSuccess;
 }
+
+@implementation MonadoDisplayLinkCA
+
+- (instancetype)initWithOwner:(struct comp_macos_display_link *)owner display:(CGDirectDisplayID)display
+{
+	self = [super init];
+	if (self == nil) {
+		return nil;
+	}
+	_owner = owner;
+	_display = display;
+	_ready = dispatch_semaphore_create(0);
+	_finished = dispatch_semaphore_create(0);
+	_thread = [[NSThread alloc] initWithTarget:self selector:@selector(threadMain) object:nil];
+	_thread.name = @"Monado WSI CADisplayLink";
+	_thread.qualityOfService = NSQualityOfServiceUserInteractive;
+	[_thread start];
+	dispatch_semaphore_wait(_ready, DISPATCH_TIME_FOREVER);
+	if (!_created) {
+		dispatch_semaphore_wait(_finished, DISPATCH_TIME_FOREVER);
+		[self release];
+		return nil;
+	}
+	return self;
+}
+
+- (void)dealloc
+{
+	[_thread release];
+	[_link release];
+	dispatch_release(_ready);
+	dispatch_release(_finished);
+	[super dealloc];
+}
+
+- (void)threadMain
+{
+	@autoreleasepool {
+		for (NSScreen *screen in [NSScreen screens]) {
+			NSNumber *number = screen.deviceDescription[@"NSScreenNumber"];
+			if (number != nil && number.unsignedIntValue == _display) {
+				_link = [[screen displayLinkWithTarget:self selector:@selector(tick:)] retain];
+				break;
+			}
+		}
+		if (_link != nil) {
+			_link.paused = YES;
+			[_link addToRunLoop:[NSRunLoop currentRunLoop] forMode:NSDefaultRunLoopMode];
+			_created = YES;
+		}
+		dispatch_semaphore_signal(_ready);
+		while (_created && !_stop) {
+			@autoreleasepool {
+				[[NSRunLoop currentRunLoop] runMode:NSDefaultRunLoopMode beforeDate:[NSDate distantFuture]];
+			}
+		}
+		[_link invalidate];
+	}
+	dispatch_semaphore_signal(_finished);
+}
+
+- (void)tick:(CADisplayLink *)link
+{
+	// Seconds of mach_absolute_time, like CACurrentMediaTime().
+	CFTimeInterval now_s = link.timestamp;
+	CFTimeInterval output_s = link.targetTimestamp;
+	uint64_t now_ns = now_s > 0.0 ? (uint64_t)llround(now_s * 1e9) : 0;
+	uint64_t output_ns = output_s > 0.0 ? (uint64_t)llround(output_s * 1e9) : 0;
+	_owner->tick(_owner->ctx, now_ns, output_ns, now_ns != 0);
+}
+
+- (void)applyPaused:(NSNumber *)paused
+{
+	_link.paused = paused.boolValue;
+}
+
+- (void)applyStop
+{
+	_stop = YES;
+}
+
+- (void)setRunning:(BOOL)running
+{
+	_running = running;
+	[self performSelector:@selector(applyPaused:)
+	             onThread:_thread
+	           withObject:[NSNumber numberWithBool:!running]
+	        waitUntilDone:YES];
+}
+
+- (void)shutdown
+{
+	[self performSelector:@selector(applyStop) onThread:_thread withObject:nil waitUntilDone:NO];
+	dispatch_semaphore_wait(_finished, DISPATCH_TIME_FOREVER);
+}
+
+@end
 
 struct comp_macos_display_link *
 comp_macos_display_link_create(CGDirectDisplayID display, comp_macos_display_tick tick, void *ctx)
@@ -63,13 +190,32 @@ comp_macos_display_link_create(CGDirectDisplayID display, comp_macos_display_tic
 	if (!(period.flags & kCVTimeIsIndefinite) && period.timeValue > 0 && period.timeScale > 0) {
 		link->period_ns = (int64_t)(((__int128)period.timeValue * 1000000000) / period.timeScale);
 	}
+	const char *kind = debug_get_option_macos_display_link_kind();
+	if (kind == NULL || strcmp(kind, "cv") != 0) {
+		if (@available(macOS 14.0, *)) {
+			link->ca = [[MonadoDisplayLinkCA alloc] initWithOwner:link display:display];
+		}
+		if (link->ca == NULL) {
+			U_LOG_W("WSI: CADisplayLink unavailable for display %u; using CVDisplayLink", display);
+		}
+	}
+	U_LOG_W("WSI display link: %s", link->ca != NULL ? "CADisplayLink" : "CVDisplayLink");
 	return link;
 }
 
 void
 comp_macos_display_link_stop(struct comp_macos_display_link *link)
 {
-	if (link != NULL && link->cv != NULL) {
+	if (link == NULL) {
+		return;
+	}
+	if (link->ca != NULL) {
+		if (@available(macOS 14.0, *)) {
+			[(MonadoDisplayLinkCA *)link->ca setRunning:NO];
+		}
+		return;
+	}
+	if (link->cv != NULL) {
 		CVDisplayLinkStop(link->cv);
 	}
 }
@@ -82,6 +228,14 @@ comp_macos_display_link_destroy(struct comp_macos_display_link **ptr)
 		return;
 	}
 	comp_macos_display_link_stop(link);
+	if (link->ca != NULL) {
+		if (@available(macOS 14.0, *)) {
+			MonadoDisplayLinkCA *ca = (MonadoDisplayLinkCA *)link->ca;
+			[ca shutdown];
+			[ca release];
+		}
+		link->ca = NULL;
+	}
 	if (link->cv != NULL) {
 		CVDisplayLinkRelease(link->cv);
 	}
@@ -92,13 +246,30 @@ comp_macos_display_link_destroy(struct comp_macos_display_link **ptr)
 bool
 comp_macos_display_link_start(struct comp_macos_display_link *link)
 {
-	return link != NULL && CVDisplayLinkStart(link->cv) == kCVReturnSuccess;
+	if (link == NULL) {
+		return false;
+	}
+	if (link->ca != NULL) {
+		if (@available(macOS 14.0, *)) {
+			[(MonadoDisplayLinkCA *)link->ca setRunning:YES];
+			return true;
+		}
+	}
+	return CVDisplayLinkStart(link->cv) == kCVReturnSuccess;
 }
 
 bool
 comp_macos_display_link_running(struct comp_macos_display_link *link)
 {
-	return link != NULL && CVDisplayLinkIsRunning(link->cv);
+	if (link == NULL) {
+		return false;
+	}
+	if (link->ca != NULL) {
+		if (@available(macOS 14.0, *)) {
+			return ((MonadoDisplayLinkCA *)link->ca)->_running;
+		}
+	}
+	return CVDisplayLinkIsRunning(link->cv);
 }
 
 int64_t

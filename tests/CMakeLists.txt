@@ -6,6 +6,8 @@
 set(tests
     tests_comp_refresh_request
     tests_present_feedback_correction
+    tests_latency_drain
+    tests_present_wait_delay
     tests_cxx_wrappers
     tests_macos_display_timing
     tests_macos_presenter
