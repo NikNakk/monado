@@ -248,12 +248,50 @@ prior_reacquire(const std::vector<JointSolveCamera> &cameras,
 	return false;
 }
 
+namespace {
+
+	/*!
+	 * Index of the first rival whose fit uses at least half of @p ours' blobs and is at least as good by the
+	 * tracker's contest rule (t_constellation_tracker_joint.cpp: clearly more matches, then the lower RMS), or -1.
+	 */
+	int
+	ambiguous_rival(const JointSolveResult &ours, const std::vector<OrientedBootstrapResult> &rivals)
+	{
+		for (size_t i = 0; i < rivals.size(); i++) {
+			const OrientedBootstrapResult &rival = rivals[i];
+			if (!rival.ok || ours.correspondences.empty()) {
+				continue;
+			}
+			size_t shared = 0;
+			for (const JointSolveMatch &m : ours.correspondences) {
+				for (const JointSolveMatch &n : rival.refined.correspondences) {
+					if (m.camera == n.camera && m.blob == n.blob) {
+						shared++;
+						break;
+					}
+				}
+			}
+			if (shared * 2 < ours.correspondences.size()) {
+				continue; // The rival found its own blobs elsewhere.
+			}
+			const JointSolveResult &b = rival.refined;
+			if (b.matches > ours.matches + 2 ||
+			    (b.matches + 2 >= ours.matches && b.rms_px <= ours.rms_px)) {
+				return (int)i;
+			}
+		}
+		return -1;
+	}
+
+} // namespace
+
 bool
 oriented_bootstrap(const std::vector<JointSolveCamera> &cameras,
                    const t_constellation_tracker_led_model &model,
                    const xrt_quat &Tcv_world_orientation,
                    const OrientedBootstrapParams &params,
-                   OrientedBootstrapResult &out)
+                   OrientedBootstrapResult &out,
+                   const std::vector<OrientedBootstrapRival> *rivals)
 {
 	out = OrientedBootstrapResult{};
 	if (model.led_count < 2) {
@@ -356,16 +394,37 @@ oriented_bootstrap(const std::vector<JointSolveCamera> &cameras,
 		}
 	}
 
+	// Rivals are bootstrapped at most once, when a hypothesis first passes.
+	std::vector<OrientedBootstrapResult> rival_results;
 	for (const Candidate &c : best) {
 		out.inliers = std::max(out.inliers, c.h.inliers);
 		xrt_pose prior;
 		prior.orientation = Tcv_world_orientation;
 		prior.position = xrt_vec3{(float)c.h.t.x(), (float)c.h.t.y(), (float)c.h.t.z()};
-		if (joint_solve_refine(cameras, model, prior, Tcv_world_orientation, params.refine, out.refined)) {
-			out.ok = true;
-			out.camera = c.camera;
-			return true;
+		if (!joint_solve_refine(cameras, model, prior, Tcv_world_orientation, params.refine, out.refined)) {
+			continue;
 		}
+		if (rivals != nullptr && !rivals->empty()) {
+			if (rival_results.empty()) {
+				rival_results.resize(rivals->size());
+				for (size_t i = 0; i < rivals->size(); i++) {
+					const OrientedBootstrapRival &rival = (*rivals)[i];
+					if (rival.model != nullptr) {
+						oriented_bootstrap(cameras, *rival.model, rival.Tcv_world_orientation,
+						                   params, rival_results[i]);
+					}
+				}
+			}
+			int ambiguous = ambiguous_rival(out.refined, rival_results);
+			if (ambiguous >= 0) {
+				out.ambiguous_rival = ambiguous;
+				continue;
+			}
+		}
+		out.ok = true;
+		out.camera = c.camera;
+		out.ambiguous_rival = -1;
+		return true;
 	}
 	return false;
 }

@@ -450,11 +450,22 @@ JointProcessor::process(JointExposure &exposure)
 			xrt_quat orientation;
 			if (!ok && this->oriented_bootstrap_enabled &&
 			    aligned_orientation(need_bootstrap[i]->id, orientation)) {
+				// Every other device with a known orientation, such as the other hand's mirror-image
+				// ring, may explain the same blobs; an ambiguous sighting is left for a later exposure.
+				std::vector<OrientedBootstrapRival> rivals;
+				for (std::unique_ptr<Device> &other : ct->devices) {
+					xrt_quat other_orientation;
+					if (other.get() != need_bootstrap[i] &&
+					    aligned_orientation(other->id, other_orientation)) {
+						rivals.push_back(OrientedBootstrapRival{&other->params.led_model,
+						                                        other_orientation});
+					}
+				}
 				OrientedBootstrapResult oriented_result;
 				ok = timed([&] {
 					return oriented_bootstrap(cameras, need_bootstrap[i]->params.led_model,
 					                          orientation, OrientedBootstrapParams{},
-					                          oriented_result);
+					                          oriented_result, &rivals);
 				});
 				if (ok) {
 					result.refined = oriented_result.refined;
