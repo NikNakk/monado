@@ -624,6 +624,45 @@ TEST_CASE("Oriented bootstrap tolerates a few degrees of orientation error")
 	CHECK(found >= trials * 8 / 10);
 }
 
+TEST_CASE("Oriented bootstrap still finds its own ring with the other hand as a rival")
+{
+	Ring ring;
+	Ring mirror(true);
+	Rig rig;
+	std::mt19937 rng(31);
+
+	int trials = 0, found_alone = 0, found_with_rival = 0;
+	for (int i = 0; i < 60; i++) {
+		CAPTURE(i);
+		xrt_pose truth = random_pose(rng, 0.0);
+		size_t camera = (size_t)i % rig.cam_poses.size();
+		auto blobs = only_camera(render(rig, ring, truth, 0.2, 3, rng), camera);
+		if (blobs[camera].size() < 3 + 6) {
+			continue;
+		}
+		trials++;
+		auto all = cameras_for(rig, blobs);
+		std::vector<JointSolveCamera> cams{all[camera]};
+		xrt_quat orientation = perturbed_orientation(truth, 2.0, rng);
+		// The other hand somewhere else at an unrelated orientation, or at about this hand's (the worst case).
+		xrt_quat other = i % 2 ? random_pose(rng, 0.0).orientation : perturbed_orientation(truth, 2.0, rng);
+		std::vector<OrientedBootstrapRival> rivals{OrientedBootstrapRival{&mirror.model, other}};
+
+		OrientedBootstrapResult alone;
+		found_alone += oriented_bootstrap(cams, ring.model, orientation, OrientedBootstrapParams{}, alone);
+		OrientedBootstrapResult result;
+		if (!oriented_bootstrap(cams, ring.model, orientation, OrientedBootstrapParams{}, result, &rivals)) {
+			continue;
+		}
+		found_with_rival++;
+		CHECK((pos_of(result.refined.Tcv_world_device) - pos_of(truth)).norm() < 0.01);
+	}
+	INFO("found " << found_with_rival << " with a rival, " << found_alone << " alone, of " << trials);
+	REQUIRE(trials >= 20);
+	// The true model fits its own ring better than the mirror image does, so a rival costs few sightings.
+	CHECK(found_with_rival * 10 >= found_alone * 9);
+}
+
 TEST_CASE("Oriented bootstrap does not fit the other hand's ring")
 {
 	// The other controller's ring, untracked and seen by one camera, with this hand's model and orientation.
@@ -646,8 +685,13 @@ TEST_CASE("Oriented bootstrap does not fit the other hand's ring")
 		// This hand's orientation: unrelated to the other ring's, or the same (the worst case).
 		xrt_quat orientation =
 		    i % 2 ? random_pose(rng, 0.0).orientation : perturbed_orientation(other, 2.0, rng);
+		// As in tracking, the other hand is a rival at its own (IMU) orientation. Without it, the
+		// same-orientation case can pass the acceptance limits by a hair (x86-64 accepted 2 of 60 at 0.78 px,
+		// 0.50 coverage).
+		std::vector<OrientedBootstrapRival> rivals{
+		    OrientedBootstrapRival{&mirror.model, perturbed_orientation(other, 2.0, rng)}};
 		OrientedBootstrapResult result;
-		if (oriented_bootstrap(cams, ring.model, orientation, OrientedBootstrapParams{}, result)) {
+		if (oriented_bootstrap(cams, ring.model, orientation, OrientedBootstrapParams{}, result, &rivals)) {
 			accepted++;
 			CAPTURE(i, result.inliers, result.refined.matches, result.refined.rms_px,
 			        result.refined.coverage);
