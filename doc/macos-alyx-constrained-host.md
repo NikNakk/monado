@@ -1,4 +1,8 @@
-<!-- Copyright 2026, Nick Kennedy; SPDX-License-Identifier: BSL-1.0 -->
+<!--
+Copyright 2026, Nick Kennedy
+
+SPDX-License-Identifier: BSL-1.0
+-->
 # ARM64 Alyx constrained-host follow-up — 20 October 2026
 
 Current follow-up: [private-memory ABI translation is authorized and actual
