@@ -41,6 +41,7 @@
 
 
 #include <stdio.h>
+#include <string.h>
 #if defined(XRT_OS_WINDOWS)
 #include <timeapi.h>
 #else
@@ -66,6 +67,8 @@
 #endif // XRT_OS_ANDROID
 
 DEBUG_GET_ONCE_LOG_OPTION(ipc_log, "IPC_LOG", U_LOGGING_WARN)
+// An application can ask the service to record its session into this directory.
+DEBUG_GET_ONCE_OPTION(client_session_record_dir, "XRT_SESSION_RECORD_DIR", NULL)
 
 
 /*
@@ -227,6 +230,22 @@ ipc_client_instance_create_system(struct xrt_instance *xinst,
 	SET_ROLE(hand_tracking.conforming.right);
 
 #undef SET_ROLE
+
+	// Ask the service to record this session; it stops when this client disconnects.
+	const char *record_dir = debug_get_option_client_session_record_dir();
+	if (record_dir != NULL && record_dir[0] != '\0') {
+		struct ipc_session_record_request request = {0};
+		if (strlen(record_dir) >= sizeof(request.dir)) {
+			IPC_WARN(&ii->ipc_c, "XRT_SESSION_RECORD_DIR is too long; not recording.");
+		} else {
+			memcpy(request.dir, record_dir, strlen(record_dir));
+			xrt_result_t record_ret = ipc_call_system_session_record_start(&ii->ipc_c, &request);
+			if (record_ret != XRT_SUCCESS) {
+				IPC_WARN(&ii->ipc_c, "The service did not start recording to '%s' (%d); see its log.",
+				         record_dir, record_ret);
+			}
+		}
+	}
 
 	// Done here now.
 	if (out_xsysc == NULL) {

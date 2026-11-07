@@ -695,6 +695,18 @@ ipc_server_session_record_start(struct ipc_server *s);
 void
 ipc_server_session_record_stop(struct ipc_server *s);
 
+/*!
+ * Starts recording into @p dir for a client. Succeeds if that directory is
+ * already being recorded; fails if another one is, or before the system exists.
+ * The recording stops when the client disconnects.
+ */
+xrt_result_t
+ipc_server_session_record_start_for_client(volatile struct ipc_client_state *ics, const char *dir);
+
+//! Stops the recording a disconnecting client asked for, if any.
+void
+ipc_server_session_record_client_gone(volatile struct ipc_client_state *ics);
+
 #ifdef __APPLE__
 /*!
  * Stop showing a client's hosted layer, if it has one. Called on detach and

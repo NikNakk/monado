@@ -404,6 +404,17 @@ struct ipc_client_description
 	struct xrt_application_info info;
 };
 
+/*!
+ * A client's request to record the session into a directory.
+ *
+ * @ingroup ipc
+ */
+struct ipc_session_record_request
+{
+	//! Absolute path of an existing directory, NUL-terminated.
+	char dir[512];
+};
+
 struct ipc_client_list
 {
 	uint32_t ids[IPC_MAX_CLIENTS];
