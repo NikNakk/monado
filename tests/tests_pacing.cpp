@@ -17,6 +17,7 @@
 #include <sstream>
 #include <iomanip>
 #include <queue>
+#include <cstdlib>
 
 using namespace std::chrono_literals;
 using namespace std::chrono;
@@ -452,6 +453,36 @@ TEST_CASE("Display-timing pacer changes refresh period without resetting frame I
 	u_pc_destroy(&upc);
 }
 
+TEST_CASE("Fake pacing exposes the acquire placement deadline tradeoff", "[pacing][acquire-phase]")
+{
+	constexpr int64_t period = 11122208;
+	constexpr int64_t previous_present = 1000000000;
+	u_pacing_compositor *pc = nullptr;
+	REQUIRE(u_pc_fake_create(period, previous_present, &pc) == XRT_SUCCESS);
+	u_pc_update_vblank_from_display_control(pc, previous_present);
+	CompositorPredictions early, late;
+	auto predict = [&](int64_t now, CompositorPredictions &p) {
+		u_pc_predict(pc, now, &p.frame_id, &p.wake_up_time_ns, &p.desired_present_time_ns,
+		             &p.present_slop_ns, &p.predicted_display_time_ns, &p.predicted_display_period_ns,
+		             &p.min_display_period_ns);
+	};
+	predict(previous_present + 1000000, early);
+	REQUIRE(early.desired_present_time_ns == previous_present + period);
+	const int64_t budget = early.desired_present_time_ns - early.wake_up_time_ns;
+	REQUIRE(budget > 1000000);
+	// Image readiness can miss the conservative wake budget but still allow rendering.
+	const int64_t ready = early.wake_up_time_ns + budget / 2;
+	predict(ready, late);
+	CHECK(late.desired_present_time_ns == early.desired_present_time_ns + period);
+	CHECK(late.frame_id > early.frame_id);
+	const int64_t short_render = budget / 4;
+	CHECK(ready + short_render < early.desired_present_time_ns);
+	// Keeping a target cannot rescue work whose image arrives after its deadline.
+	const int64_t too_late = early.desired_present_time_ns + 1000000;
+	CHECK(too_late + short_render > early.desired_present_time_ns);
+	u_pc_destroy(&pc);
+}
+
 TEST_CASE("Refresh period updates preserve budget, offset and phase")
 {
 	for (bool display_timing : {false, true}) {
@@ -637,4 +668,117 @@ TEST_CASE("u_pacing_app holds 60 Hz on a 120 Hz display with jittery GPU-bound f
 			CHECK(r.off_cadence <= r.frames / 20);
 		}
 	}
+}
+
+namespace {
+
+struct OnTimeResult
+{
+	int64_t frames = 0;
+	int64_t late = 0;
+	double mean_wake_to_display_ms = 0;
+};
+
+/*!
+ * Frames are on time when their GPU work finishes before the compositor's
+ * latch, display time minus @p extra_ns. GPU time has a heavy tail: one frame
+ * in @p slow_every takes @p slow_extra_ns longer.
+ */
+OnTimeResult
+run_app_on_time(bool adaptive, int64_t slow_every, int64_t slow_extra_ns, int64_t base_gpu_ns)
+{
+	const int64_t ms = 1000000;
+	const int64_t period_ns = 11111111; // 90 Hz
+	const int64_t extra_ns = 7 * ms;
+	// Set either way: the default differs by platform.
+	setenv("U_PACING_APP_ADAPTIVE_MARGIN", adaptive ? "1" : "0", 1);
+	struct u_pacing_app_factory *upaf = nullptr;
+	struct u_pacing_app *upa = nullptr;
+	REQUIRE(u_pa_factory_create(&upaf) == XRT_SUCCESS);
+	u_paf_create(upaf, &upa);
+	unsetenv("U_PACING_APP_ADAPTIVE_MARGIN");
+	REQUIRE(upa != nullptr);
+
+	uint32_t lcg = 777;
+	auto rnd = [&](int64_t range) -> int64_t {
+		lcg = lcg * 1664525u + 1013904223u;
+		return range == 0 ? 0 : (int64_t)(lcg >> 8) % range;
+	};
+
+	int64_t now_ns = 1000000000;
+	int64_t gpu_free_ns = 0;
+	int64_t last_info_k = -1;
+	std::queue<std::pair<int64_t, int64_t>> gpu_done;
+	auto feed = [&](int64_t until_ns) {
+		int64_t k = (until_ns + extra_ns) / period_ns;
+		while (!gpu_done.empty() && gpu_done.front().first <= until_ns) {
+			u_pa_mark_gpu_done(upa, gpu_done.front().second, gpu_done.front().first);
+			gpu_done.pop();
+		}
+		if (k != last_info_k) {
+			u_pa_info(upa, k * period_ns, period_ns, extra_ns);
+			last_info_k = k;
+		}
+	};
+
+	OnTimeResult r;
+	double wake_to_display_sum = 0;
+	for (int i = 0; i < 3000; i++) {
+		feed(now_ns);
+		int64_t frame_id, wake_ns, display_ns, app_period_ns;
+		u_pa_predict(upa, now_ns, &frame_id, &wake_ns, &display_ns, &app_period_ns);
+		if (wake_ns > now_ns) {
+			now_ns = wake_ns;
+		}
+		feed(now_ns);
+		int64_t woke_ns = now_ns;
+		u_pa_mark_point(upa, frame_id, U_TIMING_POINT_WAKE_UP, now_ns);
+		now_ns += ms;
+		u_pa_mark_point(upa, frame_id, U_TIMING_POINT_BEGIN, now_ns);
+		now_ns += 2 * ms;
+		u_pa_mark_delivered(upa, frame_id, now_ns, display_ns);
+		int64_t gpu_ns = base_gpu_ns + rnd(ms) + (slow_every > 0 && rnd(slow_every) == 0 ? slow_extra_ns : 0);
+		gpu_free_ns = std::max(gpu_free_ns, now_ns) + gpu_ns;
+		gpu_done.push({gpu_free_ns, frame_id});
+		now_ns += ms / 2;
+
+		if (i >= 500) {
+			r.frames++;
+			r.late += gpu_free_ns > display_ns - extra_ns;
+			wake_to_display_sum += (double)(display_ns - woke_ns) / (double)ms;
+		}
+	}
+	r.mean_wake_to_display_ms = wake_to_display_sum / (double)r.frames;
+
+	u_pa_destroy(&upa);
+	u_paf_destroy(&upaf);
+	return r;
+}
+
+} // namespace
+
+TEST_CASE("u_pacing_app adaptive margin covers occasional slow frames", "[pacing][adaptive-margin]")
+{
+	const int64_t ms = 1000000;
+	// One frame in ten takes 4 ms longer: a fixed 2 ms margin misses most of them.
+	OnTimeResult fixed = run_app_on_time(false, 10, 4 * ms, 4 * ms);
+	OnTimeResult adaptive = run_app_on_time(true, 10, 4 * ms, 4 * ms);
+	INFO("fixed late " << fixed.late << "/" << fixed.frames << ", wake->display " << fixed.mean_wake_to_display_ms
+	                   << " ms; adaptive late " << adaptive.late << "/" << adaptive.frames << ", wake->display "
+	                   << adaptive.mean_wake_to_display_ms << " ms");
+	CHECK(fixed.late > fixed.frames / 20);
+	CHECK(adaptive.late <= adaptive.frames / 50);
+	CHECK(adaptive.late * 3 < fixed.late);
+}
+
+TEST_CASE("u_pacing_app adaptive margin adds no latency for steady frames", "[pacing][adaptive-margin]")
+{
+	const int64_t ms = 1000000;
+	OnTimeResult fixed = run_app_on_time(false, 0, 0, 4 * ms);
+	OnTimeResult adaptive = run_app_on_time(true, 0, 0, 4 * ms);
+	INFO("fixed late " << fixed.late << ", wake->display " << fixed.mean_wake_to_display_ms << " ms; adaptive late "
+	                   << adaptive.late << ", wake->display " << adaptive.mean_wake_to_display_ms << " ms");
+	CHECK(fixed.late == 0);
+	CHECK(adaptive.late == 0);
+	CHECK(adaptive.mean_wake_to_display_ms <= fixed.mean_wake_to_display_ms + 0.5);
 }

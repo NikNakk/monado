@@ -75,6 +75,28 @@ DEBUG_GET_ONCE_BOOL_OPTION(align_predicted_display_time_to_app_period,
  */
 #define IMMEDIATE_WAIT_FRAME_RETURN_MARGIN_NS U_TIME_HALF_MS_IN_NS
 
+/*!
+ * Adaptive margin (U_PACING_APP_ADAPTIVE_MARGIN; on by default on macOS,
+ * where a headset replay kept the same delivery as a fixed margin with less
+ * wake-to-display latency).
+ *
+ * A frame reaches the compositor in time when its GPU work finishes no later
+ * than its predicted GPU-done time plus the margin, so the margin needed for a
+ * given on-time rate is a quantile of recent overshoots (actual minus
+ * predicted GPU-done time). The margin rises at once to cover a new quantile
+ * and falls slowly, never below U_PACING_APP_MIN_MARGIN_MS or above
+ * U_PACING_APP_MAX_MARGIN_MS.
+ */
+#define ADAPTIVE_WINDOW (360)            // About four seconds at 90 Hz.
+#define ADAPTIVE_MIN_SAMPLES (30)
+#define ADAPTIVE_PAD_NS (U_TIME_1MS_IN_NS / 4)
+#define ADAPTIVE_FALL_NS (U_TIME_1MS_IN_NS / 50) // Per completed frame.
+#ifdef XRT_OS_OSX
+#define ADAPTIVE_DEFAULT true
+#else
+#define ADAPTIVE_DEFAULT false
+#endif
+
 #ifdef XRT_OS_OSX
 static FILE *g_macos_app_pacing_trace = NULL;
 static bool g_macos_app_pacing_trace_failed = false;
@@ -116,7 +138,7 @@ macos_app_pacing_trace_get(void)
 	fputs(
 	    "event,session_id,client_frame_id,event_ns,wake_ns,predicted_display_ns,predicted_period_ns,display_time_"
 	    "ns,"
-	    "cpu_est_ns,draw_est_ns,gpu_est_ns,cpu_actual_ns,draw_actual_ns,gpu_actual_ns\n",
+	    "cpu_est_ns,draw_est_ns,gpu_est_ns,cpu_actual_ns,draw_actual_ns,gpu_actual_ns,margin_ns\n",
 	    g_macos_app_pacing_trace);
 	if (!g_macos_app_pacing_trace_atexit_registered) {
 		atexit(macos_app_pacing_trace_close);
@@ -139,7 +161,8 @@ macos_app_pacing_trace_event(const char *event,
                              int64_t gpu_est_ns,
                              int64_t cpu_actual_ns,
                              int64_t draw_actual_ns,
-                             int64_t gpu_actual_ns)
+                             int64_t gpu_actual_ns,
+                             int64_t margin_ns)
 {
 	FILE *file = macos_app_pacing_trace_get();
 	if (file == NULL) {
@@ -148,9 +171,10 @@ macos_app_pacing_trace_event(const char *event,
 	flockfile(file);
 	fprintf(file,
 	        "%s,%" PRId64 ",%" PRId64 ",%" PRId64 ",%" PRId64 ",%" PRId64 ",%" PRId64 ",%" PRId64 ",%" PRId64
-	        ",%" PRId64 ",%" PRId64 ",%" PRId64 ",%" PRId64 ",%" PRId64 "\n",
+	        ",%" PRId64 ",%" PRId64 ",%" PRId64 ",%" PRId64 ",%" PRId64 ",%" PRId64 "\n",
 	        event, session_id, frame_id, event_ns, wake_ns, predicted_display_ns, predicted_period_ns,
-	        display_time_ns, cpu_est_ns, draw_est_ns, gpu_est_ns, cpu_actual_ns, draw_actual_ns, gpu_actual_ns);
+	        display_time_ns, cpu_est_ns, draw_est_ns, gpu_est_ns, cpu_actual_ns, draw_actual_ns, gpu_actual_ns,
+	        margin_ns);
 	g_macos_app_pacing_trace_rows++;
 	if (!u_timing_trace_fully_buffered() && (g_macos_app_pacing_trace_rows % 512 == 0)) {
 		fflush(file);
@@ -173,8 +197,10 @@ macos_app_pacing_trace_event(const char *event,
                              int64_t gpu_est_ns,
                              int64_t cpu_actual_ns,
                              int64_t draw_actual_ns,
-                             int64_t gpu_actual_ns)
+                             int64_t gpu_actual_ns,
+                             int64_t margin_ns)
 {
+	(void)margin_ns;
 	(void)event;
 	(void)session_id;
 	(void)frame_id;
@@ -300,6 +326,18 @@ struct pacing_app
 
 	//! Per-client policy; initialized from U_PACING_APP_USE_MIN_FRAME_PERIOD.
 	bool use_min_frame_period;
+
+	//! Opt-in adaptive margin, see ADAPTIVE_WINDOW.
+	struct
+	{
+		bool enabled;
+		double quantile;
+		int64_t max_ns;
+		int64_t margin_ns;
+		int64_t overshoot_ns[ADAPTIVE_WINDOW];
+		uint32_t count;
+		uint32_t next;
+	} adaptive;
 };
 
 
@@ -374,9 +412,69 @@ min_app_time(const struct pacing_app *pa)
 }
 
 static int64_t
-margin_time(const struct pacing_app *pa)
+min_margin_time(const struct pacing_app *pa)
 {
 	return (int64_t)(pa->min_margin_ms.val * (double)U_TIME_1MS_IN_NS);
+}
+
+static int64_t
+margin_time(const struct pacing_app *pa)
+{
+	int64_t min_ns = min_margin_time(pa);
+	if (!pa->adaptive.enabled || pa->adaptive.margin_ns < min_ns) {
+		return min_ns;
+	}
+	return pa->adaptive.margin_ns;
+}
+
+static int
+compare_i64(const void *a, const void *b)
+{
+	int64_t x = *(const int64_t *)a;
+	int64_t y = *(const int64_t *)b;
+	return (x > y) - (x < y);
+}
+
+static void
+adaptive_margin_update(struct pacing_app *pa, int64_t overshoot_ns)
+{
+	pa->adaptive.overshoot_ns[pa->adaptive.next] = overshoot_ns;
+	pa->adaptive.next = (pa->adaptive.next + 1) % ADAPTIVE_WINDOW;
+	if (pa->adaptive.count < ADAPTIVE_WINDOW) {
+		pa->adaptive.count++;
+	}
+	if (pa->adaptive.count < ADAPTIVE_MIN_SAMPLES) {
+		return;
+	}
+
+	int64_t sorted[ADAPTIVE_WINDOW];
+	uint32_t n = pa->adaptive.count;
+	memcpy(sorted, pa->adaptive.overshoot_ns, n * sizeof(sorted[0]));
+	qsort(sorted, n, sizeof(sorted[0]), compare_i64);
+
+	// Smallest sample with at least `quantile` of the window at or below it.
+	double rank = pa->adaptive.quantile * (double)n;
+	uint32_t index = rank <= 1.0 ? 0 : (uint32_t)(rank + 0.999999) - 1;
+	if (index >= n) {
+		index = n - 1;
+	}
+
+	int64_t target_ns = sorted[index] + ADAPTIVE_PAD_NS;
+	int64_t min_ns = min_margin_time(pa);
+	if (target_ns < min_ns) {
+		target_ns = min_ns;
+	}
+	if (target_ns > pa->adaptive.max_ns) {
+		target_ns = pa->adaptive.max_ns;
+	}
+
+	int64_t current_ns = margin_time(pa);
+	if (target_ns >= current_ns) {
+		pa->adaptive.margin_ns = target_ns;
+	} else {
+		int64_t lowered_ns = current_ns - ADAPTIVE_FALL_NS;
+		pa->adaptive.margin_ns = lowered_ns > target_ns ? lowered_ns : target_ns;
+	}
 }
 
 static int64_t
@@ -671,7 +769,7 @@ pa_predict(struct u_pacing_app *upa,
 
 	macos_app_pacing_trace_event("predict", pa->session_id, frame_id, now_ns, wake_up_time_ns, predict_ns,
 	                             app_period_ns, 0, pa->app.cpu_time_ns, pa->app.draw_time_ns, pa->app.gpu_time_ns,
-	                             0, 0, 0);
+	                             0, 0, 0, margin_time(pa));
 
 #ifdef U_TRACE_TRACY // Uses Tracy specific things.
 	TracyCPlot("App time(ms)", time_ns_to_ms_f(total_app_time_ns(pa)));
@@ -761,7 +859,7 @@ pa_mark_delivered(struct u_pacing_app *upa, int64_t frame_id, int64_t when_ns, i
 	macos_app_pacing_trace_event("delivered", pa->session_id, frame_id, when_ns, f->predicted_wake_up_time_ns,
 	                             f->predicted_display_time_ns, f->predicted_display_period_ns, display_time_ns,
 	                             pa->app.cpu_time_ns, pa->app.draw_time_ns, pa->app.gpu_time_ns, cpu_actual_ns,
-	                             draw_actual_ns, 0);
+	                             draw_actual_ns, 0, margin_time(pa));
 }
 
 static void
@@ -813,10 +911,14 @@ pa_mark_gpu_done(struct u_pacing_app *upa, int64_t frame_id, int64_t when_ns)
 	do_iir_filter(&pa->app.draw_time_ns, IIR_ALPHA_LT, IIR_ALPHA_GT, diff_draw_ns);
 	do_iir_filter(&pa->app.gpu_time_ns, IIR_ALPHA_LT, IIR_ALPHA_GT, diff_gpu_ns);
 
+	if (pa->adaptive.enabled) {
+		adaptive_margin_update(pa, when_ns - f->predicted_gpu_done_time_ns);
+	}
+
 	macos_app_pacing_trace_event("gpu_done", pa->session_id, frame_id, when_ns, f->predicted_wake_up_time_ns,
 	                             f->predicted_display_time_ns, f->predicted_display_period_ns, f->display_time_ns,
 	                             pa->app.cpu_time_ns, pa->app.draw_time_ns, pa->app.gpu_time_ns, diff_cpu_ns,
-	                             diff_draw_ns, diff_gpu_ns);
+	                             diff_draw_ns, diff_gpu_ns, margin_time(pa));
 
 	// Write out metrics and tracing data.
 	do_metrics(pa, f, false);
@@ -935,6 +1037,24 @@ pa_create(int64_t session_id, struct u_pacing_app **out_upa)
 	    .max = +120.0, // There are some really slow applications out there.
 	};
 
+	pa->adaptive.enabled = debug_get_bool_option("U_PACING_APP_ADAPTIVE_MARGIN", ADAPTIVE_DEFAULT);
+	if (pa->adaptive.enabled) {
+		double quantile = debug_get_float_option("U_PACING_APP_ADAPTIVE_QUANTILE", 0.98f);
+		if (!(quantile >= 0.5 && quantile <= 0.999)) {
+			U_LOG_W("U_PACING_APP_ADAPTIVE_QUANTILE=%g outside 0.5-0.999; using 0.98", quantile);
+			quantile = 0.98;
+		}
+		double max_ms = debug_get_float_option("U_PACING_APP_MAX_MARGIN_MS", 10.0f);
+		if (!(max_ms >= pa->min_margin_ms.val && max_ms <= 120.0)) {
+			U_LOG_W("U_PACING_APP_MAX_MARGIN_MS=%g outside minimum margin-120 ms; using 10", max_ms);
+			max_ms = 10.0 > pa->min_margin_ms.val ? 10.0 : pa->min_margin_ms.val;
+		}
+		pa->adaptive.quantile = quantile;
+		pa->adaptive.max_ns = (int64_t)(max_ms * (double)U_TIME_1MS_IN_NS);
+		U_LOG_W("App pacing: adaptive margin quantile=%.3f min=%.2fms max=%.2fms window=%d", quantile,
+		        pa->min_margin_ms.val, max_ms, ADAPTIVE_WINDOW);
+	}
+
 	for (size_t i = 0; i < ARRAY_SIZE(pa->frames); i++) {
 		pa->frames[i].state = U_PA_READY;
 		pa->frames[i].frame_id = -1;
@@ -947,6 +1067,7 @@ pa_create(int64_t session_id, struct u_pacing_app **out_upa)
 	u_var_add_ro_i64_ns(pa, &pa->app.cpu_time_ns, "CPU time");
 	u_var_add_ro_i64_ns(pa, &pa->app.draw_time_ns, "Draw time");
 	u_var_add_ro_i64_ns(pa, &pa->app.gpu_time_ns, "GPU time");
+	u_var_add_ro_i64_ns(pa, &pa->adaptive.margin_ns, "Adaptive margin");
 
 	*out_upa = &pa->base;
 
