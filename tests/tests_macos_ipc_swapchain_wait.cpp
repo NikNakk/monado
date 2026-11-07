@@ -70,7 +70,10 @@ TEST_CASE("infinite wait is honoured across bounded slices")
 	volatile bool running = true;
 	sc.ready_ns = os_monotonic_get_ns() + 1200 * ms;
 	CHECK(ipc_server_swapchain_wait_in_slices(&sc, INT64_MAX, 0, client.fds[0], &running) == XRT_SUCCESS);
-	CHECK(sc.timeouts.size() >= 3);
+	// It waited until ready, in more than one slice. Ideally three (500, 500,
+	// 200 ms), but an oversleeping CI runner can cover it in two.
+	CHECK(os_monotonic_get_ns() >= sc.ready_ns);
+	CHECK(sc.timeouts.size() >= 2);
 	for (int64_t timeout : sc.timeouts) {
 		CHECK(timeout <= IPC_SERVER_SWAPCHAIN_WAIT_SLICE_NS);
 	}
