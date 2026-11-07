@@ -19,6 +19,20 @@
 #include <queue>
 #include <cstdlib>
 
+#ifdef _WIN32
+// MSVC has no setenv/unsetenv; _putenv_s with an empty value removes the variable.
+static int
+setenv(const char *name, const char *value, int)
+{
+	return _putenv_s(name, value);
+}
+static int
+unsetenv(const char *name)
+{
+	return _putenv_s(name, "");
+}
+#endif
+
 using namespace std::chrono_literals;
 using namespace std::chrono;
 

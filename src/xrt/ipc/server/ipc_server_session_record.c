@@ -332,9 +332,14 @@ record_open(struct ipc_server *s, const char *dir)
 
 	rec->start_ns = os_monotonic_get_ns();
 	struct timespec wall;
-	clock_gettime(CLOCK_REALTIME, &wall);
 	struct tm tm_local;
+#ifdef _WIN32
+	timespec_get(&wall, TIME_UTC);
+	localtime_s(&tm_local, &wall.tv_sec);
+#else
+	clock_gettime(CLOCK_REALTIME, &wall);
 	localtime_r(&wall.tv_sec, &tm_local);
+#endif
 	char stamp[64];
 	strftime(stamp, sizeof(stamp), "%Y-%m-%dT%H:%M:%S", &tm_local);
 	fprintf(rec->file,
