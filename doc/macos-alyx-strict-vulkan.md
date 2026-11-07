@@ -1,4 +1,8 @@
-<!-- Copyright 2026, Nick Kennedy; SPDX-License-Identifier: BSL-1.0 -->
+<!--
+Copyright 2026, Nick Kennedy
+
+SPDX-License-Identifier: BSL-1.0
+-->
 # Strict Vulkan boundary and raw-SVC guard — 20 October 2026
 
 The isolated Klepton path now has opt-in strict graphics dispatch and a
