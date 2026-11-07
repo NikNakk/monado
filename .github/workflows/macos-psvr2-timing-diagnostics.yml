@@ -34,7 +34,7 @@ jobs:
   build-generic-controller-standards:
     runs-on: macos-15
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Install dependencies
         # PS Sense needs Ceres for upstream's constellation tracker.
         run: brew install ceres-solver cmake eigen glslang libusb ninja molten-vk pkgconf vulkan-headers vulkan-loader
@@ -64,7 +64,7 @@ jobs:
   build-foveation-standards:
     runs-on: macos-15
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Install dependencies
         run: brew install cmake eigen glslang libusb ninja molten-vk pkgconf vulkan-headers vulkan-loader
       - name: Configure foveation standards build
@@ -126,7 +126,7 @@ jobs:
   build-driver:
     runs-on: macos-15
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Install dependencies
         run: brew install cmake eigen glslang libusb ninja
       - name: Configure driver-only build
@@ -168,7 +168,7 @@ jobs:
   build-compositor:
     runs-on: macos-15
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Install dependencies
         run: brew install cmake eigen glslang libusb ninja molten-vk pkgconf vulkan-headers vulkan-loader
       - name: Configure compositor build
