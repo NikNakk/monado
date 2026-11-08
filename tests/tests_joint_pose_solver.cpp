@@ -6,6 +6,9 @@
 #include "stereo_bootstrap.hpp"
 #include "oriented_bootstrap.hpp"
 
+// M_PI on MSVC.
+#include "math/m_mathinclude.h"
+
 #include <Eigen/Geometry>
 
 #include <cmath>
