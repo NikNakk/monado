@@ -23,15 +23,17 @@ namespace xrt::tracking::constellation::optimizer {
 
 namespace {
 
-void
-warn_once()
-{
-	static std::atomic<bool> warned{false};
-	if (!warned.exchange(true)) {
-		U_LOG_W("Constellation per-camera pose optimisation needs Ceres, which this build does not include; "
-		        "only the joint multi-camera path can produce poses.");
+	void
+	warn_once()
+	{
+		static std::atomic<bool> warned{false};
+		if (!warned.exchange(true)) {
+			U_LOG_W(
+			    "Constellation per-camera pose optimisation needs Ceres, which this build does not "
+			    "include; "
+			    "only the joint multi-camera path can produce poses.");
+		}
 	}
-}
 
 } // namespace
 

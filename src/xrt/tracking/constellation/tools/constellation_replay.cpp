@@ -1760,6 +1760,10 @@ main(int argc, char **argv)
 			status = fusion_compare(dataset, exposure_times, records, options) != 0 ? 1 : status;
 #else
 			std::fprintf(stderr, "--fusion-compare needs a build with Ceres >= 2.1\n");
+			(void)run_log;
+			(void)fusion_out;
+			(void)fusion_scenarios;
+			(void)fusion_frontend;
 			status = 1;
 #endif
 		} else if (m1 && !compare) {
