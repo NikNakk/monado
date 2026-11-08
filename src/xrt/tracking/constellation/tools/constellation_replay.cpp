@@ -1155,7 +1155,11 @@ replay_tracker(const DatasetReader &dataset, const char *csv_path, bool use_filt
 		params.mosaics[0].cameras[c].has_concrete_pose = true;
 	}
 
+#ifdef _WIN32
+	_putenv_s("CONSTELLATION_TRACKER_JOINT", "1");
+#else
 	setenv("CONSTELLATION_TRACKER_JOINT", "1", 1);
+#endif
 	xrt_frame_context xfctx{};
 	t_constellation_tracker *tracker = nullptr;
 	if (t_constellation_tracker_create(&xfctx, &params, &tracker) != 0) {
