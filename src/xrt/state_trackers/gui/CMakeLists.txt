@@ -67,7 +67,10 @@ target_link_libraries(
 target_include_directories(st_gui INTERFACE ${CMAKE_CURRENT_SOURCE_DIR}/..)
 
 if(XRT_MODULE_CONSTELLATION_TRACKING)
-	target_link_libraries(st_gui PRIVATE constellation xrt-external-bigceres)
+	target_link_libraries(st_gui PRIVATE constellation)
+	if(XRT_HAVE_BIGCERES)
+		target_link_libraries(st_gui PRIVATE xrt-external-bigceres)
+	endif()
 endif()
 
 if(XRT_HAVE_GST)

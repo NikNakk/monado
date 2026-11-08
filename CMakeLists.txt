@@ -286,7 +286,9 @@ option_with_deps(XRT_MODULE_COMPOSITOR_MULTI "Build multi-client compositor libr
 option_with_deps(XRT_MODULE_COMPOSITOR_NULL "Build testing null compositor" DEPENDS XRT_MODULE_COMPOSITOR XRT_HAVE_VULKAN)
 option_with_deps(XRT_MODULE_COMPOSITOR_UTIL "Build compositor utility library" DEPENDS XRT_MODULE_COMPOSITOR XRT_HAVE_VULKAN)
 option_with_deps(XRT_MODULE_COMPOSITOR_MOCK "Build mock compositor library" DEPENDS XRT_MODULE_COMPOSITOR)
-option_with_deps(XRT_MODULE_CONSTELLATION_TRACKING "Enable constellation tracking" DEPENDS XRT_HAVE_BIGCERES)
+# Builds without Ceres keep the joint multi-camera path (PS VR2 Sense); the
+# per-camera optimiser that outside-in Rift tracking relies on needs Ceres.
+option(XRT_MODULE_CONSTELLATION_TRACKING "Enable constellation tracking" ON)
 option_with_deps(XRT_MODULE_MERCURY_HANDTRACKING "Enable Mercury hand tracking" DEPENDS XRT_HAVE_OPENCV XRT_HAVE_ONNXRUNTIME)
 
 option(XRT_MODULE_MONADO_CLI "Build monado-cli" ON)
@@ -374,7 +376,7 @@ option_with_deps(XRT_BUILD_DRIVER_PSVR2 "Enable PS VR2 HMD driver" DEPENDS XRT_H
 option_with_deps(XRT_BUILD_DRIVER_QWERTY "Enable Qwerty driver" DEPENDS XRT_HAVE_SDL2)
 option_with_deps(XRT_BUILD_DRIVER_REALSENSE "Enable RealSense device driver" DEPENDS XRT_HAVE_REALSENSE)
 option_with_deps(XRT_BUILD_DRIVER_REMOTE "Enable remote debugging driver" DEPENDS "XRT_HAVE_LINUX OR APPLE OR ANDROID OR WIN32")
-option_with_deps(XRT_BUILD_DRIVER_RIFT "Enable Oculus Rift (DK2/CV1) device driver" DEPENDS XRT_HAVE_INTERNAL_HID XRT_MODULE_CONSTELLATION_TRACKING)
+option_with_deps(XRT_BUILD_DRIVER_RIFT "Enable Oculus Rift (DK2/CV1) device driver" DEPENDS XRT_HAVE_INTERNAL_HID XRT_MODULE_CONSTELLATION_TRACKING XRT_HAVE_BIGCERES)
 option_with_deps(XRT_BUILD_DRIVER_RIFT_SENSOR "Enable Oculus Rift Sensor (DK2/CV1) device driver" DEPENDS XRT_BUILD_DRIVER_RIFT XRT_BUILD_DRIVER_UVC XRT_HAVE_LIBUSB)
 option_with_deps(XRT_BUILD_DRIVER_RIFT_S "Enable Oculus Rift S device driver" DEPENDS XRT_HAVE_V4L2)
 option_with_deps(XRT_BUILD_DRIVER_ROKID "Enable Rokid driver" DEPENDS "XRT_HAVE_LIBUSB")

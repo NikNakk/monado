@@ -621,7 +621,10 @@ if(TARGET constellation)
 			PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../src/xrt/tracking/constellation
 				${CMAKE_CURRENT_SOURCE_DIR}/../src/xrt/tracking
 			)
-		target_link_libraries(${testname} PRIVATE Eigen3::Eigen xrt-external-bigceres)
+		target_link_libraries(${testname} PRIVATE Eigen3::Eigen)
+		if(XRT_HAVE_BIGCERES)
+			target_link_libraries(${testname} PRIVATE xrt-external-bigceres)
+		endif()
 	endforeach()
 endif()
 if(TARGET constellation_fusion)

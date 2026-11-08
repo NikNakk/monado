@@ -40,17 +40,23 @@ add_library(
 	lambdatwist/quadratic.h
 	lambdatwist/refine_lambda.h
 	lambdatwist/vec.h
-	optimizer/math.hpp
-	optimizer/pose_optimize.cpp
+	optimizer/pose_covariance.cpp
 	optimizer/pose_optimize.hpp
 	optimizer/ransac.cpp
 	optimizer/ransac.hpp
 	)
+# The per-camera (outside-in) PnP optimiser needs full Ceres. Without it the
+# joint multi-camera path, used by PS VR2 Sense tracking, still works.
+if(XRT_HAVE_BIGCERES)
+	target_sources(constellation PRIVATE optimizer/math.hpp optimizer/pose_optimize.cpp)
+	target_link_libraries(constellation PRIVATE xrt-external-bigceres)
+else()
+	target_sources(constellation PRIVATE optimizer/pose_optimize_unavailable.cpp)
+endif()
 target_link_libraries(
 	constellation
 	PRIVATE
 		xrt-interfaces
-		xrt-external-bigceres
 		tracking-includes
 		aux_os
 		aux_util
