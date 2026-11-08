@@ -23,8 +23,8 @@ namespace {
 std::string
 temp_path(const char *name)
 {
-	const char *dir = std::getenv("TMPDIR");
-	return std::string(dir != nullptr ? dir : "/tmp") + "/" + name;
+	// TMPDIR on POSIX, the user's temporary folder on Windows.
+	return (std::filesystem::temp_directory_path() / name).string();
 }
 
 t_camera_calibration
