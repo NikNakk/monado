@@ -9,6 +9,9 @@
 
 #include "oriented_bootstrap.hpp"
 
+// M_PI on MSVC.
+#include "math/m_mathinclude.h"
+
 #include <Eigen/Core>
 #include <Eigen/Geometry>
 #include <Eigen/LU>
