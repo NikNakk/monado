@@ -12,6 +12,7 @@
 
 #include <xrt/xrt_defines.h>
 
+#include <math.h>
 #include <stdint.h>
 #include <stdbool.h>
 
@@ -89,6 +90,88 @@ psvr2_compute_distortion_asymmetric(float *calibration, struct xrt_uv_triplet *o
 		coord->x = (k3 * a - k4 * b) * fx + cx;
 		coord->y = (k4 * a + k3 * b) * fy + cy;
 	}
+}
+
+bool
+psvr2_visibility_outline(const float *calibration,
+                         int eEye,
+                         float max_r2,
+                         float margin,
+                         uint32_t count,
+                         struct xrt_vec2 *out_centre,
+                         struct xrt_vec2 *out_outline)
+{
+	// Constants from psvr2_compute_distortion_asymmetric.
+	const float fx = 0.3585564f;
+	const float fy = 0.3762281f;
+	const float sx = 0.9803922f * 0.9394987f;
+	const float sy = 0.9394987f;
+	const float k1 = calibration[eEye == 0 ? 0 : 2];
+	const float k2 = calibration[eEye == 0 ? 1 : 3];
+	const float k3 = calibration[eEye == 0 ? 4 : 6];
+	const float k4 = calibration[eEye == 0 ? 5 : 7];
+	const float cx = eEye == 0 ? 0.6603788f : 0.3396213f;
+	const float cy = 0.5f;
+
+	// The fallback calibration has no lens rotation and scale, which collapses the distortion.
+	const float norm = k3 * k3 + k4 * k4;
+	if (norm < 1e-6f) {
+		return false;
+	}
+
+	// Panel position of the lens centre, where the distortion's radius is 0.
+	const float u0 = 0.5f - k1 / (2.f * sx);
+	const float v0 = 0.5f - k2 / (2.f * sy);
+	if (u0 <= 0.f || u0 >= 1.f || v0 <= 0.f || v0 >= 1.f) {
+		return false;
+	}
+
+	// The lens centre maps to (cx, cy) in the eye's image, and the distortion
+	// is radial around it, so each image direction from there is one ray from
+	// the lens centre on the panel.
+	*out_centre = (struct xrt_vec2){cx, cy};
+	for (uint32_t i = 0; i < count; i++) {
+		const float phi = 2.f * (float)M_PI * (float)i / (float)count;
+		const float dx = cosf(phi);
+		const float dy = sinf(phi);
+
+		// Undo the scale and the rotation to get the ray's direction on the panel.
+		const float ax = dx / fx;
+		const float ay = dy / fy;
+		float lx = (k3 * ax + k4 * ay) / norm;
+		float ly = (-k4 * ax + k3 * ay) / norm;
+		const float len = sqrtf(lx * lx + ly * ly);
+		lx /= len;
+		ly /= len;
+
+		// Furthest panel point along the ray: the lens radius or the panel edge.
+		float t = max_r2 > 0.f ? sqrtf(max_r2) : INFINITY;
+		const float du = lx / (2.f * sx);
+		const float dv = ly / (2.f * sy);
+		if (du > 0.f) {
+			t = fminf(t, (1.f - u0) / du);
+		} else if (du < 0.f) {
+			t = fminf(t, -u0 / du);
+		}
+		if (dv > 0.f) {
+			t = fminf(t, (1.f - v0) / dv);
+		} else if (dv < 0.f) {
+			t = fminf(t, -v0 / dv);
+		}
+
+		// The image point that panel point reads, furthest of the three colour channels.
+		struct xrt_uv_triplet uv;
+		psvr2_compute_distortion_asymmetric((float *)calibration, &uv, eEye, u0 + du * t, v0 + dv * t);
+		const struct xrt_vec2 channels[3] = {uv.r, uv.g, uv.b};
+		float r = 0.f;
+		for (int c = 0; c < 3; c++) {
+			r = fmaxf(r, (channels[c].x - cx) * dx + (channels[c].y - cy) * dy);
+		}
+		r *= 1.f + margin;
+
+		out_outline[i] = (struct xrt_vec2){cx + dx * r, cy + dy * r};
+	}
+	return true;
 }
 
 static const struct LookupItem_t lookup[] = {
