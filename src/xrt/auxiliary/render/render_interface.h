@@ -1028,13 +1028,38 @@ struct render_gfx_mesh_ubo_data
 
 	// Quad-view inset, sampled from the second source: inset UV = context UV
 	// (before post_transform) * zw + xy, then inset_post_transform.
-	struct xrt_normalized_rect inset_from_context;
-	struct xrt_normalized_rect inset_post_transform;
+	// A layer has either an inset or depth, so depth reprojection reuses these
+	// two: the depth image's sub image rect and the source UV to tangent rect.
+	union {
+		struct xrt_normalized_rect inset_from_context;
+		struct xrt_normalized_rect depth_post_transform;
+	};
+	union {
+		struct xrt_normalized_rect inset_post_transform;
+		struct xrt_normalized_rect source_uv_to_tanangle;
+	};
 	struct
 	{
 		uint32_t value;
-		uint32_t padding[3];
+		//! Depth reprojection: the second source is the depth image instead of an inset.
+		uint32_t has_depth;
+		uint32_t padding[2];
 	} has_inset;
+
+	// Depth reprojection (has_inset.has_depth), as in the compute distortion
+	// pass but with the eye origin at scanout begin only (the UBO slot is full).
+	struct
+	{
+		float min_depth;
+		float max_depth;
+		float near_z;
+		float far_z;
+	} projection_depth;
+	struct
+	{
+		struct xrt_vec3 val;
+		float padding;
+	} new_origin;
 };
 
 /*!

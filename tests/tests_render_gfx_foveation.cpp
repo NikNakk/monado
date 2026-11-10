@@ -305,7 +305,8 @@ struct GfxFixture
 	          const xrt_fov *inset_fov,
 	          VkImageView source = VK_NULL_HANDLE,
 	          uint32_t source_filter = RENDER_SOURCE_FILTER_BILINEAR,
-	          xrt_normalized_rect post_transform = {0.f, 0.f, 1.f, 1.f})
+	          xrt_normalized_rect post_transform = {0.f, 0.f, 1.f, 1.f},
+	          const xrt_vec3 *depth_origin = nullptr)
 	{
 		render_gfx render{};
 		REQUIRE(render_gfx_init(&render, &r));
@@ -332,11 +333,23 @@ struct GfxFixture
 			data.inset_post_transform = {0.f, 0.f, 1.f, 1.f};
 			data.has_inset.value = 1;
 		}
+		// Depth reprojection: the depth image is in the inset slot (window depths
+		// 0..1 map to 1..3 m), and the eye moved to depth_origin in the source view.
+		VkSampler second_sampler = inset_fov ? sampler : VK_NULL_HANDLE;
+		VkImageView second_view = inset_fov ? inset.view : VK_NULL_HANDLE;
+		if (depth_origin != nullptr) {
+			data.has_inset.has_depth = 1;
+			data.depth_post_transform = {0.f, 0.f, 1.f, 1.f};
+			render_calc_uv_to_tangent_lengths_rect(&fov, &data.source_uv_to_tanangle);
+			data.projection_depth = {0.f, 1.f, 1.f, 3.f};
+			data.new_origin.val = *depth_origin;
+			second_sampler = r.samplers.nearest_clamp_to_edge;
+			second_view = inset.view;
+		}
 		VkDescriptorSet set = VK_NULL_HANDLE;
 		REQUIRE(render_gfx_mesh_alloc_and_write(&render, &data, nullptr, sampler,
-		                                        source != VK_NULL_HANDLE ? source : src.view,
-		                                        inset_fov ? sampler : VK_NULL_HANDLE,
-		                                        inset_fov ? inset.view : VK_NULL_HANDLE, &set) == VK_SUCCESS);
+		                                        source != VK_NULL_HANDLE ? source : src.view, second_sampler,
+		                                        second_view, &set) == VK_SUCCESS);
 
 		const VkClearColorValue clear = {{0.f, 0.f, 0.f, 1.f}};
 		const render_viewport_data viewport = {0, 0, kDstSize, kDstSize};
@@ -670,4 +683,45 @@ TEST_CASE("Graphics mesh distortion sharpens magnified sources with Catmull-Rom"
 		CHECK(bleed == 0.f);
 		CHECK(blue > .9f);
 	}
+}
+
+TEST_CASE("Graphics mesh distortion reprojects with depth", "[aux_render][gpu]")
+{
+	GfxFixture f;
+	f.init();
+	// Depth image: window depth 0.5 everywhere, 1.5 m (inverse distance halfway from 1 m to 3 m).
+	const uint32_t n = 16;
+	std::vector<uint16_t> depth(size_t(n) * n * 4, 0);
+	for (size_t i = 0; i < size_t(n) * n; ++i)
+		depth[i * 4] = 32768, depth[i * 4 + 3] = 65535;
+	f.upload(f.inset, n, depth);
+
+	const xrt_fov fov = f.hmd.distortion.fov[0];
+	const float tan_width = std::tan(fov.angle_right) - std::tan(fov.angle_left);
+	const float z = 1.f / (0.5f * (1.f + 1.f / 3.f));
+	const size_t row = size_t(kDstSize) * 3;
+	auto median_shift = [&](const std::vector<float> &a, const std::vector<float> &b, int c) {
+		std::vector<float> d;
+		for (unsigned y = 24; y < kDstSize - 24; ++y)
+			for (unsigned x = 24; x < kDstSize - 24; ++x)
+				d.push_back(a[y * row + x * 3 + c] - b[y * row + x * 3 + c]);
+		std::sort(d.begin(), d.end());
+		return d[d.size() / 2];
+	};
+
+	const std::vector<float> plain = f.draw_quad(true, nullptr);
+	const xrt_vec3 still = {0.f, 0.f, 0.f};
+	const std::vector<float> unmoved =
+	    f.draw_quad(true, nullptr, VK_NULL_HANDLE, RENDER_SOURCE_FILTER_BILINEAR, {0.f, 0.f, 1.f, 1.f}, &still);
+	const xrt_vec3 moved = {0.15f, 0.f, 0.f};
+	const std::vector<float> shifted =
+	    f.draw_quad(true, nullptr, VK_NULL_HANDLE, RENDER_SOURCE_FILTER_BILINEAR, {0.f, 0.f, 1.f, 1.f}, &moved);
+
+	// The source holds its own coordinate, so a shift in what is sampled shows as a value change.
+	const float expected = (0.15f / z) / tan_width;
+	CAPTURE(expected, z, tan_width);
+	CHECK(std::fabs(median_shift(unmoved, plain, 0)) < 1e-3f);
+	CHECK(median_shift(shifted, plain, 0) == Catch::Approx(expected).margin(0.004));
+	// Sideways movement leaves the vertical coordinate alone.
+	CHECK(std::fabs(median_shift(shifted, plain, 1)) < 1e-3f);
 }

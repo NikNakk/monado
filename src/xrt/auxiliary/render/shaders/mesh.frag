@@ -29,9 +29,14 @@ layout (binding = 1, std140) uniform Config
 	vec4 pre_transform;
 	mat4 transform_scanout_begin;
 	mat4 transform_scanout_end;
+	// With has_inset.y (depth) these hold the depth sub image rect and the
+	// source UV to tangent rect instead.
 	vec4 inset_from_context;
 	vec4 inset_post_transform;
+	// x: has inset, y: has depth (the second source is the depth image).
 	uvec4 has_inset;
+	vec4 projection_depth;
+	vec4 new_origin;
 } ubo;
 
 layout (location = 0)  in vec2 in_ruv;
@@ -40,6 +45,7 @@ layout (location = 2)  in vec2 in_buv;
 layout (location = 3)  in vec2 in_inset_ruv;
 layout (location = 4)  in vec2 in_inset_guv;
 layout (location = 5)  in vec2 in_inset_buv;
+layout (location = 6)  in vec2 in_g_view_uv;
 layout (location = 0) out vec4 out_color;
 
 // Matches RENDER_LAYER_DEFAULT_INSET_BLEND_EDGE used by the layer squasher.
@@ -53,11 +59,61 @@ float inset_blend_factor(vec2 uv)
 }
 
 
+// Depth reprojection, the compute distortion pass's depth_correct_projection_uv:
+// one depth sample at the rotationally timewarped source UV, then the ray from
+// the new eye origin intersected with that depth.
+float projection_depth_to_view_z_distance(float window_depth)
+{
+	const vec4 d = ubo.projection_depth; // min depth, max depth, near z, far z
+	const float range = d.y - d.x;
+	if (!(range > 0.0) || !(d.z > 0.0) || !(d.w > 0.0)) {
+		return 0.0;
+	}
+	const float t = clamp((window_depth - d.x) / range, 0.0, 1.0);
+	const float inverse_distance = mix(1.0 / d.z, 1.0 / d.w, t);
+	return inverse_distance > 1e-8 ? 1.0 / inverse_distance : 0.0;
+}
+
+vec2 depth_correct_view_uv(vec2 view_uv)
+{
+	if (any(lessThan(view_uv, vec2(0.0))) || any(greaterThan(view_uv, vec2(1.0)))) {
+		return view_uv;
+	}
+	const vec4 depth_post_transform = ubo.inset_from_context;
+	const vec4 source_uv_to_tanangle = ubo.inset_post_transform;
+	vec2 depth_uv = fma(view_uv, depth_post_transform.zw, depth_post_transform.xy);
+	float z = projection_depth_to_view_z_distance(textureLod(tex_sampler[1], depth_uv, 0.0).r);
+	if (!(z > 0.0)) {
+		return view_uv;
+	}
+	vec3 origin = ubo.new_origin.xyz;
+	vec2 extent = source_uv_to_tanangle.zw;
+	if (abs(extent.x) < 1e-6 || abs(extent.y) < 1e-6) {
+		return view_uv;
+	}
+	vec2 tan_uv = fma(view_uv, extent, source_uv_to_tanangle.xy);
+	float ray_scale = z + origin.z;
+	if (!(ray_scale > 0.0)) {
+		return view_uv;
+	}
+	vec2 corrected = vec2((origin.x + ray_scale * tan_uv.x) / z, (-origin.y + ray_scale * tan_uv.y) / z);
+	return (corrected - source_uv_to_tanangle.xy) / extent;
+}
+
 void main()
 {
 	vec2 r_uv = in_ruv;
 	vec2 g_uv = in_guv;
 	vec2 b_uv = in_buv;
+
+	// Depth reprojection: green's correction, applied to all three channels
+	// (one depth sample), carried through the affine sub image transform.
+	if (ubo.has_inset.y != 0u && !foveation_enabled()) {
+		vec2 delta = (depth_correct_view_uv(in_g_view_uv) - in_g_view_uv) * ubo.post_transform.zw;
+		r_uv += delta;
+		g_uv += delta;
+		b_uv += delta;
+	}
 
 	// Per fragment: the map is piecewise linear, so it can't be applied to
 	// the interpolated mesh vertices.
