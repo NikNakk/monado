@@ -222,7 +222,8 @@ if(XRT_HAVE_VULKAN)
 			COMMAND ${GLSLANGVALIDATOR_COMMAND} -V --target-env spirv1.0
 				-I${CMAKE_SOURCE_DIR}/src/xrt/auxiliary/render/shaders
 				"${_shader}" --vn distortion_${_group} -o "${_header}"
-			DEPENDS "${_shader}" "${CMAKE_SOURCE_DIR}/src/xrt/auxiliary/render/shaders/srgb.inc.glsl")
+			DEPENDS "${_shader}" "${CMAKE_SOURCE_DIR}/src/xrt/auxiliary/render/shaders/srgb.inc.glsl"
+				"${CMAKE_SOURCE_DIR}/src/xrt/auxiliary/render/shaders/source_filter.inc.glsl")
 		list(APPEND _distortion_bench_headers "${_header}")
 	endforeach()
 	add_executable(

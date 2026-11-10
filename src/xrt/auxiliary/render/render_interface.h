@@ -359,10 +359,26 @@ render_sub_alloc_ubo_alloc_and_write(struct vk_bundle *vk,
 /*!
  * Holds all pools and static resources for rendering.
  */
+/*!
+ * How the distortion passes sample application images.
+ */
+enum render_source_filter
+{
+	//! One hardware bilinear sample.
+	RENDER_SOURCE_FILTER_BILINEAR = 0,
+	//! Bicubic Catmull-Rom (five bilinear samples) per colour channel: sharper when magnifying.
+	RENDER_SOURCE_FILTER_CATMULL_ROM = 1,
+	//! Catmull-Rom for green only, bilinear for red and blue: most of the sharpness, half the cost.
+	RENDER_SOURCE_FILTER_CATMULL_ROM_GREEN = 2,
+};
+
 struct render_resources
 {
 	//! The count of views that we are rendering to.
 	uint32_t view_count;
+
+	//! Distortion pass source filter, from XRT_COMPOSITOR_SOURCE_FILTER.
+	enum render_source_filter source_filter;
 
 	//! Vulkan resources.
 	struct vk_bundle *vk;

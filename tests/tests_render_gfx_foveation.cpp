@@ -99,7 +99,7 @@ struct GfxFixture
 	render_gfx_target_resources rtr{};
 	bool target_ready = false;
 
-	Image src{}, dst{}, inset{};
+	Image src{}, dst{}, inset{}, filtered{};
 	render_buffer readback{};
 
 	vk_bundle &
@@ -234,7 +234,7 @@ struct GfxFixture
 			render_gfx_target_resources_fini(&rtr);
 			render_gfx_render_pass_fini(&rgrp);
 		}
-		for (Image *image : {&src, &dst, &inset}) {
+		for (Image *image : {&src, &dst, &inset, &filtered}) {
 			if (image->view != VK_NULL_HANDLE) {
 				vk().vkDestroyImageView(vk().device, image->view, nullptr);
 				vk().vkDestroyImage(vk().device, image->image, nullptr);
@@ -282,10 +282,30 @@ struct GfxFixture
 		render_buffer_fini(&vk(), &staging);
 	}
 
-	// Mesh distortion of the source with the quad-view inset (if inset_fov is
-	// set) blended in; reads back R, G and B.
+	// The filter is a pipeline specialization: rebuild the render pass and its
+	// pipelines when it changes.
+	void
+	set_source_filter(uint32_t source_filter)
+	{
+		if (uint32_t(r.source_filter) == source_filter) {
+			return;
+		}
+		render_gfx_target_resources_fini(&rtr);
+		render_gfx_render_pass_fini(&rgrp);
+		r.source_filter = render_source_filter(source_filter);
+		REQUIRE(render_gfx_render_pass_init(&rgrp, &r, kFormat, VK_ATTACHMENT_LOAD_OP_CLEAR,
+		                                    VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL));
+		REQUIRE(render_gfx_target_resources_init(&rtr, &r, &rgrp, dst.view, {kDstSize, kDstSize}));
+	}
+
+	// Mesh distortion of the source (or another image) with the quad-view
+	// inset (if inset_fov is set) blended in; reads back R, G and B.
 	std::vector<float>
-	draw_quad(bool timewarp, const xrt_fov *inset_fov)
+	draw_quad(bool timewarp,
+	          const xrt_fov *inset_fov,
+	          VkImageView source = VK_NULL_HANDLE,
+	          uint32_t source_filter = RENDER_SOURCE_FILTER_BILINEAR,
+	          xrt_normalized_rect post_transform = {0.f, 0.f, 1.f, 1.f})
 	{
 		render_gfx render{};
 		REQUIRE(render_gfx_init(&render, &r));
@@ -295,7 +315,8 @@ struct GfxFixture
 		const xrt_fov fov = hmd.distortion.fov[0];
 		render_gfx_mesh_ubo_data data{};
 		data.vertex_rot = {{{1.f, 0.f, 0.f, 1.f}}};
-		data.post_transform = {0.f, 0.f, 1.f, 1.f};
+		data.post_transform = post_transform;
+		set_source_filter(source_filter);
 		if (timewarp) {
 			// Real timewarp matrices with a small yaw between scanout begin and end.
 			const xrt_pose source = XRT_POSE_IDENTITY;
@@ -312,7 +333,8 @@ struct GfxFixture
 			data.has_inset.value = 1;
 		}
 		VkDescriptorSet set = VK_NULL_HANDLE;
-		REQUIRE(render_gfx_mesh_alloc_and_write(&render, &data, nullptr, sampler, src.view,
+		REQUIRE(render_gfx_mesh_alloc_and_write(&render, &data, nullptr, sampler,
+		                                        source != VK_NULL_HANDLE ? source : src.view,
 		                                        inset_fov ? sampler : VK_NULL_HANDLE,
 		                                        inset_fov ? inset.view : VK_NULL_HANDLE, &set) == VK_SUCCESS);
 
@@ -561,5 +583,91 @@ TEST_CASE("Graphics mesh distortion blends a quad-view inset", "[aux_render][gpu
 		// Inset and source differ only by resampling: under 1.5 source texels.
 		CHECK(gradient_error < 1.5f / kSrcSize);
 		CHECK(outside_error == 0.f);
+	}
+}
+
+TEST_CASE("Graphics mesh distortion sharpens magnified sources with Catmull-Rom", "[aux_render][gpu]")
+{
+	GfxFixture f;
+	f.init();
+	const uint32_t n = 12; // 96 / 12: 8x magnification.
+	const size_t row = size_t(kDstSize) * 3;
+	auto pixel = [&](const std::vector<float> &img, unsigned x, unsigned y, int c) {
+		return img[y * row + size_t(x) * 3 + c];
+	};
+
+	SECTION("smooth gradients are reproduced without a shift")
+	{
+		std::vector<uint16_t> pixels(size_t(n) * n * 4);
+		for (uint32_t y = 0; y < n; ++y)
+			for (uint32_t x = 0; x < n; ++x) {
+				uint16_t *p = &pixels[(size_t(y) * n + x) * 4];
+				p[0] = uint16_t(x * 5000), p[1] = uint16_t(y * 5000), p[2] = 20000, p[3] = 65535;
+			}
+		f.upload(f.filtered, n, pixels);
+		auto bilinear = f.draw_quad(false, nullptr, f.filtered.view, RENDER_SOURCE_FILTER_BILINEAR);
+		auto cubic = f.draw_quad(false, nullptr, f.filtered.view, RENDER_SOURCE_FILTER_CATMULL_ROM);
+		float max_diff = 0;
+		for (unsigned y = 16; y < kDstSize - 16; ++y)
+			for (unsigned x = 16; x < kDstSize - 16; ++x)
+				for (int c = 0; c < 3; ++c)
+					max_diff = std::fmax(
+					    max_diff, std::fabs(pixel(bilinear, x, y, c) - pixel(cubic, x, y, c)));
+		CHECK(max_diff < 0.005f);
+		// Not a vacuous all-black draw.
+		CHECK(pixel(cubic, kDstSize / 2, kDstSize / 2, 2) > 0.2f);
+	}
+
+	SECTION("hard edges get a steeper transition")
+	{
+		std::vector<uint16_t> pixels(size_t(n) * n * 4);
+		for (uint32_t y = 0; y < n; ++y)
+			for (uint32_t x = 0; x < n; ++x) {
+				uint16_t *p = &pixels[(size_t(y) * n + x) * 4];
+				p[0] = x < n / 2 ? 0 : 65535, p[1] = 30000, p[2] = 0, p[3] = 65535;
+			}
+		f.upload(f.filtered, n, pixels);
+		auto measure = [&](const std::vector<float> &img, float &slope, unsigned &width) {
+			slope = 0, width = 0;
+			const unsigned y = kDstSize / 2;
+			for (unsigned x = 0; x < kDstSize; ++x) {
+				float v = pixel(img, x, y, 0);
+				width += v > .1f && v < .9f;
+				if (x > 0)
+					slope = std::fmax(slope, v - pixel(img, x - 1, y, 0));
+			}
+		};
+		float bilinear_slope, cubic_slope;
+		unsigned bilinear_width, cubic_width;
+		measure(f.draw_quad(false, nullptr, f.filtered.view, RENDER_SOURCE_FILTER_BILINEAR), bilinear_slope,
+		        bilinear_width);
+		measure(f.draw_quad(false, nullptr, f.filtered.view, RENDER_SOURCE_FILTER_CATMULL_ROM), cubic_slope,
+		        cubic_width);
+		CAPTURE(bilinear_slope, cubic_slope, bilinear_width, cubic_width);
+		CHECK(cubic_slope > bilinear_slope * 1.15f);
+		CHECK(cubic_width < bilinear_width);
+	}
+
+	SECTION("a view sharing its image never reads its neighbour")
+	{
+		// Left half blue, right half red; the view uses only the left half.
+		const uint32_t m = 2 * n;
+		std::vector<uint16_t> pixels(size_t(m) * m * 4);
+		for (uint32_t y = 0; y < m; ++y)
+			for (uint32_t x = 0; x < m; ++x) {
+				uint16_t *p = &pixels[(size_t(y) * m + x) * 4];
+				p[0] = x < n ? 0 : 65535, p[1] = 0, p[2] = x < n ? 65535 : 0, p[3] = 65535;
+			}
+		f.upload(f.filtered, m, pixels);
+		auto cubic = f.draw_quad(false, nullptr, f.filtered.view, RENDER_SOURCE_FILTER_CATMULL_ROM,
+		                         {0.f, 0.f, .5f, 1.f});
+		float bleed = 0, blue = 0;
+		for (unsigned y = 0; y < kDstSize; ++y)
+			for (unsigned x = 0; x < kDstSize; ++x) {
+				bleed = std::fmax(bleed, pixel(cubic, x, y, 0));
+				blue = std::fmax(blue, pixel(cubic, x, y, 2));
+			}
+		CHECK(bleed == 0.f);
+		CHECK(blue > .9f);
 	}
 }

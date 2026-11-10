@@ -19,17 +19,21 @@
 
 #include "render/render_interface.h"
 #include "util/u_debug.h"
+#include "util/u_logging.h"
 
 #include "cache/render_compute_pipeline_cache.h"
 #include "cache/render_shader_specialization_helpers.h"
 
 #include <stdio.h>
+#include <string.h>
 
 #ifdef XRT_OS_OSX
 DEBUG_GET_ONCE_BOOL_OPTION(macos_quad_bounds, "XRT_MACOS_COMPOSITOR_QUAD_BOUNDS", false)
 DEBUG_GET_ONCE_BOOL_OPTION(macos_common_layers, "XRT_MACOS_COMPOSITOR_COMMON_LAYERS", false)
 DEBUG_GET_ONCE_BOOL_OPTION(macos_gpu_pass_timing, "XRT_MACOS_GPU_PASS_TIMING", false)
 DEBUG_GET_ONCE_BOOL_OPTION(log_apple_samples, "XRT_COMPOSITOR_LOG_APPLE_SAMPLES", false)
+// Distortion pass source filter: "bilinear" (default), "catmull-rom" or "catmull-rom-green".
+DEBUG_GET_ONCE_OPTION(source_filter, "XRT_COMPOSITOR_SOURCE_FILTER", NULL)
 #endif
 
 
@@ -462,6 +466,18 @@ render_resources_init(struct render_resources *r,
 
 	r->vk = vk;
 	r->shaders = shaders;
+
+	const char *source_filter = debug_get_option_source_filter();
+	r->source_filter = RENDER_SOURCE_FILTER_BILINEAR;
+	if (source_filter != NULL && strcmp(source_filter, "catmull-rom") == 0) {
+		r->source_filter = RENDER_SOURCE_FILTER_CATMULL_ROM;
+		U_LOG_I("Distortion source filter: Catmull-Rom");
+	} else if (source_filter != NULL && strcmp(source_filter, "catmull-rom-green") == 0) {
+		r->source_filter = RENDER_SOURCE_FILTER_CATMULL_ROM_GREEN;
+		U_LOG_I("Distortion source filter: Catmull-Rom for green");
+	} else if (source_filter != NULL && strcmp(source_filter, "bilinear") != 0) {
+		U_LOG_W("Unknown XRT_COMPOSITOR_SOURCE_FILTER '%s', using bilinear", source_filter);
+	}
 
 
 	/*
@@ -1052,6 +1068,7 @@ render_resources_init(struct render_resources *r,
 	};
 	for (size_t i = 0; i < ARRAY_SIZE(distortion_variants); i++) {
 		distortion_variants[i].use_identity_distortion = use_identity_distortion;
+		distortion_variants[i].source_filter = (uint32_t)r->source_filter;
 	}
 
 	xret = render_distortion_pipeline_cache_prewarm( //

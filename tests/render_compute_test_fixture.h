@@ -289,7 +289,7 @@ struct Fixture
 		REQUIRE(render_buffer_write(&vk(), &ubo, &data, sizeof(data)) == VK_SUCCESS);
 	}
 	VkPipeline
-	pipeline(const Variant &v, unsigned scenario, bool alpha, bool identity = false)
+	pipeline(const Variant &v, unsigned scenario, bool alpha, bool identity = false, uint32_t source_filter = 0)
 	{
 		VkShaderModuleCreateInfo mi{};
 		mi.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
@@ -301,6 +301,7 @@ struct Fixture
 		auto spec = render_make_distortion_spec(33, scenario != 0, 2);
 		spec.preserve_source_alpha = alpha;
 		spec.use_identity_distortion = identity;
+		spec.source_filter = source_filter;
 		auto &entries = ShaderSpecializationMap<render_distortion_spec>::kEntries;
 		VkSpecializationInfo sp{uint32_t(entries.size()), entries.data(), sizeof(spec), &spec};
 		VkComputePipelineCreateInfo ci{};

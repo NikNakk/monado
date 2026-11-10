@@ -14,6 +14,10 @@
 // Has to match mesh.foveation_binding in render_resources.c.
 #define FOVEATION_BINDING 2
 #include "foveation.inc.glsl"
+#include "source_filter.inc.glsl"
+
+// Source filter, SOURCE_FILTER_* in source_filter.inc.glsl.
+layout(constant_id = 0) const uint k_source_filter = 0;
 
 // [0]: the source, [1]: the quad-view inset (the source again without one).
 layout (binding = 0) uniform sampler2D tex_sampler[2];
@@ -63,8 +67,12 @@ void main()
 		b_uv = transform_uv_foveation(b_uv);
 	}
 
-	vec3 colour = vec3(texture(tex_sampler[0], r_uv).x, texture(tex_sampler[0], g_uv).y,
-	                   texture(tex_sampler[0], b_uv).z);
+	// Foveated sources are compact physical images: keep the hardware filter.
+	uint filter_mode = foveation_enabled() ? SOURCE_FILTER_BILINEAR : k_source_filter;
+	vec4 rect = ubo.post_transform;
+	vec3 colour = vec3(sample_source(tex_sampler[0], r_uv, rect, filter_mode, 0u).x,
+	                   sample_source(tex_sampler[0], g_uv, rect, filter_mode, 1u).y,
+	                   sample_source(tex_sampler[0], b_uv, rect, filter_mode, 2u).z);
 
 	// Quad views: blend the inset over its context view, per colour channel.
 	if (ubo.has_inset.x != 0u) {
@@ -72,9 +80,10 @@ void main()
 		              inset_blend_factor(in_inset_buv));
 		if (any(greaterThan(f, vec3(0.0)))) {
 			vec4 p = ubo.inset_post_transform;
-			vec3 inset = vec3(texture(tex_sampler[1], fma(in_inset_ruv, p.zw, p.xy)).x,
-			                  texture(tex_sampler[1], fma(in_inset_guv, p.zw, p.xy)).y,
-			                  texture(tex_sampler[1], fma(in_inset_buv, p.zw, p.xy)).z);
+			uint inset_filter = k_source_filter;
+			vec3 inset = vec3(sample_source(tex_sampler[1], fma(in_inset_ruv, p.zw, p.xy), p, inset_filter, 0u).x,
+			                  sample_source(tex_sampler[1], fma(in_inset_guv, p.zw, p.xy), p, inset_filter, 1u).y,
+			                  sample_source(tex_sampler[1], fma(in_inset_buv, p.zw, p.xy), p, inset_filter, 2u).z);
 			colour = mix(colour, inset, f);
 		}
 	}
