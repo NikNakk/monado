@@ -1,5 +1,6 @@
 // Copyright 2026, Nick Kennedy
 // SPDX-License-Identifier: BSL-1.0
+#include <algorithm>
 #include "render_compute_test_fixture.h"
 #include "util/comp_projection_fast_path.h"
 
@@ -133,6 +134,216 @@ TEST_CASE("Identity distortion agrees with CPU color and alpha reference", "[aux
 		// One code value accommodates float sampling and UNORM rounding differences.
 		CHECK(max_error <= 1);
 	}
+}
+
+namespace {
+// Quad-view fast path: the inset images go in the depth source slots.
+struct InsetSources
+{
+	Fixture &f;
+	Image images[2]{};
+	InsetSources(Fixture &fixture, uint32_t w, uint32_t h, const std::vector<uint8_t> &pixels) : f(fixture)
+	{
+		for (auto &image : images)
+			f.create_image(image, {w, h}, VK_FORMAT_R8G8B8A8_UNORM, pixels.data(), pixels.size());
+		VkDescriptorImageInfo infos[2];
+		for (unsigned i = 0; i < 2; ++i)
+			infos[i] = {f.sampler, images[i].view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
+		VkWriteDescriptorSet write{};
+		write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+		write.dstSet = f.set;
+		write.dstBinding = 0;
+		write.dstArrayElement = 2;
+		write.descriptorCount = 2;
+		write.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+		write.pImageInfo = infos;
+		f.vk().vkUpdateDescriptorSets(f.vk().device, 1, &write, 0, nullptr);
+	}
+	~InsetSources()
+	{
+		f.vk().vkDeviceWaitIdle(f.vk().device);
+		for (auto &i : images) {
+			f.vk().vkDestroyImageView(f.vk().device, i.view, nullptr);
+			f.vk().vkDestroyImage(f.vk().device, i.image, nullptr);
+			f.vk().vkFreeMemory(f.vk().device, i.memory, nullptr);
+		}
+	}
+};
+
+xrt_fov
+fov_degrees(float left, float right, float up, float down)
+{
+	const float d = float(M_PI / 180.0);
+	return {left * d, right * d, up * d, down * d};
+}
+
+render_compute_distortion_ubo_data
+inset_ubo(Fixture &f, bool timewarp, bool inset, const xrt_fov &context, const xrt_fov &inset_fov)
+{
+	render_compute_distortion_ubo_data data{};
+	for (unsigned eye = 0; eye < 2; ++eye) {
+		data.views[eye] = {eye * f.width, 0, f.width, f.height};
+		render_calc_uv_to_tangent_lengths_rect(&context, &data.pre_transforms[eye]);
+		data.post_transforms[eye] = {0, 0, 1, 1};
+		// Real timewarp matrices; a small yaw so the context and inset move together.
+		const xrt_pose source = XRT_POSE_IDENTITY;
+		xrt_pose begin = XRT_POSE_IDENTITY, end = XRT_POSE_IDENTITY;
+		if (timewarp) {
+			begin.orientation = {0, std::sin(.004f), 0, std::cos(.004f)};
+			end.orientation = {0, std::sin(-.004f), 0, std::cos(-.004f)};
+		}
+		render_calc_time_warp_matrix(&source, &context, &begin, &data.transform_timewarp_scanout_begin[eye]);
+		render_calc_time_warp_matrix(&source, &context, &end, &data.transform_timewarp_scanout_end[eye]);
+		data.has_depth[eye].has_inset = inset ? 1 : 0;
+		render_calc_inset_from_context_uv(&context, &inset_fov, &data.inset_from_context[eye]);
+		data.inset_post_transforms[eye] = {0, 0, 1, 1};
+	}
+	return data;
+}
+} // namespace
+
+TEST_CASE("Quad-view inset blends over its context in the distortion pass", "[aux_render][gpu]")
+{
+	Fixture f;
+	f.init(96, 80);
+	// A tangent-space identity context (+-45 degrees) and an off-centre, asymmetric inset.
+	const xrt_fov context = fov_degrees(-45, 45, 45, -45);
+	const xrt_fov inset_fov = fov_degrees(-10, 25, 20, -5);
+	xrt_normalized_rect a{};
+	render_calc_inset_from_context_uv(&context, &inset_fov, &a);
+
+	// Inset content: the context's red/green gradients resampled at the inset's
+	// directions (so they should agree), with a blue marker that the context lacks.
+	const uint32_t iw = 64, ih = 64;
+	std::vector<uint8_t> pixels(size_t(iw) * ih * 4);
+	for (uint32_t y = 0; y < ih; ++y)
+		for (uint32_t x = 0; x < iw; ++x) {
+			double u = ((x + .5) / iw - a.x) / a.w, v = ((y + .5) / ih - a.y) / a.h;
+			double tx = u * f.width - .5, ty = v * f.height - .5;
+			size_t i = (size_t(y) * iw + x) * 4;
+			pixels[i] = uint8_t(std::clamp(std::lround(tx * 255 / (f.width - 1)), 0l, 255l));
+			pixels[i + 1] = uint8_t(std::clamp(std::lround(ty * 255 / (f.height - 1)), 0l, 255l));
+			pixels[i + 2] = 128;
+			pixels[i + 3] = 255;
+		}
+	InsetSources sources(f, iw, ih, pixels);
+
+	const double tl = std::tan(inset_fov.angle_left), tr = std::tan(inset_fov.angle_right);
+	const double tu = std::tan(inset_fov.angle_up), td = std::tan(inset_fov.angle_down);
+	for (bool timewarp : {false, true}) {
+		CAPTURE(timewarp);
+		auto p = f.pipeline(variants[0], timewarp ? 1 : 0, false, true);
+		auto plain = inset_ubo(f, timewarp, false, context, inset_fov);
+		REQUIRE(render_buffer_write(&f.vk(), &f.ubo, &plain, sizeof(plain)) == VK_SUCCESS);
+		f.run(p, variants[0], 1, true);
+		auto reference = f.snapshot();
+		auto quad = inset_ubo(f, timewarp, true, context, inset_fov);
+		REQUIRE(render_buffer_write(&f.vk(), &f.ubo, &quad, sizeof(quad)) == VK_SUCCESS);
+		f.run(p, variants[0], 1, true);
+		auto actual = f.snapshot();
+
+		unsigned inside = 0, outside = 0, gradient_error = 0, marker_error = 0, outside_error = 0;
+		for (unsigned eye = 0; eye < 2; ++eye)
+			for (unsigned y = 0; y < f.height; ++y)
+				for (unsigned x = 0; x < f.width; ++x) {
+					// Where this output pixel's direction falls in the inset, from angles only.
+					double tan_x = -1 + 2 * (x + .5) / f.width, tan_y = 1 - 2 * (y + .5) / f.height;
+					double ix = (tan_x - tl) / (tr - tl), iy = (tu - tan_y) / (tu - td);
+					size_t i = (size_t(y) * 2 * f.width + eye * f.width + x) * 4;
+					auto diff = [&](unsigned c) {
+						return unsigned(std::abs(int(actual[i + c]) - int(reference[i + c])));
+					};
+					if (ix > .1 && ix < .9 && iy > .1 && iy < .9) {
+						inside++;
+						gradient_error = std::max({gradient_error, diff(0), diff(1)});
+						marker_error = std::max(marker_error,
+						                        unsigned(std::abs(int(actual[i + 2]) - 188)));
+					} else if (ix < -.05 || ix > 1.05 || iy < -.05 || iy > 1.05) {
+						outside++;
+						outside_error =
+						    std::max({outside_error, diff(0), diff(1), diff(2), diff(3)});
+					}
+				}
+		CAPTURE(inside, outside);
+		CHECK(inside > 500);
+		CHECK(outside > 5000);
+		// sRGB(128/255) is 188; the gradients differ only by resampling and rounding.
+		CHECK(marker_error <= 1);
+		CHECK(gradient_error <= 3);
+		CHECK(outside_error == 0);
+	}
+}
+
+// Quad views at PS VR2 size: the layer squasher route (context plus inset
+// squashed at the 1.4x intermediate size, then distortion) against one
+// distortion pass that blends the inset. Prints medians; no thresholds.
+TEST_CASE("Quad-view composition GPU benchmark", "[.][aux_render][gpu][quad_benchmark]")
+{
+	const uint32_t out_w = 2000, out_h = 2040, scratch_w = 2800, scratch_h = 2856;
+	auto median = [](std::vector<double> v) {
+		std::sort(v.begin(), v.end());
+		return v[v.size() / 2];
+	};
+	const unsigned rounds = 15, frames = 8;
+
+	// Layer squasher: context then inset layer, per eye, at the intermediate size.
+	double squash_ms = 0;
+	{
+		LayerFixture f;
+		f.init(scratch_w, scratch_h);
+		f.init_layers();
+		if (!f.queries)
+			SKIP("GPU timestamps unavailable");
+		f.config_layers(1);
+		for (unsigned eye = 0; eye < 2; ++eye) {
+			render_compute_layer_ubo_data data{};
+			data.view = {eye * scratch_w, 0, scratch_w, scratch_h};
+			data.pre_transform = {-1, -1, 2, 2};
+			data.layer_count.value = 2;
+			for (unsigned l = 0; l < 2; ++l) {
+				auto &layer = data.layers[l];
+				layer.layer_data.layer_type = l == 0 ? LAYER_COMP_TYPE_CONTEXT : LAYER_COMP_TYPE_INSET;
+				layer.image_info.color_image_index = l;
+				layer.post_transforms = {0, 0, 1, 1};
+				layer.color_scale = {1, 1, 1, 1};
+				// The inset covers the central half in each direction.
+				for (unsigned i = 0; i < 4; ++i)
+					layer.transforms.v[i * 5] = (l == 1 && i < 2) ? 2.f : 1.f;
+			}
+			REQUIRE(render_buffer_write(&f.vk(), &f.layer_ubo[eye], &data, sizeof(data)) == VK_SUCCESS);
+		}
+		auto p = f.layer_pipeline(false, false, true);
+		f.run_layers(p, 16, false);
+		std::vector<double> ms;
+		for (unsigned r = 0; r < rounds; ++r)
+			ms.push_back(f.run_layers(p, frames, false));
+		squash_ms = median(ms);
+	}
+
+	// Distortion: stereo (as after squashing) and quad (inset blended in).
+	Fixture f;
+	f.init(out_w, out_h);
+	if (!f.queries)
+		SKIP("GPU timestamps unavailable");
+	std::vector<uint8_t> pixels(size_t(1400) * 1428 * 4, 200);
+	InsetSources sources(f, 1400, 1428, pixels);
+	const xrt_fov context = fov_degrees(-50, 45, 50, -52);
+	const xrt_fov inset_fov = fov_degrees(-25, 22.5f, 25, -26);
+	auto p = f.pipeline(variants[0], 1, false);
+	double ms_by_mode[2]{};
+	for (bool inset : {false, true}) {
+		auto data = inset_ubo(f, true, inset, context, inset_fov);
+		REQUIRE(render_buffer_write(&f.vk(), &f.ubo, &data, sizeof(data)) == VK_SUCCESS);
+		f.run(p, variants[0], 16, false);
+		std::vector<double> ms;
+		for (unsigned r = 0; r < rounds; ++r)
+			ms.push_back(f.run(p, variants[0], frames, false));
+		ms_by_mode[inset] = median(ms);
+	}
+	std::printf(
+	    "quad-view benchmark (ms per frame, both eyes): squash %u x %u x2 %.3f, "
+	    "stereo distortion %u x %u x2 %.3f, squasher route %.3f, quad fast path %.3f\n",
+	    scratch_w, scratch_h, squash_ms, out_w, out_h, ms_by_mode[0], squash_ms + ms_by_mode[0], ms_by_mode[1]);
 }
 
 TEST_CASE("Distortion GPU workgroup benchmark", "[.][aux_render][gpu][benchmark]")

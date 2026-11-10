@@ -101,6 +101,8 @@
 #define WINDOW_TITLE "Monado"
 
 DEBUG_GET_ONCE_BOOL_OPTION(disable_deferred, "XRT_COMPOSITOR_DISABLE_DEFERRED", false)
+// Quad views (context plus inset) in one compute distortion pass, without the layer squasher.
+DEBUG_GET_ONCE_BOOL_OPTION(quad_view_fast_path, "XRT_COMPOSITOR_QUAD_VIEW_FAST_PATH", false)
 #ifdef XRT_OS_OSX
 DEBUG_GET_ONCE_BOOL_OPTION(macos_psvr2_frame_pipeline_trace, "PSVR2_TIMING_TRACE", false)
 #endif
@@ -529,6 +531,52 @@ compositor_layer_passthrough(struct xrt_compositor *xc, struct xrt_device *xdev,
 	return XRT_SUCCESS;
 }
 
+static bool
+plain_projection_layer(const struct comp_layer *layer, enum xrt_layer_composition_flags split_flag)
+{
+	return layer->data.type == XRT_LAYER_PROJECTION && (layer->data.flags & split_flag) != 0 &&
+	       (layer->data.flags & XRT_LAYER_COMPOSITION_COLOR_BIAS_SCALE) == 0 &&
+	       !(layer->data.proj.chroma_key.curve > 0.0f);
+}
+
+static bool
+same_pose(const struct xrt_pose *a, const struct xrt_pose *b)
+{
+	const float e = 1e-5f;
+	return fabsf(a->position.x - b->position.x) <= e && fabsf(a->position.y - b->position.y) <= e &&
+	       fabsf(a->position.z - b->position.z) <= e && fabsf(a->orientation.x - b->orientation.x) <= e &&
+	       fabsf(a->orientation.y - b->orientation.y) <= e && fabsf(a->orientation.z - b->orientation.z) <= e &&
+	       fabsf(a->orientation.w - b->orientation.w) <= e;
+}
+
+/*!
+ * A quad-view frame is a context then an inset projection layer. The compute
+ * distortion shader and the graphics distortion mesh can blend the inset
+ * themselves when each inset view shares its context view's pose (as Monado's
+ * emulated inset does).
+ */
+static bool
+can_do_quad_view_fast_path(struct comp_compositor *c)
+{
+	if (!debug_get_bool_option_quad_view_fast_path() || c->base.layer_accum.layer_count != 2) {
+		return false;
+	}
+	const struct comp_layer *context = &c->base.layer_accum.layers[0];
+	const struct comp_layer *inset = &c->base.layer_accum.layers[1];
+	if (!plain_projection_layer(context, XRT_LAYER_SPLIT_QUAD_VIEW_CONTEXT) ||
+	    !plain_projection_layer(inset, XRT_LAYER_SPLIT_QUAD_VIEW_INSET)) {
+		return false;
+	}
+	for (uint32_t i = 0; i < c->nr.view_count; i++) {
+		const struct xrt_layer_projection_view_data *cv = &context->data.proj.v[i];
+		const struct xrt_layer_projection_view_data *iv = &inset->data.proj.v[i];
+		if (cv->foveation.enabled || iv->foveation.enabled || !same_pose(&cv->pose, &iv->pose)) {
+			return false;
+		}
+	}
+	return true;
+}
+
 /*!
  * We have a fast path for single projection layer that goes directly
  * to the distortion shader, so no need to use the layer renderer.
@@ -536,6 +584,9 @@ compositor_layer_passthrough(struct xrt_compositor *xc, struct xrt_device *xdev,
 static bool
 can_do_one_projection_layer_fast_path(struct comp_compositor *c)
 {
+	if (can_do_quad_view_fast_path(c)) {
+		return true;
+	}
 	if (c->base.layer_accum.layer_count != 1) {
 		return false;
 	}
@@ -1595,7 +1646,9 @@ comp_main_create_system_compositor(struct xrt_device *xdev,
 	sys_info->view_types[0] = c->view_configs[0].view_type;
 	c->view_config_count = sys_info->view_type_count = 1; // Only one view config for now.
 
-	if (c->settings.use_compute && // Only compute for now.
+	// The compute layer squasher blends insets; the graphics compositor only
+	// does on the quad-view fast path.
+	if ((c->settings.use_compute || debug_get_bool_option_quad_view_fast_path()) &&
 	    view_type == XRT_VIEW_TYPE_STEREO) {
 		sys_info->supports_emulated_quad_views_with_inset = true;
 	}

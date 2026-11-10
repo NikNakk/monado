@@ -217,3 +217,20 @@ render_calc_uv_to_tangent_lengths_rect(const struct xrt_fov *fov, struct xrt_nor
 
 	*out_rect = transform;
 }
+
+void
+render_calc_inset_from_context_uv(const struct xrt_fov *context,
+                                  const struct xrt_fov *inset,
+                                  struct xrt_normalized_rect *out_rect)
+{
+	// tangent = uv * wh + xy in each view, so inset = (context * c.wh + c.xy - i.xy) / i.wh.
+	struct xrt_normalized_rect c, i;
+	render_calc_uv_to_tangent_lengths_rect(context, &c);
+	render_calc_uv_to_tangent_lengths_rect(inset, &i);
+	*out_rect = (struct xrt_normalized_rect){
+	    .x = (c.x - i.x) / i.w,
+	    .y = (c.y - i.y) / i.h,
+	    .w = c.w / i.w,
+	    .h = c.h / i.h,
+	};
+}

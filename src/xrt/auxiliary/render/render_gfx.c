@@ -1248,23 +1248,47 @@ render_gfx_mesh_alloc_and_write(struct render_gfx *render,
                                 const struct xrt_foveation_map_data *src_foveation,
                                 VkSampler src_sampler,
                                 VkImageView src_image_view,
+                                VkSampler inset_sampler,
+                                VkImageView inset_image_view,
                                 VkDescriptorSet *out_descriptor_set)
 {
 	struct render_resources *r = render->r;
+	struct vk_bundle *vk = vk_from_render(render);
 
-	return do_ubo_and_src_alloc_and_write(  //
-	    render,                             //
-	    r->mesh.ubo_binding,                //
-	    data,                               // ubo_ptr
-	    sizeof(*data),                      // ubo_size
-	    r->mesh.src_binding,                //
-	    src_sampler,                        //
-	    src_image_view,                     //
-	    r->mesh.foveation_binding,          //
-	    src_foveation,                      //
-	    r->gfx.ubo_and_src_descriptor_pool, //
-	    r->mesh.descriptor_set_layout,      //
-	    out_descriptor_set);                //
+	VkResult ret = do_ubo_and_src_alloc_and_write( //
+	    render,                                    //
+	    r->mesh.ubo_binding,                       //
+	    data,                                      // ubo_ptr
+	    sizeof(*data),                             // ubo_size
+	    r->mesh.src_binding,                       //
+	    src_sampler,                               //
+	    src_image_view,                            //
+	    r->mesh.foveation_binding,                 //
+	    src_foveation,                             //
+	    r->gfx.ubo_and_src_descriptor_pool,        //
+	    r->mesh.descriptor_set_layout,             //
+	    out_descriptor_set);                       //
+	VK_CHK_AND_RET(ret, "do_ubo_and_src_alloc_and_write");
+
+	// Second source: the quad-view inset, or the source again so every element is valid.
+	const bool inset = inset_image_view != VK_NULL_HANDLE;
+	VkDescriptorImageInfo image_info = {
+	    .sampler = inset ? inset_sampler : src_sampler,
+	    .imageView = inset ? inset_image_view : src_image_view,
+	    .imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+	};
+	VkWriteDescriptorSet write = {
+	    .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+	    .dstSet = *out_descriptor_set,
+	    .dstBinding = r->mesh.src_binding,
+	    .dstArrayElement = 1,
+	    .descriptorCount = 1,
+	    .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+	    .pImageInfo = &image_info,
+	};
+	vk->vkUpdateDescriptorSets(vk->device, 1, &write, 0, NULL);
+
+	return VK_SUCCESS;
 }
 
 void

@@ -48,7 +48,24 @@ layout(set = 0, binding = 3, std140) uniform restrict Config
 	vec4 foveation_y[66];
 	// x: enabled, y: boundary count.
 	uvec4 foveation[2];
+
+	// Quad-view inset (has_depth[iz].y): inset UV = context UV * zw + xy,
+	// then the inset sub image transform. The inset is in the depth slot.
+	vec4 inset_from_context[2];
+	vec4 inset_post_transform[2];
 }ubo;
+
+// Matches RENDER_LAYER_DEFAULT_INSET_BLEND_EDGE used by the layer squasher.
+const float k_inset_blend_edge = 0.05;
+
+// Same as the layer squasher's inset blend: fade over the inset's outer edge.
+// 1 - smoothstep(1 - e, 1, uv) is the defined form of smoothstep(1, 1 - e, uv).
+float inset_blend_factor(vec2 uv)
+{
+	vec2 f = min(smoothstep(vec2(0.0), vec2(k_inset_blend_edge), uv),
+	             vec2(1.0) - smoothstep(vec2(1.0 - k_inset_blend_edge), vec2(1.0), uv));
+	return min(f.x, f.y);
+}
 
 
 vec2 position_to_subimage_uv(ivec2 extent, uint ix, uint iy)
@@ -258,6 +275,8 @@ void main()
 	// Keep projection UVs separate from the subimage mapping. For depth layers
 	// use a single depth fetch at the green/central chromatic sample, then apply
 	// the resulting positional delta to all channels.
+	// Source view UVs before the sub image transform, for the quad-view inset.
+	vec2 r_view_uv = r_uv, g_view_uv = g_uv, b_view_uv = b_uv;
 	if (k_do_timewarp) {
 		vec2 r_projection_uv = transform_uv_timewarp(r_uv, iz);
 		vec2 g_projection_uv = transform_uv_timewarp(g_uv, iz);
@@ -272,6 +291,9 @@ void main()
 			b_projection_uv += positional_delta;
 		}
 
+		r_view_uv = r_projection_uv;
+		g_view_uv = g_projection_uv;
+		b_view_uv = b_projection_uv;
 		r_uv = transform_uv_subimage(r_projection_uv, iz);
 		g_uv = transform_uv_subimage(g_projection_uv, iz);
 		b_uv = transform_uv_subimage(b_projection_uv, iz);
@@ -294,6 +316,26 @@ void main()
 	    texture(source[iz], g_uv).g, //
 	    texture(source[iz], b_uv).b, //
 	    k_preserve_source_alpha ? texture(source[iz], g_uv).a : 1.0); //
+
+	// Quad views: blend the inset over its context view, per colour channel.
+	if (ubo.has_depth[iz].y != 0u) {
+		vec4 a = ubo.inset_from_context[iz];
+		vec2 r_inset = fma(r_view_uv, a.zw, a.xy);
+		vec2 g_inset = fma(g_view_uv, a.zw, a.xy);
+		vec2 b_inset = fma(b_view_uv, a.zw, a.xy);
+		vec3 f = vec3(inset_blend_factor(r_inset), inset_blend_factor(g_inset), inset_blend_factor(b_inset));
+		// Most pixels are outside the inset: skip its samples there.
+		if (any(greaterThan(f, vec3(0.0)))) {
+			vec4 p = ubo.inset_post_transform[iz];
+			uint s = k_view_count + iz;
+			vec4 inset = vec4(                                       //
+			    texture(source[s], fma(r_inset, p.zw, p.xy)).r,      //
+			    texture(source[s], fma(g_inset, p.zw, p.xy)).g,      //
+			    texture(source[s], fma(b_inset, p.zw, p.xy)).b,      //
+			    k_preserve_source_alpha ? texture(source[s], fma(g_inset, p.zw, p.xy)).a : 1.0);
+			colour = vec4(mix(colour.rgb, inset.rgb, f), mix(colour.a, inset.a, f.g));
+		}
+	}
 
 	// Do colour correction here since there are no automatic conversion in hardware available.
 	colour = vec4(from_linear_to_srgb(colour.rgb), colour.a);
