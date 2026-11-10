@@ -5,6 +5,7 @@
  * @brief Visibility masks from an outline, and the PS VR2 lens outline.
  */
 
+#include "math/m_mathinclude.h"
 #include "util/u_visibility_mask.h"
 
 #include "catch_amalgamated.hpp"

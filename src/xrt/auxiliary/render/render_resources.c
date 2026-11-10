@@ -32,9 +32,10 @@ DEBUG_GET_ONCE_BOOL_OPTION(macos_quad_bounds, "XRT_MACOS_COMPOSITOR_QUAD_BOUNDS"
 DEBUG_GET_ONCE_BOOL_OPTION(macos_common_layers, "XRT_MACOS_COMPOSITOR_COMMON_LAYERS", false)
 DEBUG_GET_ONCE_BOOL_OPTION(macos_gpu_pass_timing, "XRT_MACOS_GPU_PASS_TIMING", false)
 DEBUG_GET_ONCE_BOOL_OPTION(log_apple_samples, "XRT_COMPOSITOR_LOG_APPLE_SAMPLES", false)
+#endif
+
 // Distortion pass source filter: "bilinear" (default), "catmull-rom" or "catmull-rom-green".
 DEBUG_GET_ONCE_OPTION(source_filter, "XRT_COMPOSITOR_SOURCE_FILTER", NULL)
-#endif
 
 
 /*
