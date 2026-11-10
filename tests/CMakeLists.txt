@@ -661,6 +661,13 @@ if(XRT_BUILD_DRIVER_PSVR2 AND XRT_BUILD_DRIVER_PSSENSE)
 	add_test(NAME tests_psvr2_sense_tracking COMMAND tests_psvr2_sense_tracking)
 endif()
 
+add_executable(
+	tests_visibility_mask tests_visibility_mask.cpp
+	${CMAKE_CURRENT_SOURCE_DIR}/../src/xrt/drivers/psvr2/psvr2_distortion.c
+	)
+target_link_libraries(tests_visibility_mask PRIVATE xrt-external-catch2 xrt-interfaces aux_util)
+add_test(NAME tests_visibility_mask COMMAND tests_visibility_mask)
+
 if(XRT_BUILD_DRIVER_PSSENSE)
 	add_executable(
 		tests_pssense_clock

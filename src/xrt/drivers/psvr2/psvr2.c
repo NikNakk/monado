@@ -44,6 +44,7 @@
 #include "util/u_time.h"
 #include "util/u_trace_marker.h"
 #include "util/u_var.h"
+#include "util/u_visibility_mask.h"
 #include "util/u_debug.h"
 
 #include <assert.h>
@@ -73,6 +74,13 @@
 // clang-format on
 
 DEBUG_GET_ONCE_FLOAT_OPTION(psvr2_default_brightness, "PSVR2_DEFAULT_BRIGHTNESS", 1.0f)
+// Hidden-area mask from the lens distortion; off gives Monado's default corner triangles.
+DEBUG_GET_ONCE_BOOL_OPTION(psvr2_visibility_mask, "PSVR2_VISIBILITY_MASK", true)
+// Squared lens radius the mask keeps; 0 keeps the whole panel. The distortion table ends at 1, so the
+// default hides only the panel corners beyond it.
+DEBUG_GET_ONCE_FLOAT_OPTION(psvr2_visibility_mask_r2, "PSVR2_VISIBILITY_MASK_R2", 1.0f)
+// Extra room around the visible area, as a fraction of its radius, for reprojection.
+DEBUG_GET_ONCE_FLOAT_OPTION(psvr2_visibility_mask_margin, "PSVR2_VISIBILITY_MASK_MARGIN", 0.03f)
 
 DEBUG_GET_ONCE_LOG_OPTION(psvr2_log, "PSVR2_LOG", U_LOGGING_WARN)
 DEBUG_GET_ONCE_BOOL_OPTION(psvr2_timing_log, "PSVR2_TIMING_LOG", false)
@@ -1053,6 +1061,34 @@ psvr2_hmd_get_tracked_pose(struct xrt_device *xdev,
 #endif
 
 	return XRT_SUCCESS;
+}
+
+#define PSVR2_VISIBILITY_OUTLINE_POINTS 96
+
+static xrt_result_t
+psvr2_hmd_get_visibility_mask(struct xrt_device *xdev,
+                              enum xrt_visibility_mask_type type,
+                              uint32_t view_index,
+                              struct xrt_visibility_mask **out_mask)
+{
+	struct psvr2_hmd *hmd = psvr2_hmd(xdev);
+	const struct xrt_fov fov = xdev->hmd->distortion.fov[view_index];
+	struct xrt_vec2 centre;
+	struct xrt_vec2 outline[PSVR2_VISIBILITY_OUTLINE_POINTS];
+	const float r2 = debug_get_float_option_psvr2_visibility_mask_r2();
+	const float margin = debug_get_float_option_psvr2_visibility_mask_margin();
+
+	if (view_index < 2 && debug_get_bool_option_psvr2_visibility_mask() &&
+	    psvr2_visibility_outline(hmd->distortion_calibration, (int)view_index, r2, margin, ARRAY_SIZE(outline),
+	                             &centre, outline)) {
+		u_visibility_mask_from_outline(type, &fov, &centre, outline, ARRAY_SIZE(outline), out_mask);
+		PSVR2_INFO(hmd, "Visibility mask type %d for view %u from the lens (r2 %.2f, margin %.2f)", (int)type,
+		           view_index, r2, margin);
+	} else {
+		u_visibility_mask_get_default(type, &fov, out_mask);
+		PSVR2_INFO(hmd, "Visibility mask type %d for view %u: default corners", (int)type, view_index);
+	}
+	return *out_mask != NULL ? XRT_SUCCESS : XRT_ERROR_ALLOCATION;
 }
 
 static xrt_result_t
@@ -2861,6 +2897,7 @@ psvr2_hmd_create(struct xrt_prober_device *xpdev)
 
 	hmd->base.update_inputs = psvr2_hmd_update_inputs;
 	hmd->base.get_view_poses = psvr2_hmd_get_view_poses;
+	hmd->base.get_visibility_mask = psvr2_hmd_get_visibility_mask;
 	hmd->base.get_brightness = psvr2_get_brightness;
 	hmd->base.set_brightness = psvr2_set_brightness;
 	hmd->base.set_output = psvr2_hmd_set_output;

@@ -38,6 +38,37 @@ u_visibility_mask_get_default(enum xrt_visibility_mask_type type,
 void
 u_visibility_mask_get_noop(enum xrt_visibility_mask_type type, struct xrt_visibility_mask **out_mask);
 
+/*!
+ * Visibility mask from the outline of the visible area, for example a lens
+ * edge. The outline is @p count points around @p centre in order of increasing
+ * angle, all in the view's image coordinates (0 to 1, v down), and must be
+ * star-shaped around the centre. Points beyond the image are clamped to its
+ * edge. The hidden mesh covers the image outside the outline, the visible
+ * mesh is a fan from the centre, and the line loop is the outline itself. The
+ * caller must take care of de-allocating the mask once done with it.
+ *
+ * @ingroup aux_util
+ */
+void
+u_visibility_mask_from_outline(enum xrt_visibility_mask_type type,
+                               const struct xrt_fov *fov,
+                               const struct xrt_vec2 *centre,
+                               const struct xrt_vec2 *outline,
+                               uint32_t count,
+                               struct xrt_visibility_mask **out_mask);
+
+/*!
+ * Outline of an ellipse centred in the image that touches its edges when
+ * @p scale is 1, for u_visibility_mask_from_outline. Writes @p count points.
+ *
+ * @ingroup aux_util
+ */
+void
+u_visibility_mask_ellipse_outline(float scale,
+                                  uint32_t count,
+                                  struct xrt_vec2 *out_centre,
+                                  struct xrt_vec2 *out_outline);
+
 
 #ifdef __cplusplus
 }

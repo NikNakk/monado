@@ -38,6 +38,8 @@
 DEBUG_GET_ONCE_OPTION(head_serial, "XRT_DEVICE_HEAD_SERIAL", NULL)
 DEBUG_GET_ONCE_OPTION(left_serial, "XRT_DEVICE_LEFT_SERIAL", NULL)
 DEBUG_GET_ONCE_OPTION(right_serial, "XRT_DEVICE_RIGHT_SERIAL", NULL)
+// Greater than 0: an elliptical mask of this size (1 touches the image edges) instead of the corner triangles.
+DEBUG_GET_ONCE_FLOAT_OPTION(visibility_mask_ellipse, "XRT_VISIBILITY_MASK_ELLIPSE", 0.0f)
 
 
 /*
@@ -570,8 +572,18 @@ u_device_get_visibility_mask(struct xrt_device *xdev,
                              struct xrt_visibility_mask **out_mask)
 {
 	const struct xrt_fov fov = xdev->hmd->distortion.fov[view_index];
-	u_visibility_mask_get_default(type, &fov, out_mask);
-	return XRT_SUCCESS;
+	const float ellipse = debug_get_float_option_visibility_mask_ellipse();
+	if (ellipse > 0.0f) {
+		struct xrt_vec2 centre;
+		struct xrt_vec2 outline[64];
+		u_visibility_mask_ellipse_outline(ellipse, ARRAY_SIZE(outline), &centre, outline);
+		u_visibility_mask_from_outline(type, &fov, &centre, outline, ARRAY_SIZE(outline), out_mask);
+	} else {
+		u_visibility_mask_get_default(type, &fov, out_mask);
+	}
+	U_LOG_I("%s: visibility mask type %d for view %u (%s)", xdev->str, (int)type, view_index,
+	        ellipse > 0.0f ? "ellipse" : "corners");
+	return *out_mask != NULL ? XRT_SUCCESS : XRT_ERROR_ALLOCATION;
 }
 
 /*

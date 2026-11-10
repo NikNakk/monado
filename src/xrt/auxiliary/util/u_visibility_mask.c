@@ -15,6 +15,7 @@
 
 
 #include <string.h>
+#include <stdlib.h>
 
 static const struct xrt_vec2 vertices_hidden[] = {
     {1.0, 0.75},   {1.0, 1.0},   {0.75, 1.0},   {-1.0, 1.0},  {-1.0, 0.75}, {-0.75, 1.0},
@@ -138,4 +139,192 @@ u_visibility_mask_get_noop(enum xrt_visibility_mask_type type, struct xrt_visibi
 	mask->vertex_count = 0;
 
 	*out_mask = mask;
+}
+
+
+/*
+ *
+ * Masks from an outline.
+ *
+ */
+
+static float
+triangle_area2(struct xrt_vec2 a, struct xrt_vec2 b, struct xrt_vec2 c)
+{
+	return (b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x);
+}
+
+/*!
+ * Where the ray from @p c through @p p leaves the unit square. Edges are
+ * numbered in the order the outline visits them with v down: 0 right,
+ * 1 bottom, 2 left, 3 top.
+ */
+static struct xrt_vec2
+exit_unit_square(struct xrt_vec2 c, struct xrt_vec2 p, int *out_edge)
+{
+	const float dx = p.x - c.x;
+	const float dy = p.y - c.y;
+	float t = INFINITY;
+	int edge = 0;
+
+	if (dx > 0 && (1.f - c.x) / dx < t) {
+		t = (1.f - c.x) / dx;
+		edge = 0;
+	}
+	if (dy > 0 && (1.f - c.y) / dy < t) {
+		t = (1.f - c.y) / dy;
+		edge = 1;
+	}
+	if (dx < 0 && -c.x / dx < t) {
+		t = -c.x / dx;
+		edge = 2;
+	}
+	if (dy < 0 && -c.y / dy < t) {
+		t = -c.y / dy;
+		edge = 3;
+	}
+
+	*out_edge = edge;
+	return (struct xrt_vec2){c.x + dx * t, c.y + dy * t};
+}
+
+static void
+push_triangle(const struct xrt_vec2 *uv, uint32_t *indices, uint32_t *count, uint32_t a, uint32_t b, uint32_t c)
+{
+	// Drop slivers, such as where the outline has been clamped to the edge.
+	if (fabsf(triangle_area2(uv[a], uv[b], uv[c])) < 1e-9f) {
+		return;
+	}
+	indices[(*count)++] = a;
+	indices[(*count)++] = b;
+	indices[(*count)++] = c;
+}
+
+void
+u_visibility_mask_from_outline(enum xrt_visibility_mask_type type,
+                               const struct xrt_fov *fov,
+                               const struct xrt_vec2 *centre,
+                               const struct xrt_vec2 *outline,
+                               uint32_t count,
+                               struct xrt_visibility_mask **out_mask)
+{
+	static const struct xrt_vec2 corners[4] = {{1.f, 1.f}, {0.f, 1.f}, {0.f, 0.f}, {1.f, 0.f}};
+	const uint32_t n = count;
+	const struct xrt_vec2 c = *centre;
+
+	// Vertices: outline [0, n), its edge points [n, 2n), image corners [2n, 2n + 4), centre 2n + 4.
+	const uint32_t max_vertices = 2 * n + 5;
+	const uint32_t max_indices = 18 * n;
+	struct xrt_vec2 *uv = U_TYPED_ARRAY_CALLOC(struct xrt_vec2, max_vertices);
+	int *edges = U_TYPED_ARRAY_CALLOC(int, n);
+	uint32_t *indices = U_TYPED_ARRAY_CALLOC(uint32_t, max_indices);
+	struct xrt_visibility_mask *mask = NULL;
+	uint32_t vertex_count = 0;
+	uint32_t index_count = 0;
+
+	if (uv == NULL || edges == NULL || indices == NULL || n < 3) {
+		U_LOG_E("failed to build visibility mask from %u outline points", n);
+		goto out;
+	}
+
+	for (uint32_t i = 0; i < n; i++) {
+		struct xrt_vec2 o = exit_unit_square(c, outline[i], &edges[i]);
+		struct xrt_vec2 p = outline[i];
+		const float dp = (p.x - c.x) * (p.x - c.x) + (p.y - c.y) * (p.y - c.y);
+		const float de = (o.x - c.x) * (o.x - c.x) + (o.y - c.y) * (o.y - c.y);
+		uv[i] = dp < de ? p : o;
+		uv[n + i] = o;
+	}
+	for (uint32_t i = 0; i < 4; i++) {
+		uv[2 * n + i] = corners[i];
+	}
+	uv[2 * n + 4] = c;
+
+	switch (type) {
+	case XRT_VISIBILITY_MASK_TYPE_HIDDEN_TRIANGLE_MESH:
+		vertex_count = 2 * n + 4;
+		for (uint32_t i = 0; i < n; i++) {
+			const uint32_t j = (i + 1) % n;
+			// Fan from this outline point along the image edge to the next edge point,
+			// through any image corners between them.
+			uint32_t prev = n + i;
+			for (int e = edges[i], k = 0; e != edges[j] && k < 4; e = (e + 1) % 4, k++) {
+				push_triangle(uv, indices, &index_count, i, prev, 2 * n + (uint32_t)e);
+				prev = 2 * n + (uint32_t)e;
+			}
+			push_triangle(uv, indices, &index_count, i, prev, n + j);
+			push_triangle(uv, indices, &index_count, i, n + j, j);
+		}
+		break;
+	case XRT_VISIBILITY_MASK_TYPE_VISIBLE_TRIANGLE_MESH:
+		// Put the centre first and the outline after it.
+		uv[n] = c;
+		vertex_count = n + 1;
+		for (uint32_t i = 0; i < n; i++) {
+			push_triangle(uv, indices, &index_count, n, i, (i + 1) % n);
+		}
+		break;
+	case XRT_VISIBILITY_MASK_TYPE_LINE_LOOP:
+		vertex_count = n;
+		for (uint32_t i = 0; i < n; i++) {
+			indices[index_count++] = i;
+		}
+		break;
+	}
+
+	const size_t size = sizeof(struct xrt_visibility_mask) + sizeof(uint32_t) * index_count +
+	                    sizeof(struct xrt_vec2) * vertex_count;
+	mask = U_CALLOC_WITH_CAST(struct xrt_visibility_mask, size);
+	if (mask == NULL) {
+		U_LOG_E("failed to allocate out xrt_visibility_mask");
+		goto out;
+	}
+	mask->type = type;
+	mask->index_count = index_count;
+	mask->vertex_count = vertex_count;
+
+	// Image coordinates to tangents in view space (x right, y up, at z = -1).
+	const float tan_left = tanf(fov->angle_left);
+	const float tan_right = tanf(fov->angle_right);
+	const float tan_down = tanf(fov->angle_down);
+	const float tan_up = tanf(fov->angle_up);
+
+	struct xrt_vec2 *dst = xrt_visibility_mask_get_vertices(mask);
+	for (uint32_t i = 0; i < vertex_count; i++) {
+		dst[i].x = tan_left + uv[i].x * (tan_right - tan_left);
+		dst[i].y = tan_up - uv[i].y * (tan_up - tan_down);
+	}
+
+	// Counter-clockwise triangles in view space.
+	uint32_t *dst_indices = xrt_visibility_mask_get_indices(mask);
+	memcpy(dst_indices, indices, sizeof(uint32_t) * index_count);
+	if (type != XRT_VISIBILITY_MASK_TYPE_LINE_LOOP) {
+		for (uint32_t i = 0; i + 2 < index_count; i += 3) {
+			uint32_t *t = &dst_indices[i];
+			if (triangle_area2(dst[t[0]], dst[t[1]], dst[t[2]]) < 0) {
+				const uint32_t tmp = t[1];
+				t[1] = t[2];
+				t[2] = tmp;
+			}
+		}
+	}
+
+out:
+	free(uv);
+	free(edges);
+	free(indices);
+	*out_mask = mask; // Always NULL or allocated data.
+}
+
+void
+u_visibility_mask_ellipse_outline(float scale,
+                                  uint32_t count,
+                                  struct xrt_vec2 *out_centre,
+                                  struct xrt_vec2 *out_outline)
+{
+	*out_centre = (struct xrt_vec2){0.5f, 0.5f};
+	for (uint32_t i = 0; i < count; i++) {
+		const float a = 2.f * (float)M_PI * (float)i / (float)count;
+		out_outline[i] = (struct xrt_vec2){0.5f + 0.5f * scale * cosf(a), 0.5f + 0.5f * scale * sinf(a)};
+	}
 }
