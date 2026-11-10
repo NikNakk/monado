@@ -39,6 +39,18 @@ void
 u_visibility_mask_get_noop(enum xrt_visibility_mask_type type, struct xrt_visibility_mask **out_mask);
 
 /*!
+ * Visibility mask for a view that is visible everywhere: no hidden triangles,
+ * and a visible mesh and line loop covering the whole of @p fov. The caller
+ * must take care of de-allocating the mask once done with it.
+ *
+ * @ingroup aux_util
+ */
+void
+u_visibility_mask_get_full(enum xrt_visibility_mask_type type,
+                           const struct xrt_fov *fov,
+                           struct xrt_visibility_mask **out_mask);
+
+/*!
  * Visibility mask from the outline of the visible area, for example a lens
  * edge. The outline is @p count points around @p centre in order of increasing
  * angle, all in the view's image coordinates (0 to 1, v down), and must be

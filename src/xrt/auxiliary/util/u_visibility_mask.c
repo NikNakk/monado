@@ -142,6 +142,53 @@ u_visibility_mask_get_noop(enum xrt_visibility_mask_type type, struct xrt_visibi
 }
 
 
+void
+u_visibility_mask_get_full(enum xrt_visibility_mask_type type,
+                           const struct xrt_fov *fov,
+                           struct xrt_visibility_mask **out_mask)
+{
+	if (type == XRT_VISIBILITY_MASK_TYPE_HIDDEN_TRIANGLE_MESH) {
+		u_visibility_mask_get_noop(type, out_mask);
+		return;
+	}
+
+	// Counter-clockwise corners, in the same convention as the default mask.
+	static const uint32_t indices_full_visible[] = {0, 1, 2, 0, 2, 3};
+	static const uint32_t indices_full_line[] = {0, 1, 2, 3};
+	const bool visible = type == XRT_VISIBILITY_MASK_TYPE_VISIBLE_TRIANGLE_MESH;
+	const uint32_t *indices = visible ? indices_full_visible : indices_full_line;
+	const uint32_t nindices = visible ? ARRAY_SIZE(indices_full_visible) : ARRAY_SIZE(indices_full_line);
+	const uint32_t nvertices = 4;
+
+	const size_t size =
+	    sizeof(struct xrt_visibility_mask) + sizeof(uint32_t) * nindices + sizeof(struct xrt_vec2) * nvertices;
+	struct xrt_visibility_mask *mask = U_CALLOC_WITH_CAST(struct xrt_visibility_mask, size);
+	if (mask == NULL) {
+		U_LOG_E("failed to allocate out xrt_visibility_mask");
+		*out_mask = NULL;
+		return;
+	}
+
+	mask->type = type;
+	mask->index_count = nindices;
+	mask->vertex_count = nvertices;
+	memcpy(xrt_visibility_mask_get_indices(mask), indices, sizeof(uint32_t) * nindices);
+
+	const float tan_left = tanf(fov->angle_left);
+	const float tan_right = tanf(fov->angle_right);
+	const float tan_down = tanf(fov->angle_down);
+	const float tan_up = tanf(fov->angle_up);
+
+	struct xrt_vec2 *dst = xrt_visibility_mask_get_vertices(mask);
+	dst[0] = (struct xrt_vec2){tan_left, tan_down};
+	dst[1] = (struct xrt_vec2){tan_right, tan_down};
+	dst[2] = (struct xrt_vec2){tan_right, tan_up};
+	dst[3] = (struct xrt_vec2){tan_left, tan_up};
+
+	*out_mask = mask;
+}
+
+
 /*
  *
  * Masks from an outline.

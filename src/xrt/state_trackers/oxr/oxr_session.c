@@ -1894,7 +1894,13 @@ oxr_session_get_visibility_mask(struct oxr_logger *log,
 	// If we didn't have any cached mask get it.
 	if (mask == NULL) {
 		if (is_emulated_quad_inset_view(xdev, viewIndex)) {
-			u_visibility_mask_get_noop(type, &mask);
+			// The emulated inset lies inside its context view, and in the
+			// lens, wherever it is placed: nothing is hidden, and the visible
+			// area covers the context view's whole field of view. An empty
+			// visible mesh would leave applications that draw post-processing
+			// through it (Unreal) with a black inset.
+			const struct xrt_fov fov = xdev->hmd->distortion.fov[viewIndex - 2];
+			u_visibility_mask_get_full(type, &fov, &mask);
 		} else {
 			xrt_result_t xret = xrt_device_get_visibility_mask(xdev, type, viewIndex, &mask);
 			if (xret == XRT_ERROR_NOT_IMPLEMENTED && xdev->hmd != NULL) {
