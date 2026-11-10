@@ -30,6 +30,7 @@ render_make_distortion_spec(uint32_t distortion_texel_count, VkBool32 do_timewar
 #else
 	    .preserve_source_alpha = VK_FALSE,
 #endif
+	    .source_filter = 0, // RENDER_SOURCE_FILTER_BILINEAR; render_resources sets the configured one.
 	};
 
 	return spec;
