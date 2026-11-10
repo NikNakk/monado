@@ -159,6 +159,26 @@ TEST_CASE("Visibility mask from an ellipse outline")
 	}
 }
 
+TEST_CASE("Full visibility mask hides nothing and shows the whole view")
+{
+	// The emulated quad-view inset uses this: an empty visible mesh leaves
+	// Unreal's post-processing out of the inset, which then shows black.
+	const xrt_fov fov = fov_degrees(-50, 30, -20, 40);
+	Mask hidden, visible, line;
+	u_visibility_mask_get_full(XRT_VISIBILITY_MASK_TYPE_HIDDEN_TRIANGLE_MESH, &fov, &hidden.mask);
+	u_visibility_mask_get_full(XRT_VISIBILITY_MASK_TYPE_VISIBLE_TRIANGLE_MESH, &fov, &visible.mask);
+	u_visibility_mask_get_full(XRT_VISIBILITY_MASK_TYPE_LINE_LOOP, &fov, &line.mask);
+	REQUIRE(hidden.mask != nullptr);
+	REQUIRE(visible.mask != nullptr);
+	REQUIRE(line.mask != nullptr);
+	CHECK(hidden.mask->index_count == 0);
+	CHECK(hidden.mask->type == XRT_VISIBILITY_MASK_TYPE_HIDDEN_TRIANGLE_MESH);
+	CHECK(visible.mask->type == XRT_VISIBILITY_MASK_TYPE_VISIBLE_TRIANGLE_MESH);
+	CHECK(visible.area() == Catch::Approx(tangent_area(fov)).epsilon(1e-5));
+	CHECK(line.mask->index_count == 4);
+	CHECK(line.mask->vertex_count == 4);
+}
+
 TEST_CASE("Visibility mask vertices are in view space with y up")
 {
 	// Asymmetric so a flipped axis would show.
