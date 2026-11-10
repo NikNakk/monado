@@ -274,6 +274,186 @@ TEST_CASE("Quad-view inset blends over its context in the distortion pass", "[au
 	}
 }
 
+namespace {
+// Replaces the two source slots (one per eye) with the given images.
+struct SourceImages
+{
+	Fixture &f;
+	Image images[2]{};
+	SourceImages(Fixture &fixture, uint32_t w, uint32_t h, const std::vector<uint8_t> pixels[2]) : f(fixture)
+	{
+		for (unsigned i = 0; i < 2; ++i)
+			f.create_image(images[i], {w, h}, VK_FORMAT_R8G8B8A8_UNORM, pixels[i].data(), pixels[i].size());
+		VkDescriptorImageInfo infos[2];
+		for (unsigned i = 0; i < 2; ++i)
+			infos[i] = {f.sampler, images[i].view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
+		VkWriteDescriptorSet write{};
+		write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+		write.dstSet = f.set;
+		write.dstBinding = 0;
+		write.dstArrayElement = 0;
+		write.descriptorCount = 2;
+		write.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+		write.pImageInfo = infos;
+		f.vk().vkUpdateDescriptorSets(f.vk().device, 1, &write, 0, nullptr);
+	}
+	~SourceImages()
+	{
+		f.vk().vkDeviceWaitIdle(f.vk().device);
+		for (auto &i : images) {
+			f.vk().vkDestroyImageView(f.vk().device, i.view, nullptr);
+			f.vk().vkDestroyImage(f.vk().device, i.image, nullptr);
+			f.vk().vkFreeMemory(f.vk().device, i.memory, nullptr);
+		}
+	}
+};
+
+double
+srgb_to_linear(uint8_t v)
+{
+	double c = v / 255.0;
+	return c <= .04045 ? c / 12.92 : std::pow((c + .055) / 1.055, 2.4);
+}
+
+// Identity distortion of the sources with the given filter and sub image rects.
+std::vector<uint8_t>
+run_filtered(Fixture &f, uint32_t filter, const xrt_normalized_rect rects[2])
+{
+	const xrt_fov fov = fov_degrees(-45, 45, 45, -45);
+	auto data = inset_ubo(f, false, false, fov, fov);
+	for (unsigned eye = 0; eye < 2; ++eye)
+		data.post_transforms[eye] = rects[eye];
+	REQUIRE(render_buffer_write(&f.vk(), &f.ubo, &data, sizeof(data)) == VK_SUCCESS);
+	auto p = f.pipeline(variants[0], 0, false, true, filter);
+	f.run(p, variants[0], 1, true);
+	return f.snapshot();
+}
+} // namespace
+
+TEST_CASE("Catmull-Rom source filter sharpens magnified sources in the distortion pass", "[aux_render][gpu]")
+{
+	Fixture f;
+	f.init(96, 80);
+	const uint32_t sw = 12, sh = 10; // 8x magnification.
+	const xrt_normalized_rect full[2] = {{0, 0, 1, 1}, {0, 0, 1, 1}};
+
+	SECTION("smooth gradients are reproduced without a shift")
+	{
+		// Red ramps along x, green along y: Catmull-Rom is exact for linear ramps.
+		std::vector<uint8_t> pixels[2];
+		for (auto &px : pixels) {
+			px.resize(size_t(sw) * sh * 4);
+			for (uint32_t y = 0; y < sh; ++y)
+				for (uint32_t x = 0; x < sw; ++x) {
+					uint8_t *q = &px[(size_t(y) * sw + x) * 4];
+					q[0] = uint8_t(x * 20), q[1] = uint8_t(y * 25), q[2] = 64, q[3] = 255;
+				}
+		}
+		SourceImages sources(f, sw, sh, pixels);
+		auto bilinear = run_filtered(f, RENDER_SOURCE_FILTER_BILINEAR, full);
+		auto cubic = run_filtered(f, RENDER_SOURCE_FILTER_CATMULL_ROM, full);
+		unsigned max_diff = 0;
+		// Away from the image border, where the ramp's ends are clamped differently.
+		for (unsigned eye = 0; eye < 2; ++eye)
+			for (unsigned y = 16; y < f.height - 16; ++y)
+				for (unsigned x = 16; x < f.width - 16; ++x) {
+					size_t i = (size_t(y) * 2 * f.width + eye * f.width + x) * 4;
+					for (unsigned c = 0; c < 3; ++c)
+						max_diff = std::max(max_diff, unsigned(std::abs(int(bilinear[i + c]) -
+						                                                int(cubic[i + c]))));
+				}
+		CHECK(max_diff <= 2);
+	}
+
+	SECTION("hard edges get a steeper transition")
+	{
+		std::vector<uint8_t> pixels[2];
+		for (auto &px : pixels) {
+			px.resize(size_t(sw) * sh * 4);
+			for (uint32_t y = 0; y < sh; ++y)
+				for (uint32_t x = 0; x < sw; ++x) {
+					uint8_t *q = &px[(size_t(y) * sw + x) * 4];
+					q[0] = x < sw / 2 ? 0 : 255, q[1] = 128, q[2] = 0, q[3] = 255;
+				}
+		}
+		SourceImages sources(f, sw, sh, pixels);
+		auto measure = [&](const std::vector<uint8_t> &img, double &max_slope, unsigned &width) {
+			max_slope = 0, width = 0;
+			const unsigned y = f.height / 2;
+			for (unsigned x = 0; x < f.width; ++x) {
+				double v = srgb_to_linear(img[(size_t(y) * 2 * f.width + x) * 4]);
+				width += v > .1 && v < .9;
+				if (x > 0)
+					max_slope = std::max(
+					    max_slope, v - srgb_to_linear(img[(size_t(y) * 2 * f.width + x - 1) * 4]));
+			}
+		};
+		double bilinear_slope, cubic_slope;
+		unsigned bilinear_width, cubic_width;
+		measure(run_filtered(f, RENDER_SOURCE_FILTER_BILINEAR, full), bilinear_slope, bilinear_width);
+		measure(run_filtered(f, RENDER_SOURCE_FILTER_CATMULL_ROM, full), cubic_slope, cubic_width);
+		CAPTURE(bilinear_slope, cubic_slope, bilinear_width, cubic_width);
+		// Catmull-Rom's slope at a step is 1.25x bilinear's; its 10-90% width
+		// (0.7 against 0.8 texels) can round to the same pixel count.
+		CHECK(cubic_slope > bilinear_slope * 1.15);
+		CHECK(cubic_width <= bilinear_width);
+	}
+
+	SECTION("the green-only mode sharpens green and leaves red bilinear")
+	{
+		std::vector<uint8_t> pixels[2];
+		for (auto &px : pixels) {
+			px.resize(size_t(sw) * sh * 4);
+			for (uint32_t y = 0; y < sh; ++y)
+				for (uint32_t x = 0; x < sw; ++x) {
+					uint8_t *q = &px[(size_t(y) * sw + x) * 4];
+					q[0] = q[1] = x < sw / 2 ? 0 : 255, q[2] = 0, q[3] = 255;
+				}
+		}
+		SourceImages sources(f, sw, sh, pixels);
+		auto bilinear = run_filtered(f, RENDER_SOURCE_FILTER_BILINEAR, full);
+		auto green = run_filtered(f, RENDER_SOURCE_FILTER_CATMULL_ROM_GREEN, full);
+		const unsigned y = f.height / 2;
+		double bilinear_slope = 0, green_slope = 0;
+		unsigned red_diff = 0;
+		for (unsigned x = 1; x < f.width; ++x) {
+			size_t i = (size_t(y) * 2 * f.width + x) * 4, j = i - 4;
+			bilinear_slope =
+			    std::max(bilinear_slope, srgb_to_linear(bilinear[i + 1]) - srgb_to_linear(bilinear[j + 1]));
+			green_slope =
+			    std::max(green_slope, srgb_to_linear(green[i + 1]) - srgb_to_linear(green[j + 1]));
+			red_diff = std::max(red_diff, unsigned(std::abs(int(bilinear[i]) - int(green[i]))));
+		}
+		CAPTURE(bilinear_slope, green_slope);
+		CHECK(green_slope > bilinear_slope * 1.15);
+		CHECK(red_diff == 0);
+	}
+
+	SECTION("views sharing one image never read each other")
+	{
+		// One image: the left eye's half is blue, the right eye's half red.
+		const uint32_t w = 2 * sw;
+		std::vector<uint8_t> shared(size_t(w) * sh * 4);
+		for (uint32_t y = 0; y < sh; ++y)
+			for (uint32_t x = 0; x < w; ++x) {
+				uint8_t *q = &shared[(size_t(y) * w + x) * 4];
+				q[0] = x < sw ? 0 : 255, q[1] = 0, q[2] = x < sw ? 255 : 0, q[3] = 255;
+			}
+		std::vector<uint8_t> pixels[2] = {shared, shared};
+		SourceImages sources(f, w, sh, pixels);
+		const xrt_normalized_rect halves[2] = {{0, 0, .5f, 1}, {.5f, 0, .5f, 1}};
+		auto cubic = run_filtered(f, RENDER_SOURCE_FILTER_CATMULL_ROM, halves);
+		unsigned bleed = 0;
+		for (unsigned eye = 0; eye < 2; ++eye)
+			for (unsigned y = 0; y < f.height; ++y)
+				for (unsigned x = 0; x < f.width; ++x) {
+					size_t i = (size_t(y) * 2 * f.width + eye * f.width + x) * 4;
+					bleed = std::max(bleed, unsigned(cubic[i + (eye == 0 ? 0 : 2)]));
+				}
+		CHECK(bleed == 0);
+	}
+}
+
 // Quad views at PS VR2 size: the layer squasher route (context plus inset
 // squashed at the 1.4x intermediate size, then distortion) against one
 // distortion pass that blends the inset. Prints medians; no thresholds.
@@ -344,6 +524,54 @@ TEST_CASE("Quad-view composition GPU benchmark", "[.][aux_render][gpu][quad_benc
 	    "quad-view benchmark (ms per frame, both eyes): squash %u x %u x2 %.3f, "
 	    "stereo distortion %u x %u x2 %.3f, squasher route %.3f, quad fast path %.3f\n",
 	    scratch_w, scratch_h, squash_ms, out_w, out_h, ms_by_mode[0], squash_ms + ms_by_mode[0], ms_by_mode[1]);
+}
+
+// Source filter cost at PS VR2 output size with sources at 50% view scale
+// (1400 x 1428 per eye, magnified by the distortion). Prints medians.
+TEST_CASE("Source filter GPU benchmark", "[.][aux_render][gpu][source_filter_benchmark]")
+{
+	const uint32_t out_w = 2000, out_h = 2040, src_w = 1400, src_h = 1428;
+	auto median = [](std::vector<double> v) {
+		std::sort(v.begin(), v.end());
+		return v[v.size() / 2];
+	};
+	Fixture f;
+	f.init(out_w, out_h);
+	if (!f.queries)
+		SKIP("GPU timestamps unavailable");
+	// Noise, so the extra taps miss the texture cache as real content would.
+	std::vector<uint8_t> pixels[2];
+	uint32_t seed = 12345;
+	for (auto &px : pixels) {
+		px.resize(size_t(src_w) * src_h * 4);
+		for (auto &v : px) {
+			seed = seed * 1664525u + 1013904223u;
+			v = uint8_t(seed >> 24);
+		}
+	}
+	SourceImages sources(f, src_w, src_h, pixels);
+	InsetSources insets(f, src_w, src_h, pixels[0]);
+	const xrt_fov context = fov_degrees(-50, 45, 50, -52);
+	const xrt_fov inset_fov = fov_degrees(-25, 22.5f, 25, -26);
+	VkPipeline ps[3] = {f.pipeline(variants[0], 1, false, false, 0), f.pipeline(variants[0], 1, false, false, 1),
+	                    f.pipeline(variants[0], 1, false, false, 2)};
+	double ms[2][3]{};
+	for (int round = 0; round < 2; ++round) // The second round is the one reported.
+		for (bool inset : {false, true})
+			for (uint32_t filter : {0u, 1u, 2u}) {
+				auto data = inset_ubo(f, true, inset, context, inset_fov);
+				REQUIRE(render_buffer_write(&f.vk(), &f.ubo, &data, sizeof(data)) == VK_SUCCESS);
+				f.run(ps[filter], variants[0], 16, false);
+				std::vector<double> runs;
+				for (unsigned r = 0; r < 15; ++r)
+					runs.push_back(f.run(ps[filter], variants[0], 8, false));
+				ms[inset][filter] = median(runs);
+			}
+	std::printf(
+	    "source filter benchmark (ms per frame, both eyes, %ux%u from %ux%u): "
+	    "stereo bilinear %.3f, Catmull-Rom %.3f, Catmull-Rom green %.3f; "
+	    "quad bilinear %.3f, Catmull-Rom %.3f, Catmull-Rom green %.3f\n",
+	    out_w, out_h, src_w, src_h, ms[0][0], ms[0][1], ms[0][2], ms[1][0], ms[1][1], ms[1][2]);
 }
 
 TEST_CASE("Distortion GPU workgroup benchmark", "[.][aux_render][gpu][benchmark]")

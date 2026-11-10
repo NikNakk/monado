@@ -6,6 +6,7 @@
 #extension GL_GOOGLE_include_directive : require
 
 #include "srgb.inc.glsl"
+#include "source_filter.inc.glsl"
 
 
 // The size of the distortion texture dimensions in texels.
@@ -21,6 +22,8 @@ layout(constant_id = 2) const int k_view_count = 2;
 layout(constant_id = 3) const bool k_use_identity_distortion = false;
 // Apple output layers retain alpha; ordinary compositor targets are opaque.
 layout(constant_id = 4) const bool k_preserve_source_alpha = false;
+// Source filter, SOURCE_FILTER_* in source_filter.inc.glsl.
+layout(constant_id = 5) const uint k_source_filter = 0;
 
 layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
 
@@ -311,10 +314,13 @@ void main()
 	b_uv = transform_uv_foveation(b_uv, iz);
 
 	// Preserve source alpha instead of forcing the compositor target opaque.
-	vec4 colour = vec4(              //
-	    texture(source[iz], r_uv).r, //
-	    texture(source[iz], g_uv).g, //
-	    texture(source[iz], b_uv).b, //
+	// Foveated sources are compact physical images: keep the hardware filter for them.
+	uint filter_mode = ubo.foveation[iz].x != 0u ? SOURCE_FILTER_BILINEAR : k_source_filter;
+	vec4 rect = ubo.post_transform[iz];
+	vec4 colour = vec4(                                                //
+	    sample_source(source[iz], r_uv, rect, filter_mode, 0u).r,          //
+	    sample_source(source[iz], g_uv, rect, filter_mode, 1u).g,          //
+	    sample_source(source[iz], b_uv, rect, filter_mode, 2u).b,          //
 	    k_preserve_source_alpha ? texture(source[iz], g_uv).a : 1.0); //
 
 	// Quad views: blend the inset over its context view, per colour channel.
@@ -328,10 +334,11 @@ void main()
 		if (any(greaterThan(f, vec3(0.0)))) {
 			vec4 p = ubo.inset_post_transform[iz];
 			uint s = k_view_count + iz;
-			vec4 inset = vec4(                                       //
-			    texture(source[s], fma(r_inset, p.zw, p.xy)).r,      //
-			    texture(source[s], fma(g_inset, p.zw, p.xy)).g,      //
-			    texture(source[s], fma(b_inset, p.zw, p.xy)).b,      //
+			uint inset_filter = k_source_filter;
+			vec4 inset = vec4(                                                      //
+			    sample_source(source[s], fma(r_inset, p.zw, p.xy), p, inset_filter, 0u).r, //
+			    sample_source(source[s], fma(g_inset, p.zw, p.xy), p, inset_filter, 1u).g, //
+			    sample_source(source[s], fma(b_inset, p.zw, p.xy), p, inset_filter, 2u).b, //
 			    k_preserve_source_alpha ? texture(source[s], fma(g_inset, p.zw, p.xy)).a : 1.0);
 			colour = vec4(mix(colour.rgb, inset.rgb, f), mix(colour.a, inset.a, f.g));
 		}

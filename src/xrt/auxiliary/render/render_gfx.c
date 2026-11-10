@@ -590,6 +590,8 @@ create_layer_pipeline(struct vk_bundle *vk,
 struct mesh_params
 {
 	uint32_t do_timewarp;
+	//! enum render_source_filter, a fragment specialization constant.
+	uint32_t source_filter;
 };
 
 XRT_CHECK_RESULT static VkResult
@@ -717,11 +719,21 @@ create_mesh_pipeline(struct vk_bundle *vk,
 	VkSpecializationMapEntry vert_entries[] = {
 	    ENTRY(0, do_timewarp),
 	};
+	VkSpecializationMapEntry frag_entries[] = {
+	    ENTRY(0, source_filter),
+	};
 #undef ENTRY
 
 	VkSpecializationInfo vert_specialization_info = {
 	    .mapEntryCount = ARRAY_SIZE(vert_entries),
 	    .pMapEntries = vert_entries,
+	    .dataSize = sizeof(*params),
+	    .pData = params,
+	};
+
+	VkSpecializationInfo frag_specialization_info = {
+	    .mapEntryCount = ARRAY_SIZE(frag_entries),
+	    .pMapEntries = frag_entries,
 	    .dataSize = sizeof(*params),
 	    .pData = params,
 	};
@@ -738,6 +750,7 @@ create_mesh_pipeline(struct vk_bundle *vk,
 	        .sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
 	        .stage = VK_SHADER_STAGE_FRAGMENT_BIT,
 	        .module = mesh_frag,
+	        .pSpecializationInfo = &frag_specialization_info,
 	        .pName = "main",
 	    },
 	};
@@ -803,6 +816,7 @@ render_gfx_render_pass_init(struct render_gfx_render_pass *rgrp,
 
 	struct mesh_params simple_params = {
 	    .do_timewarp = false,
+	    .source_filter = (uint32_t)r->source_filter,
 	};
 
 	ret = create_mesh_pipeline(    //
@@ -822,6 +836,7 @@ render_gfx_render_pass_init(struct render_gfx_render_pass *rgrp,
 
 	struct mesh_params timewarp_params = {
 	    .do_timewarp = true,
+	    .source_filter = (uint32_t)r->source_filter,
 	};
 
 	ret = create_mesh_pipeline(         //
