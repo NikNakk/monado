@@ -18,6 +18,11 @@ layout (binding = 1, std140) uniform Config
 	vec4 pre_transform;
 	mat4 transform_scanout_begin;
 	mat4 transform_scanout_end;
+
+	// Quad-view inset: UV = context UV (before post_transform) * zw + xy.
+	vec4 inset_from_context;
+	vec4 inset_post_transform;
+	uvec4 has_inset;
 } ubo;
 
 layout (location = 0)  in vec4 in_pos_ruv;
@@ -25,6 +30,10 @@ layout (location = 1)  in vec4 in_guv_buv;
 layout (location = 0) out vec2 out_r_uv;
 layout (location = 1) out vec2 out_g_uv;
 layout (location = 2) out vec2 out_b_uv;
+// Inset UVs before its post transform; only used with has_inset.
+layout (location = 3) out vec2 out_inset_r_uv;
+layout (location = 4) out vec2 out_inset_g_uv;
+layout (location = 5) out vec2 out_inset_b_uv;
 
 out gl_PerVertex
 {
@@ -59,20 +68,14 @@ vec2 transform_uv_timewarp(vec2 uv, float scanout_fraction)
 	// From [-1, 1] to [0, 1]
 	values.xy = values.xy * 0.5 + 0.5;
 
-	// To deal with OpenGL flip and sub image view.
-	values.xy = fma(values.xy, ubo.post_transform.zw, ubo.post_transform.xy);
-
-	// Done.
+	// Done; the sub image transform is applied separately.
 	return values.xy;
 }
 
-vec2 transform_uv(vec2 uv, float scanout_fraction)
+// Source view UV, before the sub image transform.
+vec2 transform_uv_view(vec2 uv, float scanout_fraction)
 {
-	if (do_timewarp) {
-		return transform_uv_timewarp(uv, scanout_fraction);
-	} else {
-		return transform_uv_subimage(uv);
-	}
+	return do_timewarp ? transform_uv_timewarp(uv, scanout_fraction) : uv;
 }
 
 void main()
@@ -91,11 +94,17 @@ void main()
 	vec2 g_uv = in_guv_buv.xy;
 	vec2 b_uv = in_guv_buv.zw;
 
-	r_uv = transform_uv(r_uv, scanout_fraction);
-	g_uv = transform_uv(g_uv, scanout_fraction);
-	b_uv = transform_uv(b_uv, scanout_fraction);
+	r_uv = transform_uv_view(r_uv, scanout_fraction);
+	g_uv = transform_uv_view(g_uv, scanout_fraction);
+	b_uv = transform_uv_view(b_uv, scanout_fraction);
 
-	out_r_uv = r_uv;
-	out_g_uv = g_uv;
-	out_b_uv = b_uv;
+	// The inset UV is affine in the context view UV, so it interpolates like it.
+	vec4 a = ubo.inset_from_context;
+	out_inset_r_uv = fma(r_uv, a.zw, a.xy);
+	out_inset_g_uv = fma(g_uv, a.zw, a.xy);
+	out_inset_b_uv = fma(b_uv, a.zw, a.xy);
+
+	out_r_uv = transform_uv_subimage(r_uv);
+	out_g_uv = transform_uv_subimage(g_uv);
+	out_b_uv = transform_uv_subimage(b_uv);
 }

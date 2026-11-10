@@ -100,6 +100,12 @@ struct gfx_mesh_view_data
 
 	/// Foveation map of the source, NULL if it is not foveated.
 	const struct xrt_foveation_map_data *src_foveation;
+
+	/// Quad-view inset blended over the source, if inset_image_view is set.
+	struct xrt_fov inset_fov;
+	struct xrt_normalized_rect inset_norm_rect;
+	VkSampler inset_sampler;
+	VkImageView inset_image_view;
 };
 
 /*
@@ -608,12 +614,21 @@ crg_distortion_common(struct render_gfx *render,
 			    &data.transform_scanout_end);        //
 		}
 
+		if (md->views[i].inset_image_view != VK_NULL_HANDLE) {
+			render_calc_inset_from_context_uv(&md->views[i].src_fov, &md->views[i].inset_fov,
+			                                  &data.inset_from_context);
+			data.inset_post_transform = md->views[i].inset_norm_rect;
+			data.has_inset.value = 1;
+		}
+
 		ret = render_gfx_mesh_alloc_and_write( //
 		    render,                            //
 		    &data,                             //
 		    md->views[i].src_foveation,        //
 		    md->views[i].src_sampler,          //
 		    md->views[i].src_image_view,       //
+		    md->views[i].inset_sampler,        //
+		    md->views[i].inset_image_view,     //
 		    &ms.descriptor_sets[i]);           //
 		VK_CHK_WITH_GOTO(ret, "render_gfx_mesh_alloc_and_write", err_no_memory);
 
@@ -684,6 +699,55 @@ crg_distortion_after_squash(struct render_gfx *render, const struct comp_render_
 		    clamp_to_border_black, // src_sampler
 		    src_image_view,        //
 		    NULL);                 // src_foveation, the squashed image is not foveated
+	}
+
+	crg_distortion_common( //
+	    render,            //
+	    d->do_timewarp,    //
+	    &md,               //
+	    d);                //
+}
+
+/// Quad-view fast path: the distortion mesh blends each inset over its context view.
+static void
+crg_distortion_quad_fast_path(struct render_gfx *render,
+                              const struct comp_render_dispatch_data *d,
+                              const struct comp_layer *context,
+                              const struct comp_layer *inset)
+{
+	VkSampler clamp_to_border_black = render->r->samplers.clamp_to_border_black;
+
+	struct gfx_mesh_data md = XRT_STRUCT_INIT;
+	for (uint32_t i = 0; i < d->target.view_count; i++) {
+		const struct xrt_layer_projection_view_data *cv = &context->data.proj.v[i];
+		const struct xrt_layer_projection_view_data *iv = &inset->data.proj.v[i];
+		const struct comp_swapchain_image *c_image = get_layer_image(context, i, cv->sub.image_index);
+		const struct comp_swapchain_image *i_image = get_layer_image(inset, i, iv->sub.image_index);
+
+		struct xrt_normalized_rect c_rect = cv->sub.norm_rect;
+		if (context->data.flip_y) {
+			c_rect.y += c_rect.h;
+			c_rect.h = -c_rect.h;
+		}
+		struct xrt_normalized_rect i_rect = iv->sub.norm_rect;
+		if (inset->data.flip_y) {
+			i_rect.y += i_rect.h;
+			i_rect.h = -i_rect.h;
+		}
+
+		gfx_mesh_add_view(                                                     //
+		    &md,                                                               //
+		    i,                                                                 //
+		    &cv->pose,                                                         //
+		    &cv->fov,                                                          //
+		    &c_rect,                                                           //
+		    clamp_to_border_black,                                             //
+		    get_image_view(c_image, context->data.flags, cv->sub.array_index), //
+		    NULL);                                                             // no foveation
+		md.views[i].inset_fov = iv->fov;
+		md.views[i].inset_norm_rect = i_rect;
+		md.views[i].inset_sampler = clamp_to_border_black;
+		md.views[i].inset_image_view = get_image_view(i_image, inset->data.flags, iv->sub.array_index);
 	}
 
 	crg_distortion_common( //
@@ -980,7 +1044,11 @@ comp_render_gfx_dispatch(struct render_gfx *render,
 	// We want to read from the images afterwards.
 	VkImageLayout transition_to = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
 
-	if (fast_path && layer->data.type == XRT_LAYER_PROJECTION) {
+	// The compositor only sets fast_path with two layers for an eligible quad-view pair.
+	if (fast_path && layer_count == 2) {
+		crg_distortion_quad_fast_path(render, d, &layers[0], &layers[1]);
+
+	} else if (fast_path && layer->data.type == XRT_LAYER_PROJECTION) {
 		// Fast path.
 		const struct xrt_layer_projection_data *proj = &layer->data.proj;
 		const struct xrt_layer_projection_view_data *vds[XRT_MAX_VIEWS];

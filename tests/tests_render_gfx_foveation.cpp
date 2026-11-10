@@ -99,7 +99,7 @@ struct GfxFixture
 	render_gfx_target_resources rtr{};
 	bool target_ready = false;
 
-	Image src{}, dst{};
+	Image src{}, dst{}, inset{};
 	render_buffer readback{};
 
 	vk_bundle &
@@ -234,7 +234,7 @@ struct GfxFixture
 			render_gfx_target_resources_fini(&rtr);
 			render_gfx_render_pass_fini(&rgrp);
 		}
-		for (Image *image : {&src, &dst}) {
+		for (Image *image : {&src, &dst, &inset}) {
 			if (image->view != VK_NULL_HANDLE) {
 				vk().vkDestroyImageView(vk().device, image->view, nullptr);
 				vk().vkDestroyImage(vk().device, image->image, nullptr);
@@ -252,6 +252,101 @@ struct GfxFixture
 		}
 		free(hmd.distortion.mesh.vertices);
 		free(hmd.distortion.mesh.indices);
+	}
+
+	// Uploads RGBA16 pixels into a new sampled image.
+	void
+	upload(Image &image, uint32_t size, const std::vector<uint16_t> &pixels)
+	{
+		create_image(image, size, VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT);
+		const VkDeviceSize bytes = pixels.size() * sizeof(uint16_t);
+		render_buffer staging{};
+		REQUIRE(render_buffer_init(&vk(), &staging, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, kHostMemory, bytes) ==
+		        VK_SUCCESS);
+		REQUIRE(render_buffer_map_and_write(&vk(), &staging, const_cast<uint16_t *>(pixels.data()), bytes) ==
+		        VK_SUCCESS);
+		VkCommandBuffer cmd = begin_cmd();
+		barrier(cmd, image.image, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 0,
+		        VK_ACCESS_TRANSFER_WRITE_BIT, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+		        VK_PIPELINE_STAGE_TRANSFER_BIT);
+		VkBufferImageCopy copy{};
+		copy.imageSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
+		copy.imageExtent = {size, size, 1};
+		vk().vkCmdCopyBufferToImage(cmd, staging.buffer, image.image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1,
+		                            &copy);
+		barrier(cmd, image.image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+		        VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_ACCESS_TRANSFER_WRITE_BIT,
+		        VK_ACCESS_SHADER_READ_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT,
+		        VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT);
+		finish_cmd(cmd);
+		render_buffer_fini(&vk(), &staging);
+	}
+
+	// Mesh distortion of the source with the quad-view inset (if inset_fov is
+	// set) blended in; reads back R, G and B.
+	std::vector<float>
+	draw_quad(bool timewarp, const xrt_fov *inset_fov)
+	{
+		render_gfx render{};
+		REQUIRE(render_gfx_init(&render, &r));
+		REQUIRE(render_gfx_begin(&render));
+
+		const VkSampler sampler = r.samplers.clamp_to_border_black;
+		const xrt_fov fov = hmd.distortion.fov[0];
+		render_gfx_mesh_ubo_data data{};
+		data.vertex_rot = {{{1.f, 0.f, 0.f, 1.f}}};
+		data.post_transform = {0.f, 0.f, 1.f, 1.f};
+		if (timewarp) {
+			// Real timewarp matrices with a small yaw between scanout begin and end.
+			const xrt_pose source = XRT_POSE_IDENTITY;
+			xrt_pose begin = XRT_POSE_IDENTITY, end = XRT_POSE_IDENTITY;
+			begin.orientation = {0.f, std::sin(.004f), 0.f, std::cos(.004f)};
+			end.orientation = {0.f, std::sin(-.004f), 0.f, std::cos(-.004f)};
+			render_calc_uv_to_tangent_lengths_rect(&fov, &data.pre_transform);
+			render_calc_time_warp_matrix(&source, &fov, &begin, &data.transform_scanout_begin);
+			render_calc_time_warp_matrix(&source, &fov, &end, &data.transform_scanout_end);
+		}
+		if (inset_fov != nullptr) {
+			render_calc_inset_from_context_uv(&fov, inset_fov, &data.inset_from_context);
+			data.inset_post_transform = {0.f, 0.f, 1.f, 1.f};
+			data.has_inset.value = 1;
+		}
+		VkDescriptorSet set = VK_NULL_HANDLE;
+		REQUIRE(render_gfx_mesh_alloc_and_write(&render, &data, nullptr, sampler, src.view,
+		                                        inset_fov ? sampler : VK_NULL_HANDLE,
+		                                        inset_fov ? inset.view : VK_NULL_HANDLE, &set) == VK_SUCCESS);
+
+		const VkClearColorValue clear = {{0.f, 0.f, 0.f, 1.f}};
+		const render_viewport_data viewport = {0, 0, kDstSize, kDstSize};
+		render_gfx_begin_target(&render, &rtr, &clear);
+		render_gfx_begin_view(&render, 0, &viewport, &viewport);
+		render_gfx_mesh_draw(&render, 0, set, timewarp);
+		render_gfx_end_view(&render);
+		render_gfx_end_target(&render);
+		REQUIRE(render_gfx_end(&render));
+
+		VkSubmitInfo submit{};
+		submit.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+		submit.commandBufferCount = 1;
+		submit.pCommandBuffers = &r.cmd;
+		REQUIRE(vk().vkQueueSubmit(vk().main_queue->queue, 1, &submit, VK_NULL_HANDLE) == VK_SUCCESS);
+		REQUIRE(vk().vkQueueWaitIdle(vk().main_queue->queue) == VK_SUCCESS);
+		render_gfx_fini(&render);
+
+		VkCommandBuffer cmd = begin_cmd();
+		VkBufferImageCopy copy{};
+		copy.imageSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
+		copy.imageExtent = {kDstSize, kDstSize, 1};
+		vk().vkCmdCopyImageToBuffer(cmd, dst.image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, readback.buffer, 1,
+		                            &copy);
+		finish_cmd(cmd);
+
+		const uint16_t *pixels = static_cast<const uint16_t *>(readback.mapped);
+		std::vector<float> rgb(size_t(kDstSize) * kDstSize * 3);
+		for (size_t i = 0; i < size_t(kDstSize) * kDstSize; ++i)
+			for (int c = 0; c < 3; ++c)
+				rgb[i * 3 + c] = pixels[i * 4 + c] / 65535.f;
+		return rgb;
 	}
 
 	enum class Draw
@@ -276,8 +371,8 @@ struct GfxFixture
 			render_gfx_mesh_ubo_data data{};
 			data.vertex_rot = {{{1.f, 0.f, 0.f, 1.f}}};
 			data.post_transform = full;
-			REQUIRE(render_gfx_mesh_alloc_and_write(&render, &data, map, sampler, src.view, &set) ==
-			        VK_SUCCESS);
+			REQUIRE(render_gfx_mesh_alloc_and_write(&render, &data, map, sampler, src.view, VK_NULL_HANDLE,
+			                                        VK_NULL_HANDLE, &set) == VK_SUCCESS);
 		} else {
 			// As comp_render_gfx.c's do_projection_layer, with the layer
 			// at the view's own pose and fov so it fills the target.
@@ -401,5 +496,70 @@ TEST_CASE("Graphics draws without a map are unchanged by a disabled map", "[aux_
 		const std::vector<float> plain = f.draw(what, nullptr);
 		const std::vector<float> off = f.draw(what, &disabled);
 		CHECK(plain == off);
+	}
+}
+
+TEST_CASE("Graphics mesh distortion blends a quad-view inset", "[aux_render][gpu]")
+{
+	GfxFixture f;
+	f.init();
+	const xrt_fov context = f.hmd.distortion.fov[0];
+	const xrt_fov inset_fov = {-0.2f, 0.4f, 0.35f, -0.1f};
+	xrt_normalized_rect a{};
+	render_calc_inset_from_context_uv(&context, &inset_fov, &a);
+
+	// Inset texels hold the context coordinate they show (so R and G should
+	// match the plain draw) and a blue marker the source lacks.
+	const uint32_t n = 128;
+	std::vector<uint16_t> pixels(size_t(n) * n * 4);
+	for (uint32_t y = 0; y < n; ++y)
+		for (uint32_t x = 0; x < n; ++x) {
+			double u = ((x + .5) / n - a.x) / a.w, v = ((y + .5) / n - a.y) / a.h;
+			uint16_t *p = &pixels[(size_t(y) * n + x) * 4];
+			p[0] = uint16_t(std::lround(std::fmin(std::fmax(u, 0.), 1.) * 65535.0));
+			p[1] = uint16_t(std::lround(std::fmin(std::fmax(v, 0.), 1.) * 65535.0));
+			p[2] = 65535;
+			p[3] = 65535;
+		}
+	f.upload(f.inset, n, pixels);
+
+	const double tl = std::tan(inset_fov.angle_left), tr = std::tan(inset_fov.angle_right);
+	const double tu = std::tan(inset_fov.angle_up), td = std::tan(inset_fov.angle_down);
+	const double cl = std::tan(context.angle_left), cr = std::tan(context.angle_right);
+	const double cu = std::tan(context.angle_up), cd = std::tan(context.angle_down);
+	for (bool timewarp : {false, true}) {
+		CAPTURE(timewarp);
+		const std::vector<float> plain = f.draw_quad(timewarp, nullptr);
+		const std::vector<float> quad = f.draw_quad(timewarp, &inset_fov);
+		uint32_t inside = 0, outside = 0;
+		float gradient_error = 0.f, marker_error = 0.f, outside_error = 0.f;
+		for (uint32_t y = 0; y < kDstSize; ++y)
+			for (uint32_t x = 0; x < kDstSize; ++x) {
+				// Where this pixel's direction falls in the inset, from angles only.
+				double tan_x = cl + (x + .5) / kDstSize * (cr - cl);
+				double tan_y = cu - (y + .5) / kDstSize * (cu - cd);
+				double ix = (tan_x - tl) / (tr - tl), iy = (tu - tan_y) / (tu - td);
+				size_t i = (size_t(y) * kDstSize + x) * 3;
+				if (ix > .1 && ix < .9 && iy > .1 && iy < .9) {
+					inside++;
+					gradient_error = std::fmax(gradient_error, std::fabs(quad[i] - plain[i]));
+					gradient_error =
+					    std::fmax(gradient_error, std::fabs(quad[i + 1] - plain[i + 1]));
+					marker_error = std::fmax(marker_error, std::fabs(quad[i + 2] - 1.f));
+				} else if (ix < -.05 || ix > 1.05 || iy < -.05 || iy > 1.05) {
+					outside++;
+					for (int c = 0; c < 3; ++c)
+						outside_error =
+						    std::fmax(outside_error, std::fabs(quad[i + c] - plain[i + c]));
+				}
+			}
+		INFO("inside " << inside << " outside " << outside << " gradient error " << gradient_error
+		               << " marker error " << marker_error << " outside error " << outside_error);
+		CHECK(inside > 400);
+		CHECK(outside > 3000);
+		CHECK(marker_error < 1e-3f);
+		// Inset and source differ only by resampling: under 1.5 source texels.
+		CHECK(gradient_error < 1.5f / kSrcSize);
+		CHECK(outside_error == 0.f);
 	}
 }

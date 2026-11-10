@@ -43,6 +43,7 @@ XRT_CHECK_RESULT static VkResult
 create_gfx_ubo_and_src_descriptor_set_layout(struct vk_bundle *vk,
                                              uint32_t ubo_binding,
                                              uint32_t src_binding,
+                                             uint32_t src_count,
                                              uint32_t foveation_binding,
                                              VkDescriptorSetLayout *out_descriptor_set_layout)
 {
@@ -52,7 +53,7 @@ create_gfx_ubo_and_src_descriptor_set_layout(struct vk_bundle *vk,
 	    {
 	        .binding = src_binding,
 	        .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-	        .descriptorCount = 1,
+	        .descriptorCount = src_count,
 	        .stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT,
 	    },
 	    {
@@ -686,9 +687,10 @@ render_resources_init(struct render_resources *r,
 		const uint32_t mesh_shader_count = RENDER_MAX_LAYER_RUNS_COUNT(r);
 
 		struct vk_descriptor_pool_info mesh_pool_info = {
-		    // The draw's UBO and its source's foveation map.
+		    // The draw's UBO and its source's foveation map; the mesh also
+		    // samples a quad-view inset.
 		    .uniform_per_descriptor_count = 2,
-		    .sampler_per_descriptor_count = 1,
+		    .sampler_per_descriptor_count = 2,
 		    .storage_image_per_descriptor_count = 0,
 		    .storage_buffer_per_descriptor_count = 0,
 		    .descriptor_count = layer_shader_count + mesh_shader_count,
@@ -771,6 +773,7 @@ render_resources_init(struct render_resources *r,
 	    vk,                                             // vk_bundle
 	    RENDER_BINDING_LAYER_SHARED_UBO,                // ubo_binding
 	    RENDER_BINDING_LAYER_SHARED_SRC,                // src_binding
+	    1,                                              // src_count
 	    RENDER_BINDING_LAYER_PROJECTION_FOVEATION,      // foveation_binding
 	    &r->gfx.layer.shared.descriptor_set_layout);    // out_descriptor_set_layout
 	VK_CHK_WITH_RET(ret, "create_gfx_ubo_and_src_descriptor_set_layout", false);
@@ -796,6 +799,7 @@ render_resources_init(struct render_resources *r,
 	    vk,                                             // vk_bundle
 	    r->mesh.ubo_binding,                            // ubo_binding
 	    r->mesh.src_binding,                            // src_binding
+	    2,                                              // src_count: source, quad-view inset
 	    r->mesh.foveation_binding,                      // foveation_binding
 	    &r->mesh.descriptor_set_layout);                // out_mesh_descriptor_set_layout
 	VK_CHK_WITH_RET(ret, "create_gfx_ubo_and_src_descriptor_set_layout", false);
