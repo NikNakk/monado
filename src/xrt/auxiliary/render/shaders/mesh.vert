@@ -20,9 +20,14 @@ layout (binding = 1, std140) uniform Config
 	mat4 transform_scanout_end;
 
 	// Quad-view inset: UV = context UV (before post_transform) * zw + xy.
+	// With has_inset.y (depth) these hold the depth sub image rect and the
+	// source UV to tangent rect instead.
 	vec4 inset_from_context;
 	vec4 inset_post_transform;
+	// x: has inset, y: has depth (the second source is the depth image).
 	uvec4 has_inset;
+	vec4 projection_depth;
+	vec4 new_origin;
 } ubo;
 
 layout (location = 0)  in vec4 in_pos_ruv;
@@ -34,6 +39,8 @@ layout (location = 2) out vec2 out_b_uv;
 layout (location = 3) out vec2 out_inset_r_uv;
 layout (location = 4) out vec2 out_inset_g_uv;
 layout (location = 5) out vec2 out_inset_b_uv;
+// Depth reprojection: green's source view UV (before the sub image transform).
+layout (location = 6) out vec2 out_g_view_uv;
 
 out gl_PerVertex
 {
@@ -103,6 +110,8 @@ void main()
 	out_inset_r_uv = fma(r_uv, a.zw, a.xy);
 	out_inset_g_uv = fma(g_uv, a.zw, a.xy);
 	out_inset_b_uv = fma(b_uv, a.zw, a.xy);
+
+	out_g_view_uv = g_uv;
 
 	out_r_uv = transform_uv_subimage(r_uv);
 	out_g_uv = transform_uv_subimage(g_uv);

@@ -16,6 +16,7 @@
 #include "math/m_mathinclude.h"
 
 #include "util/u_trace_marker.h"
+#include "util/u_logging.h"
 
 #include "vk/vk_helpers.h"
 
@@ -23,6 +24,7 @@
 
 #include "util/comp_render.h"
 #include "util/comp_render_helpers.h"
+#include "util/comp_layer_accum.h"
 
 
 /*
@@ -106,6 +108,12 @@ struct gfx_mesh_view_data
 	struct xrt_normalized_rect inset_norm_rect;
 	VkSampler inset_sampler;
 	VkImageView inset_image_view;
+
+	/// Depth reprojection from this depth image, if depth_image_view is set.
+	VkSampler depth_sampler;
+	VkImageView depth_image_view;
+	struct xrt_normalized_rect depth_norm_rect;
+	struct xrt_layer_depth_data depth_data;
 };
 
 /*
@@ -573,6 +581,17 @@ crg_clear_output(struct render_gfx *render, const struct comp_render_dispatch_da
  */
 
 /// Used in both fast-path and layer-squashed routes
+//! The new eye position in the source view's space, for depth reprojection.
+static struct xrt_vec3
+new_origin_in_source_view(const struct xrt_pose *source_pose, const struct xrt_pose *new_pose)
+{
+	struct xrt_pose world_to_source;
+	math_pose_invert(source_pose, &world_to_source);
+	struct xrt_vec3 origin;
+	math_pose_transform_point(&world_to_source, &new_pose->position, &origin);
+	return origin;
+}
+
 static void
 crg_distortion_common(struct render_gfx *render,
                       bool do_timewarp,
@@ -621,14 +640,32 @@ crg_distortion_common(struct render_gfx *render,
 			data.has_inset.value = 1;
 		}
 
+		// Depth reprojection takes the second source slot (a layer has no inset then).
+		VkSampler second_sampler = md->views[i].inset_sampler;
+		VkImageView second_image_view = md->views[i].inset_image_view;
+		if (do_timewarp && md->views[i].depth_image_view != VK_NULL_HANDLE) {
+			const struct xrt_layer_depth_data *dd = &md->views[i].depth_data;
+			data.has_inset.has_depth = 1;
+			data.depth_post_transform = md->views[i].depth_norm_rect;
+			render_calc_uv_to_tangent_lengths_rect(&md->views[i].src_fov, &data.source_uv_to_tanangle);
+			data.projection_depth.min_depth = dd->min_depth;
+			data.projection_depth.max_depth = dd->max_depth;
+			data.projection_depth.near_z = dd->near_z;
+			data.projection_depth.far_z = dd->far_z;
+			data.new_origin.val =
+			    new_origin_in_source_view(&md->views[i].src_pose, &d->views[i].world_pose_scanout_begin);
+			second_sampler = md->views[i].depth_sampler;
+			second_image_view = md->views[i].depth_image_view;
+		}
+
 		ret = render_gfx_mesh_alloc_and_write( //
 		    render,                            //
 		    &data,                             //
 		    md->views[i].src_foveation,        //
 		    md->views[i].src_sampler,          //
 		    md->views[i].src_image_view,       //
-		    md->views[i].inset_sampler,        //
-		    md->views[i].inset_image_view,     //
+		    second_sampler,                    //
+		    second_image_view,                 //
 		    &ms.descriptor_sets[i]);           //
 		VK_CHK_WITH_GOTO(ret, "render_gfx_mesh_alloc_and_write", err_no_memory);
 
@@ -797,6 +834,37 @@ crg_distortion_fast_path(struct render_gfx *render,
 		    clamp_to_border_black,       // src_sampler
 		    src_image_view,              // src_image_view
 		    get_view_foveation(vds[i])); // src_foveation
+
+		// Depth reprojection, opt-in as on the compute path (XRT_COMPOSITOR_DEPTH_REPROJECTION).
+		if (data->type == XRT_LAYER_PROJECTION_DEPTH && render_compute_depth_reprojection_enabled()) {
+			const struct xrt_layer_projection_view_data *vd = NULL;
+			const struct xrt_layer_depth_data *dvd = NULL;
+			view_index_to_depth_data(i, data, &vd, &dvd);
+			const struct comp_swapchain *dsc =
+			    (const struct comp_swapchain *)comp_layer_get_depth_swapchain(layer, i);
+			if (dsc != NULL) {
+				const struct comp_swapchain_image *d_image = &dsc->images[dvd->sub.image_index];
+				struct gfx_mesh_view_data *v = &md.views[i];
+				// Do not interpolate across depth discontinuities.
+				v->depth_sampler = render->r->samplers.nearest_clamp_to_edge;
+				v->depth_image_view = get_image_view(d_image, data->flags, dvd->sub.array_index);
+				v->depth_norm_rect = dvd->sub.norm_rect;
+				if (data->flip_y) {
+					v->depth_norm_rect.y += v->depth_norm_rect.h;
+					v->depth_norm_rect.h = -v->depth_norm_rect.h;
+				}
+				v->depth_data = *dvd;
+			}
+		}
+	}
+
+	static bool logged_depth;
+	if (!logged_depth && data->type == XRT_LAYER_PROJECTION_DEPTH) {
+		logged_depth = true;
+		U_LOG_I("Graphics compositor: projection layers with depth, %s",
+		        render_compute_depth_reprojection_enabled()
+		            ? (d->do_timewarp ? "depth reprojection on" : "no timewarp, depth unused")
+			    : "depth reprojection off (XRT_COMPOSITOR_DEPTH_REPROJECTION)");
 	}
 
 	crg_distortion_common( //
