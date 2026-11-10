@@ -1439,6 +1439,22 @@ struct oxr_session
 #endif
 
 	/*!
+	 * Runtime-private eye gaze for emulated quad views (OXR_QUAD_INSET_GAZE):
+	 * the inset views follow gaze instead of staying centred.
+	 */
+	struct
+	{
+		struct xrt_space *gaze_space;
+		bool feature_acquired;
+		bool tried;
+		//! Last valid gaze tangents (x right, y up) and when they were sampled.
+		float tan_x, tan_y;
+		int64_t sampled_ns;
+		uint64_t locate_count;
+		uint64_t valid_count;
+	} quad_gaze;
+
+	/*!
 	 * To pipe swapchain creation to right code.
 	 */
 	XrResult (*create_swapchain)(struct oxr_logger *,

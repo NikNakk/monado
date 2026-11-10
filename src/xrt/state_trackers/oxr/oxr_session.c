@@ -63,6 +63,12 @@
 DEBUG_GET_ONCE_NUM_OPTION(ipd, "OXR_DEBUG_IPD_MM", 63)
 DEBUG_GET_ONCE_NUM_OPTION(wait_frame_sleep, "OXR_DEBUG_WAIT_FRAME_EXTRA_SLEEP_MS", 0)
 DEBUG_GET_ONCE_BOOL_OPTION(frame_timing_spew, "OXR_FRAME_TIMING_SPEW", false)
+// Emulated quad views: inset follows runtime-private eye gaze.
+DEBUG_GET_ONCE_BOOL_OPTION(quad_inset_gaze, "OXR_QUAD_INSET_GAZE", false)
+// Emulated quad views: inset width and height in degrees (0: half the context FOV).
+DEBUG_GET_ONCE_FLOAT_OPTION(quad_inset_degrees, "OXR_QUAD_INSET_DEGREES", 0.0f)
+// Emulated quad views: log the inset FOV about once a second.
+DEBUG_GET_ONCE_BOOL_OPTION(quad_inset_log, "OXR_QUAD_INSET_LOG", false)
 
 
 /*
@@ -251,6 +257,93 @@ struct locate_views_data
 	struct xrt_pose poses[XRT_MAX_COMPOSITOR_VIEW_CONFIGS_VIEW_COUNT];
 };
 
+/*!
+ * One edge of an inset of half-extent @p half centred on @p centre, shifted
+ * (not shrunk) to stay inside [@p lo, @p hi]. @p side is -1 for the low edge.
+ */
+static float
+place_inset(float centre, float half, float lo, float hi, int side)
+{
+	if (2 * half >= hi - lo) {
+		return side < 0 ? lo : hi;
+	}
+	centre = fmaxf(lo + half, fminf(hi - half, centre));
+	return centre + (float)side * half;
+}
+
+/*!
+ * Gaze as view-space tangents for the emulated quad-view inset. Holds the last
+ * valid sample briefly (blinks), then recentres. The gaze space and the eye
+ * tracking feature are acquired on first use and released with the session.
+ */
+static bool
+sample_quad_gaze(struct oxr_logger *log, struct oxr_session *sess, float *out_x, float *out_y)
+{
+	struct xrt_space_overseer *xso = sess->sys->xso;
+	if (!sess->quad_gaze.tried) {
+		sess->quad_gaze.tried = true;
+		struct xrt_device *eyes = GET_STATIC_XDEV_BY_ROLE(sess->sys, eyes);
+		if (eyes == NULL || !eyes->supported.eye_gaze || xso->semantic.view == NULL) {
+			oxr_warn(log, "OXR_QUAD_INSET_GAZE: no eye-gaze device, inset stays centred");
+			return false;
+		}
+		xrt_result_t xret = xrt_system_devices_feature_inc(sess->sys->xsysd, XRT_DEVICE_FEATURE_EYE_TRACKING);
+		if (xret != XRT_SUCCESS) {
+			oxr_warn(log, "OXR_QUAD_INSET_GAZE: could not enable eye tracking (%d)", (int)xret);
+			return false;
+		}
+		sess->quad_gaze.feature_acquired = true;
+		xret = xrt_space_overseer_create_pose_space(xso, eyes, XRT_INPUT_GENERIC_EYE_GAZE_POSE,
+		                                            &sess->quad_gaze.gaze_space);
+		if (xret != XRT_SUCCESS || sess->quad_gaze.gaze_space == NULL) {
+			oxr_warn(log, "OXR_QUAD_INSET_GAZE: could not create gaze space (%d)", (int)xret);
+			return false;
+		}
+		oxr_log(log, "OXR_QUAD_INSET_GAZE: inset follows eye gaze");
+	}
+	if (sess->quad_gaze.gaze_space == NULL) {
+		return false;
+	}
+
+	// Latest measurement, not predicted to display time: gaze extrapolation is unreliable.
+	const int64_t now_ns = os_monotonic_get_ns();
+	const struct xrt_pose identity = XRT_POSE_IDENTITY;
+	struct xrt_space_relation relation = XRT_SPACE_RELATION_ZERO;
+	xrt_result_t xret = xrt_space_overseer_locate_space(xso, xso->semantic.view, &identity, now_ns,
+	                                                    sess->quad_gaze.gaze_space, &identity, &relation);
+	const enum xrt_space_relation_flags required = (enum xrt_space_relation_flags)(
+	    XRT_SPACE_RELATION_ORIENTATION_VALID_BIT | XRT_SPACE_RELATION_ORIENTATION_TRACKED_BIT);
+	if (xret == XRT_SUCCESS && (relation.relation_flags & required) == required) {
+		const struct xrt_vec3 forward = {0.0f, 0.0f, -1.0f};
+		struct xrt_vec3 dir = {0};
+		math_quat_rotate_vec3(&relation.pose.orientation, &forward, &dir);
+		// Ignore directions more than ~80 degrees off axis.
+		if (dir.z < -0.17f && isfinite(dir.x) && isfinite(dir.y)) {
+			sess->quad_gaze.tan_x = dir.x / -dir.z;
+			sess->quad_gaze.tan_y = dir.y / -dir.z;
+			sess->quad_gaze.sampled_ns = now_ns;
+			sess->quad_gaze.valid_count++;
+		}
+	}
+
+	if (sess->quad_gaze.sampled_ns == 0 || now_ns - sess->quad_gaze.sampled_ns > 250 * U_TIME_1MS_IN_NS) {
+		return false;
+	}
+	*out_x = sess->quad_gaze.tan_x;
+	*out_y = sess->quad_gaze.tan_y;
+	return true;
+}
+
+static void
+release_quad_gaze(struct oxr_session *sess)
+{
+	xrt_space_reference(&sess->quad_gaze.gaze_space, NULL);
+	if (sess->quad_gaze.feature_acquired) {
+		(void)xrt_system_devices_feature_dec(sess->sys->xsysd, XRT_DEVICE_FEATURE_EYE_TRACKING);
+		sess->quad_gaze.feature_acquired = false;
+	}
+}
+
 static XrResult
 get_device_fovs_and_poses(struct oxr_logger *log,
                           struct oxr_session *sess,
@@ -317,20 +410,55 @@ get_device_fovs_and_poses(struct oxr_logger *log,
 	OXR_CHECK_XRET(log, sess, xret, xrt_device_get_view_poses);
 
 	// Generate inset views (views 2-3) from context views (views 0-1) for quad view configuration.
-	// Each inset view uses the same pose as its corresponding context view but with half the FOV.
+	// Each inset view uses the same pose as its corresponding context view but with half the FOV,
+	// unless OXR_QUAD_INSET_DEGREES sizes it and OXR_QUAD_INSET_GAZE points it at the gaze.
+	const float inset_degrees = debug_get_float_option_quad_inset_degrees();
+	float gaze_x = 0.0f, gaze_y = 0.0f;
+	const bool gaze = debug_get_bool_option_quad_inset_gaze() && sample_quad_gaze(log, sess, &gaze_x, &gaze_y);
+	sess->quad_gaze.locate_count++;
+
 	for (uint32_t i = 2; i < view_count; i++) {
 		const uint32_t src_index = i - 2;
 		struct xrt_fov src_fov = out_data->fovs[src_index];
 		struct xrt_pose src_pose = out_data->poses[src_index];
 
-		out_data->fovs[i] = (struct xrt_fov){
-		    .angle_left = src_fov.angle_left / 2,
-		    .angle_right = src_fov.angle_right / 2,
-		    .angle_up = src_fov.angle_up / 2,
-		    .angle_down = src_fov.angle_down / 2,
-		};
+		if (inset_degrees <= 0.0f && !gaze) {
+			out_data->fovs[i] = (struct xrt_fov){
+			    .angle_left = src_fov.angle_left / 2,
+			    .angle_right = src_fov.angle_right / 2,
+			    .angle_up = src_fov.angle_up / 2,
+			    .angle_down = src_fov.angle_down / 2,
+			};
+		} else {
+			// Half extents in angle; default keeps the half-FOV size.
+			float half_x = (src_fov.angle_right - src_fov.angle_left) / 4;
+			float half_y = (src_fov.angle_up - src_fov.angle_down) / 4;
+			if (inset_degrees > 0.0f) {
+				half_x = half_y = inset_degrees * 0.5f * (float)(M_PI / 180.0);
+			}
+			out_data->fovs[i] = (struct xrt_fov){
+			    .angle_left =
+			        place_inset(atanf(gaze_x), half_x, src_fov.angle_left, src_fov.angle_right, -1),
+			    .angle_right =
+			        place_inset(atanf(gaze_x), half_x, src_fov.angle_left, src_fov.angle_right, 1),
+			    .angle_down = place_inset(atanf(gaze_y), half_y, src_fov.angle_down, src_fov.angle_up, -1),
+			    .angle_up = place_inset(atanf(gaze_y), half_y, src_fov.angle_down, src_fov.angle_up, 1),
+			};
+		}
 
 		out_data->poses[i] = src_pose;
+	}
+
+	if (debug_get_bool_option_quad_inset_log() && sess->quad_gaze.locate_count % 90 == 1) {
+		const struct xrt_fov *c = &out_data->fovs[0], *f = &out_data->fovs[2];
+		const float d = (float)(180.0 / M_PI);
+		oxr_log(log,
+		        "Quad inset: gaze %s (%" PRIu64 "/%" PRIu64
+		        " valid) left eye context "
+		        "[%.1f %.1f %.1f %.1f] inset [%.1f %.1f %.1f %.1f] deg",
+		        gaze ? "on" : "off", sess->quad_gaze.valid_count, sess->quad_gaze.locate_count,
+		        c->angle_left * d, c->angle_right * d, c->angle_down * d, c->angle_up * d, f->angle_left * d,
+		        f->angle_right * d, f->angle_down * d, f->angle_up * d);
 	}
 
 	return XR_SUCCESS;
@@ -1247,6 +1375,8 @@ oxr_session_destroy(struct oxr_logger *log, struct oxr_handle_base *hb)
 
 	oxr_session_action_context_fini(&sess->action_context);
 	oxr_session_attached_actions_fini(&sess->attached_actions);
+
+	release_quad_gaze(sess);
 
 	xrt_comp_destroy(&sess->compositor);
 	xrt_comp_native_destroy(&sess->xcn);
