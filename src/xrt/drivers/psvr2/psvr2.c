@@ -2707,6 +2707,11 @@ psvr2_setup_distortion_and_fovs(struct psvr2_hmd *hmd)
 		hmd->distortion_calibration[7] = sinf(right);
 	}
 
+	// For tools that draw this headset's lens geometry (scripts/psvr2_lens_rings.py in macos-wine-xr).
+	const float *c = hmd->distortion_calibration;
+	PSVR2_INFO(hmd, "Lens calibration version %u: %.9g %.9g %.9g %.9g %.9g %.9g %.9g %.9g",
+	           (unsigned)calibration_block.version_unk, c[0], c[1], c[2], c[3], c[4], c[5], c[6], c[7]);
+
 	struct xrt_fov *fovs = hmd->base.hmd->distortion.fov;
 	fovs[0].angle_up = 53.0f * (M_PI / 180.0f);
 	fovs[0].angle_down = -53.0f * (M_PI / 180.0f);
