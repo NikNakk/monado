@@ -12,7 +12,8 @@
 
 #include <xrt/xrt_defines.h>
 
-#include <math.h>
+#include "math/m_mathinclude.h"
+
 #include <stdint.h>
 #include <stdbool.h>
 
