@@ -199,6 +199,11 @@ struct PreintegratedImuSamples
 	//! This is really "delta double-integrated specific force", but we call it delta_position for simplicity.
 	Vector3d delta_position;
 
+	//! Whether the body angular velocity is valid.
+	bool body_angular_velocity_valid;
+	//! The body-frame angular velocity at the end of the window. Raw reading, apply calibration before using.
+	Vector3d body_angular_velocity;
+
 	//! The whitening matrix for this preintegration, the lower triangular.
 	PreintegrationCovarianceMatrix whitening;
 
@@ -230,6 +235,8 @@ struct PreintegratedImuSamples
 		    .Q_start_end = Quaterniond::Identity(),
 		    .delta_velocity = Vector3d::Zero(),
 		    .delta_position = Vector3d::Zero(),
+		    .body_angular_velocity_valid = false,
+		    .body_angular_velocity = Vector3d::Zero(),
 
 		    .whitening = PreintegrationCovarianceMatrix::Zero(),
 

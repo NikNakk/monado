@@ -254,9 +254,9 @@ RerunContext::logDevice(const SolveSnapshot &snapshot)
 	    getDeviceWindowEntityName() + "/velocity", //
 	    rerun::Arrows3D::from_vectors(             //
 	        {
-	            rerun::Vector3D(static_cast<float>(newest.velocity.x), //
-	                            static_cast<float>(newest.velocity.y), //
-	                            static_cast<float>(newest.velocity.z)),
+	            rerun::Vector3D(static_cast<float>(newest.linear_velocity.x), //
+	                            static_cast<float>(newest.linear_velocity.y), //
+	                            static_cast<float>(newest.linear_velocity.z)),
 	        }) //
 	        .with_origins({
 	            rerun::Position3D(newest.Tcv_world_device.position.x, //
@@ -332,7 +332,7 @@ RerunContext::logDeviceMetrics(const SolveSnapshot &snapshot)
 	this->stream->log(metrics + "/states_in_solve",
 	                  rerun::Scalars(static_cast<double>(std::popcount(device.keyframe_mask))));
 
-	this->stream->log(metrics + "/speed_m_s", rerun::Scalars(map_vec3_f64(newest.velocity).norm()));
+	this->stream->log(metrics + "/speed_m_s", rerun::Scalars(map_vec3_f64(newest.linear_velocity).norm()));
 
 	// The biases are what the IMU factors are really solving for, and they are the first thing to go somewhere
 	// unphysical when the window is too weak to constrain them.

@@ -253,6 +253,14 @@ public: // Fields
 
 	//! The relation history of the device, used as a fast way to retrieve the latest dead-reckoned poses.
 	RelationHistory imu_relation_history;
+	/*!
+	 * The relation history containing only the exact camera keyframes, to allow access to exact fused keyframes.
+	 *
+	 * Since relation histories are not allowed to be pushed to out of order, if we want to allow access to exact
+	 * camera keyframe poses, so that a late camera can get the full solved pose from other cameras, this is the way
+	 * to go about that.
+	 */
+	RelationHistory keyframe_relation_history;
 
 	//! Pre-calibrated accelerometer bias, in meters per second squared.
 	DeviceImuCalibration stored_imu_calibration;
@@ -329,7 +337,12 @@ struct SolvedDeviceKeyframe
 	//! Solved world -> LED model pose.
 	xrt_pose Tcv_world_device;
 	//! Solved world-frame velocity, in meters per second.
-	xrt_vec3_f64 velocity;
+	xrt_vec3_f64 linear_velocity;
+
+	//! Whether the world-frame angular velocity is valid.
+	bool angular_velocity_valid;
+	//! World-frame angular velocity, in radians per second.
+	xrt_vec3_f64 angular_velocity;
 
 	//! Solved accelerometer bias, in meters per second squared.
 	xrt_vec3_f64 accel_bias;
@@ -626,6 +639,13 @@ public: // Methods
 	//! Provides the latest predicted device pose for the requested timestamp.
 	void
 	getTrackedPose(timepoint_ns requested_time_ns, xrt_space_relation &out_relation);
+
+	/*!
+	 * Provides the latest predicted device pose for the requested timestamp, also checking for exact keyframe
+	 * poses, if available.
+	 */
+	void
+	getKeyframeTrackedPose(timepoint_ns requested_time_ns, xrt_space_relation &out_relation);
 
 	/*!
 	 * Appends any camera samples into @p pending, before sorting pending by timestamp order.

@@ -796,7 +796,7 @@ Camera::processSampleFast(CameraSample &sample)
 	// Figure out where all the devices are first, so we can then sort it.
 	for (std::unique_ptr<Device> &device : tracker->devices) {
 		xrt_space_relation device_predicted_relation = XRT_SPACE_RELATION_ZERO; //< AKA "the prior"
-		device->sensor_fusion->getTrackedPose(sample.timestamp_ns, device_predicted_relation);
+		device->sensor_fusion->getKeyframeTrackedPose(sample.timestamp_ns, device_predicted_relation);
 
 		bool prior_pose_valid =
 		    (device_predicted_relation.relation_flags &

@@ -416,12 +416,16 @@ preintegrate(const std::span<const xrt_imu_sample> &imu_samples,
 		                      delta_position, covariance);
 	}
 
+	xrt_vec3_f64 body_angular_velocity = imu_samples.back().gyro_rad_secs;
+
 	// Integrate the last sample to end time, if necessary.
 	if (last_sample.timestamp_ns < end_time_ns) {
 		double dt = static_cast<double>(end_time_ns - last_sample.timestamp_ns) * 1e-9;
 
 		integrateSingleSample(first_sample_after_end_time, dt, accel_bias, gyro_bias, accel_scale, Q_start_cur,
 		                      delta_velocity, delta_position, covariance);
+
+		body_angular_velocity = first_sample_after_end_time.gyro_rad_secs;
 	}
 
 	// Extract out the jacobians from Jet states.
@@ -432,6 +436,8 @@ preintegrate(const std::span<const xrt_imu_sample> &imu_samples,
 	    .Q_start_end = {Q_start_cur.w().a, Q_start_cur.x().a, Q_start_cur.y().a, Q_start_cur.z().a},
 	    .delta_velocity = {delta_velocity[0].a, delta_velocity[1].a, delta_velocity[2].a},
 	    .delta_position = {delta_position[0].a, delta_position[1].a, delta_position[2].a},
+	    .body_angular_velocity_valid = true,
+	    .body_angular_velocity = map_vec3_f64(body_angular_velocity),
 
 	    .whitening = {},
 
