@@ -434,7 +434,7 @@ Camera::tryDevicePose(Device *device,
 		    device,                   //
 		    score,                    //
 		    Tcv_cam_device_candidate, //
-		    std::nullopt);            //
+		    false);                   // was_optimized
 		return true;
 	}
 
@@ -465,9 +465,6 @@ Camera::tryDeviceBlobRecovery(Device *device,
 		return false;
 	}
 
-	OldOptimizationData old_optimization_data;
-	U_ZERO(&old_optimization_data);
-
 	// RANSAC-PnP with the matched blobs
 	// The optimization should still be able to run with an identity pose.
 	xrt_pose Tcv_cam_device =
@@ -484,17 +481,16 @@ Camera::tryDeviceBlobRecovery(Device *device,
 	        })
 	        .pose;
 	xrt_pose Tcv_cam_device_optimized;
-	bool success = optimizePose(           //
-	    tracker->log_level,                //
-	    tracker->deterministic,            //
-	    this->model,                       //
-	    Tcv_cam_device,                    //
-	    sample.blobs,                      //
-	    sample.blob_count,                 //
-	    &device->params.led_model,         //
-	    device->id,                        //
-	    Tcv_cam_device_optimized,          //
-	    old_optimization_data.covariance); //
+	bool success = optimizePose(   //
+	    tracker->log_level,        //
+	    tracker->deterministic,    //
+	    this->model,               //
+	    Tcv_cam_device,            //
+	    sample.blobs,              //
+	    sample.blob_count,         //
+	    &device->params.led_model, //
+	    device->id,                //
+	    Tcv_cam_device_optimized); //
 	if (!success) {
 		CT_DEBUG(tracker, "Camera %p RANSAC-PnP blob recovery for device %d from %u blobs failed", (void *)this,
 		         device->id, sample.blob_count);
@@ -545,13 +541,13 @@ Camera::tryDeviceBlobRecovery(Device *device,
 		CT_DEBUG(tracker, "Camera %p RANSAC-PnP recovered pose was good enough for device %d from %u blobs",
 		         (void *)this, device->id, sample.blob_count);
 
-		this->pushPose(              //
-		    sample,                  //
-		    device_state,            //
-		    device,                  //
-		    score,                   //
-		    Tcv_cam_device,          //
-		    &old_optimization_data); //
+		this->pushPose(     //
+		    sample,         //
+		    device_state,   //
+		    device,         //
+		    score,          //
+		    Tcv_cam_device, //
+		    true);          // was_optimized
 
 		return true;
 	} else {
@@ -742,7 +738,7 @@ Camera::processSampleSlow(CameraSample &sample)
 				               device,         //
 				               score,          //
 				               Tcv_cam_device, //
-				               std::nullopt);  //
+				               false);         // was_optimized
 
 				// We found a pose for this device in this sample
 				device_state.needs_slow_processing = false;
@@ -941,7 +937,7 @@ Camera::pushPose(CameraSample &camera_sample,
                  Device *device,
                  pose_metrics &score,
                  const xrt_pose &Tcv_cam_device_initial,
-                 std::optional<OldOptimizationData *> was_optimized)
+                 bool was_optimized)
 {
 	// We should never find two poses for the same device in a single frame
 	assert(device_state.found_pose.has_value() == false);
@@ -957,12 +953,6 @@ Camera::pushPose(CameraSample &camera_sample,
 
 	// Mark all the new blobs using the match info
 	camera_sample.markMatchingBlobs(tracker, device->params.led_model, device->id, blob_match_info);
-
-	RawPoseCovarianceMatrix covariance;
-	// If the pose was already optimized once, pull the covariance matrix from that
-	if (was_optimized) {
-		std::memcpy(covariance, (*was_optimized)->covariance, sizeof(RawPoseCovarianceMatrix));
-	}
 
 	xrt_pose Tcv_cam_device = Tcv_cam_device_initial;
 
@@ -980,28 +970,13 @@ Camera::pushPose(CameraSample &camera_sample,
 		    camera_sample.blob_count,  //
 		    &device->params.led_model, //
 		    device->id,                //
-		    Tcv_cam_device_optimized,  //
-		    covariance);               //
+		    Tcv_cam_device_optimized); //
 
 		if (!success) {
 			CT_DEBUG(tracker,
 			         "Camera %d (group %d) RANSAC-PnP refinement for device %d from %u "
 			         "blobs failed",
 			         0, 0, device->id, camera_sample.blob_count);
-
-			if (!was_optimized) {
-				// If we didn't do a pose optimization, and this one failed, just compute the covariance
-				// directly.
-				computePoseCovariance(         //
-				    tracker->log_level,        //
-				    this->model,               //
-				    Tcv_cam_device,            //
-				    camera_sample.blobs,       //
-				    camera_sample.blob_count,  //
-				    &device->params.led_model, //
-				    device->id,                //
-				    covariance);               //
-			}
 		} else {
 			CT_DEBUG(tracker,
 			         "Camera %d (group %d) RANSAC-PnP refinement for device %d from %u "
@@ -1070,9 +1045,7 @@ Camera::pushPose(CameraSample &camera_sample,
 	device_state.found_pose = {
 	    .Tcv_cam_device = Tcv_cam_device,
 	    .average_blob_brightness = average_brightness,
-	    .covariance = {},
 	};
-	std::memcpy(device_state.found_pose->covariance, covariance, sizeof(RawPoseCovarianceMatrix));
 
 	auto Txr_world_cam = camera_sample.Txr_world_cam;
 

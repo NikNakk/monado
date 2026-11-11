@@ -222,26 +222,10 @@ RerunContext::logFoundPose(const CameraSample &camera_sample,
                            const FoundDevicePose &found_pose)
 {
 	std::string camera_device_pose_entity = getCameraTrackedDevicePoseEntityName(camera_sample, device->id, false);
-	std::string camera_device_covariance_entity = camera_device_pose_entity + "/covariance";
 
 	const xrt_pose &Tcv_cam_device = found_pose.Tcv_cam_device;
 	this->stream->log(camera_device_pose_entity, toRerunTransform(Tcv_cam_device));
 	this->logLedModel(camera_device_pose_entity, device->id, device->params.led_model, false);
-
-	xrt_vec3 radii;
-	xrt_quat Q_cam_cov;
-	covariancePositionRadius(found_pose.covariance, radii, Q_cam_cov);
-
-	xrt_pose Tcv_device_cov = XRT_POSE_IDENTITY;
-	// Bring the covariance's orientation into camera space
-	math_quat_invert(&Tcv_cam_device.orientation, &Tcv_device_cov.orientation);
-	// Rotate by the covariance's orientation
-	math_quat_rotate(&Tcv_device_cov.orientation, &Q_cam_cov, &Tcv_device_cov.orientation);
-
-	this->stream->log(camera_device_covariance_entity, toRerunTransform(Tcv_device_cov));
-	this->stream->log(
-	    camera_device_covariance_entity,
-	    rerun::archetypes::Ellipsoids3D::from_half_sizes(rerun::components::HalfSize3D(radii.x, radii.y, radii.z)));
 }
 
 /*

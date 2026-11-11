@@ -167,10 +167,6 @@ public: // Methods
 	}
 };
 
-// Covariance lives in the manifold's tangent space, which is one dimension smaller than the ambient
-// parameter block: the quaternion contributes 3 tangent dimensions, not 4.
-typedef Eigen::Matrix<double, kPoseCovarianceSize, kPoseCovarianceSize> PoseStateCovarianceMatrix;
-
 /*
  *
  * Parameter block types

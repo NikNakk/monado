@@ -25,7 +25,6 @@
 
 #include <Eigen/Core>
 #include <Eigen/Geometry>
-#include <Eigen/Eigenvalues>
 
 #include "ceres/autodiff_cost_function.h"
 #include "ceres/problem.h"
@@ -34,9 +33,6 @@
 #include "pose_optimize.hpp"
 #include "ransac.hpp"
 #include "internal_math.hpp"
-
-#include <iostream>
-#include <stdio.h>
 
 
 namespace {
@@ -48,9 +44,6 @@ using namespace xrt::auxiliary::math;
 using namespace xrt::auxiliary::tracking::camera_models;
 using namespace xrt::tracking::constellation;
 using namespace xrt::tracking::constellation::optimizer;
-
-// @todo tune this number
-#define BAD_COVARIANCE_MATRIX (PoseStateCovarianceMatrix::Identity() * 1e6)
 
 struct PnPOptimizeCostFunctor
 {
@@ -221,61 +214,6 @@ setupProblem(Eigen::Vector<double, kPoseStateSize> &solver_params,
 	out_problem = std::move(problem);
 }
 
-bool
-computeCovariance(uint32_t num_residuals,
-                  double rss,
-                  const PoseStateCovarianceMatrix &H,
-                  Eigen::Ref<PoseStateCovarianceMatrix> out_covariance)
-{
-	assert(num_residuals > kPoseCovarianceSize);
-
-	const double sigma2 = rss / static_cast<double>(num_residuals - kPoseCovarianceSize);
-	const double sigma = std::max(std::sqrt(sigma2), kBlobPositionSigmaPixels);
-
-	Eigen::LLT<PoseStateCovarianceMatrix> llt(H);
-	if (llt.info() != Eigen::Success) {
-		return false;
-	}
-
-	out_covariance = (sigma * sigma) * llt.solve(PoseStateCovarianceMatrix::Identity());
-
-	if (!out_covariance.allFinite()) {
-		return false;
-	}
-
-	return true;
-}
-
-bool
-computeProblemHessian(ceres::Problem &problem,
-                      uint32_t &out_num_residuals,
-                      double &out_rss,
-                      PoseStateCovarianceMatrix &out_H)
-{
-	ceres::CRSMatrix jacobian_crs;
-	double cost = 0.0;
-
-	if (!problem.Evaluate(ceres::Problem::EvaluateOptions(), &cost, nullptr, nullptr, &jacobian_crs)) {
-		return false;
-	}
-
-	assert(jacobian_crs.num_cols == kPoseCovarianceSize);
-
-	Eigen::MatrixXd J = Eigen::MatrixXd::Zero(jacobian_crs.num_rows, jacobian_crs.num_cols);
-	for (int row = 0; row < jacobian_crs.num_rows; row++) {
-		for (int i = jacobian_crs.rows[row]; i < jacobian_crs.rows[row + 1]; i++) {
-			J(row, jacobian_crs.cols[i]) = jacobian_crs.values[i];
-		}
-	}
-
-	out_num_residuals = static_cast<uint32_t>(jacobian_crs.num_rows);
-	// Ceres' cost is 0.5 * ||r||^2, so twice it is the residual sum of squares computeCovariance wants.
-	out_rss = cost * 2.0;
-	out_H = J.transpose() * J;
-
-	return true;
-}
-
 }; // namespace
 
 namespace xrt::tracking::constellation::optimizer {
@@ -289,8 +227,7 @@ optimizePose(u_logging_level log_level,
              uint32_t num_blobs,
              t_constellation_tracker_led_model *leds_model,
              t_constellation_device_id_t device_id,
-             xrt_pose &out_pose,
-             RawPoseCovarianceMatrix out_covariance)
+             xrt_pose &out_pose)
 {
 	std::vector<Eigen::Vector2f> points2d;
 	std::vector<Eigen::Vector3f> points3d;
@@ -414,112 +351,7 @@ optimizePose(u_logging_level log_level,
 	// Unpack the parameters
 	out_pose = Pose<double>(solver_params).toXrtPose();
 
-	if (out_covariance != nullptr) {
-		uint32_t num_residuals;
-		double rss;
-		PoseStateCovarianceMatrix H;
-
-		Eigen::Map<PoseStateCovarianceMatrix> covariance(out_covariance);
-		if (!computeProblemHessian(problem, num_residuals, rss, H) || //
-		    !computeCovariance(num_residuals, rss, H, covariance)) {  //
-			covariance = BAD_COVARIANCE_MATRIX;
-		}
-	}
-
 	return true;
-}
-
-void
-computePoseCovariance(u_logging_level log_level,
-                      const camera_model &params,
-                      xrt_pose init_pose,
-                      t_blob *blobs,
-                      uint32_t num_blobs,
-                      t_constellation_tracker_led_model *leds_model,
-                      t_constellation_device_id_t device_id,
-                      RawPoseCovarianceMatrix out_covariance)
-{
-	Eigen::Map<PoseStateCovarianceMatrix> covariance(out_covariance);
-
-	std::vector<Eigen::Vector2f> points2d;
-	std::vector<Eigen::Vector3f> points3d;
-	std::vector<t_constellation_led_id_it> led_ids;
-	std::vector<Eigen::Vector3f> normals3d;
-	std::vector<t_blob *> inlier_blobs;
-
-	uint32_t num_leds = pickLabelledBlobs(blobs,         //
-	                                      num_blobs,     //
-	                                      leds_model,    //
-	                                      device_id,     //
-	                                      points2d,      //
-	                                      points3d,      //
-	                                      led_ids,       //
-	                                      normals3d,     //
-	                                      inlier_blobs); //
-
-	// sigma2 = rss / (num_residuals - kPoseCovarianceSize), if num_residuals is less than 8 (num_leds * 2), then we
-	// can't compute a covariance matrix, so we return a bad covariance matrix.
-	if (num_leds < 4) {
-		covariance = BAD_COVARIANCE_MATRIX;
-		return;
-	}
-
-	auto optimize_cost_functor = PnPOptimizeCostFunctor(num_leds, points2d, points3d, params);
-
-	Eigen::Vector<double, kPoseStateSize> solver_params;
-	Pose<double>(init_pose).pack(solver_params);
-
-	CostFunction cost_function = {
-	    &optimize_cost_functor,
-	    optimize_cost_functor.numResiduals(),
-	    ceres::DO_NOT_TAKE_OWNERSHIP,
-	};
-	PoseManifold pose_manifold;
-
-	ceres::Solver::Options options;
-	ceres::Problem problem;
-	setupProblem(solver_params, pose_manifold, cost_function, options, problem);
-
-	uint32_t num_residuals;
-	double rss;
-	PoseStateCovarianceMatrix H;
-
-	if (!computeProblemHessian(problem, num_residuals, rss, H) || //
-	    !computeCovariance(num_residuals, rss, H, covariance)) {  //
-		covariance = BAD_COVARIANCE_MATRIX;
-	}
-}
-
-void
-covariancePositionRadius(const RawPoseCovarianceMatrix &raw_covariance, xrt_vec3 &radii, xrt_quat &Q_cam_cov)
-{
-	Eigen::Map<const PoseStateCovarianceMatrix> covariance(raw_covariance);
-
-	const Eigen::Matrix3d &pos_covariance =
-	    covariance.block<3, 3>(static_cast<int>(CovarianceIndex::PosX), static_cast<int>(CovarianceIndex::PosX));
-
-	Eigen::SelfAdjointEigenSolver<Eigen::Matrix3d> solver(pos_covariance);
-
-	if (solver.info() != Eigen::Success) {
-		// @todo handle failure better, if possible
-		U_LOG_E("Failed to compute eigenvalues for position covariance matrix.");
-		radii = {0.0f, 0.0f, 0.0f};
-		Q_cam_cov = {0.0f, 0.0f, 0.0f, 1.0f};
-		return;
-	}
-
-	const Eigen::Vector3d &eigenvalues = solver.eigenvalues();
-	Eigen::Matrix3d eigenvectors = solver.eigenvectors();
-
-	if (eigenvectors.determinant() < 0.0) {
-		eigenvectors.col(2) *= -1.0;
-	}
-
-	Eigen::Quaterniond q(eigenvectors);
-	map_quat(Q_cam_cov) = q.cast<float>();
-
-	Eigen::Vector3d half_sizes = 3.0 * eigenvalues.cwiseMax(0.0).cwiseSqrt();
-	map_vec3(radii) = half_sizes.cast<float>();
 }
 
 }; // namespace xrt::tracking::constellation::optimizer

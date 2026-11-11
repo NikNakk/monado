@@ -97,7 +97,6 @@ struct FoundDevicePose
 {
 	xrt_pose Tcv_cam_device XRT_POSE_IDENTITY;
 	float average_blob_brightness;
-	RawPoseCovarianceMatrix covariance;
 
 	/*!
 	 * Whether a found pose was already handled, this is present so that if a single sample is torn between some
@@ -202,11 +201,6 @@ public: // Fields
 public: // Methods
 	void
 	setupDebugTracking(void *root);
-};
-
-struct OldOptimizationData
-{
-	RawPoseCovarianceMatrix covariance;
 };
 
 struct Camera
@@ -325,7 +319,7 @@ public: // Methods (t_constellation_tracker.cpp)
 	         Device *device,
 	         pose_metrics &score,
 	         const xrt_pose &Tcv_cam_device,
-	         std::optional<OldOptimizationData *> was_optimized);
+	         bool was_optimized);
 
 public: // Methods (constellation_debug_scribble.cpp)
 	void
