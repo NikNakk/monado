@@ -1042,7 +1042,7 @@ static void
 integrateToTimestampHistory(const double world_gravity_mag,
                             DeviceSolveState &inout_solve,
                             const std::span<const xrt_imu_sample> imu_samples,
-                            m_relation_history *relation_history)
+                            RelationHistory &relation_history)
 {
 	assert(imu_samples.size() > 0);
 
@@ -1097,7 +1097,7 @@ integrateToTimestampHistory(const double world_gravity_mag,
 		map_vec3(relation.angular_velocity) =
 		    (Q_world_imu * (map_vec3_f64(sample.gyro_rad_secs) - gyro_bias)).cast<float>();
 
-		m_relation_history_push_or_update(relation_history, &relation, pose_ns);
+		relation_history.pushOrUpdate({relation, pose_ns}, true);
 	}
 
 	map_vec3(inout_solve.Tcv_world_device.position) = T_world_device.cast<float>();
@@ -2187,24 +2187,21 @@ struct SensorFusionProblem
  *
  */
 
-Device::Device(t_constellation_device_id_t id, const t_constellation_tracker_led_model *led_model)
+Device::Device(t_constellation_device_id_t id,
+               const t_constellation_tracker_led_model *led_model)
     : id(id),                          //
       led_model(led_model),            //
       latest_solve(std::nullopt),      //
       latest_imu_reckon(std::nullopt), //
+      imu_relation_history(),          //
       stored_imu_calibration(),        //
       imu_write_count(0),              //
       imu_samples()                    //
 {
-	m_relation_history_create(&this->relation_history);
-
 	this->resetLocked();
 }
 
-Device::~Device()
-{
-	m_relation_history_destroy(&this->relation_history);
-}
+Device::~Device() = default;
 
 const DeviceImuCalibration &
 Device::getLatestImuCalibration() const
@@ -2219,7 +2216,7 @@ Device::getLatestImuCalibration() const
 void
 Device::resetLocked()
 {
-	m_relation_history_clear(this->relation_history);
+	this->imu_relation_history.clear();
 
 	this->latest_solve = std::nullopt;
 	this->latest_imu_reckon = std::nullopt;
@@ -2755,8 +2752,15 @@ void
 SensorFusion::getTrackedPose(timepoint_ns requested_time_ns, xrt_space_relation &out_relation)
 {
 	out_relation = XRT_SPACE_RELATION_ZERO;
-	m_relation_history_get(this->device.relation_history, requested_time_ns, &out_relation);
-	SF_TRACE(this, "Used relation history for pose at ts %" PRIi64, requested_time_ns);
+
+	RelationHistoryEntry entry{};
+	auto result = this->device.imu_relation_history.get(requested_time_ns, entry);
+	if (result != M_RELATION_HISTORY_RESULT_INVALID) {
+		out_relation = entry.relation;
+	}
+
+	SF_TRACE(this, "Used relation history for pose at ts %" PRIi64 ", got result %d", requested_time_ns,
+	         static_cast<int>(result));
 
 	// Convert to OpenXR coordinate space before outputting
 	math_pose_convert_from_opencv(&out_relation.pose, &out_relation.pose);
@@ -2955,7 +2959,7 @@ SensorFusion::reckonToLatestImu(DeviceSolveState &inout_solve)
 	integrateToTimestampHistory(this->snapshot.world_gravity_mag,                                 //
 	                            inout_solve,                                                      //
 	                            std::span<const xrt_imu_sample>(samples_buf.data(), num_samples), //
-	                            device.relation_history);                                         //
+	                            device.imu_relation_history);                                     //
 
 	SF_TRACE(this, "Filled relation history for device %d from %" PRIi64 " to %" PRIi64, device.id, start_ns,
 	         samples_buf[num_samples - 1].timestamp_ns);

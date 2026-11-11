@@ -17,7 +17,7 @@
 
 #include "constellation/t_constellation_tracker.h"
 
-#include "math/m_relation_history.h"
+#include "math/m_relation_history.hpp"
 
 #include "imu_preintegration.hpp"
 
@@ -252,7 +252,7 @@ public: // Fields
 	std::optional<DeviceSolveState> latest_imu_reckon;
 
 	//! The relation history of the device, used as a fast way to retrieve the latest dead-reckoned poses.
-	m_relation_history *relation_history;
+	RelationHistory imu_relation_history;
 
 	//! Pre-calibrated accelerometer bias, in meters per second squared.
 	DeviceImuCalibration stored_imu_calibration;
