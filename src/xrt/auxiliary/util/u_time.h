@@ -36,7 +36,7 @@ extern "C" {
 #endif
 
 //! Helper define to make code more readable.
-#define U_1_000_000_000 (1000 * 1000 * 1000)
+#define U_1_000_000_000 (1000LL * 1000 * 1000)
 
 /*!
  * The number of nanoseconds in a second.
@@ -51,14 +51,14 @@ extern "C" {
  *
  * @see timepoint_ns
  */
-#define U_TIME_1MS_IN_NS (1000 * 1000)
+#define U_TIME_1MS_IN_NS (1000LL * 1000)
 
 /*!
  * The number of nanoseconds in a microsecond.
  *
  * @see timepoint_ns
  */
-#define U_TIME_1US_IN_NS 1000
+#define U_TIME_1US_IN_NS 1000LL
 
 /*!
  * The number of nanoseconds in half a millisecond.

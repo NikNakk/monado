@@ -788,8 +788,7 @@ handle_optimize_brightness_curve(struct t_led_sync_refinement *refinement)
 	timepoint_ns now_ns = os_monotonic_get_ns();
 	time_duration_ns since_measurement_ns = now_ns - refinement->delta_sync.last_measurement_ns;
 	if (since_measurement_ns > BG_NO_MEASUREMENT_TIMEOUT_NS) {
-		LOG_DEBUG(refinement, "No BG measurement for %" PRId64 "ms, resyncing",
-		          since_measurement_ns / U_TIME_1MS_IN_NS);
+		LOG_DEBUG(refinement, "No BG measurement for %fms, resyncing", time_ns_to_ms_f(since_measurement_ns));
 		set_phase_locked(refinement, T_LED_SYNC_PHASE_FIND_INITIAL_OFFSET);
 		return;
 	}
