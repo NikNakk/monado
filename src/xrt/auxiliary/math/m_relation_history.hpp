@@ -288,6 +288,77 @@ public: // Methods (thread-unsafe)
 		return M_RELATION_HISTORY_RESULT_INTERPOLATED;
 	}
 
+	/*!
+	 * Gets an exact entry, if it exists.
+	 *
+	 * Call with @ref mutex held.
+	 */
+	std::optional<T>
+	getExactLocked(timepoint_ns timestamp_ns) const
+	{
+		if (this->impl.empty()) {
+			return std::nullopt;
+		}
+
+		const auto b = this->impl.begin();
+		const auto e = this->impl.end();
+
+		const auto it = std::lower_bound(
+		    b, e, timestamp_ns, [](const T &rhe, int64_t timestamp) { return rhe.timestamp < timestamp; });
+
+		if (it == e || it->timestamp != timestamp_ns) {
+			return std::nullopt;
+		}
+
+		return *it;
+	}
+
+	/*!
+	 * Gets the stored entry nearest to the given timestamp, if one exists within @p max_slop_ns of it.
+	 *
+	 * Never interpolates or extrapolates, the returned entry is exactly as stored (check its timestamp to see
+	 * how far off it is). If two entries are equally close, the older one is returned.
+	 *
+	 * Call with @ref mutex held.
+	 */
+	std::optional<T>
+	getNearestLocked(timepoint_ns timestamp_ns, time_duration_ns max_slop_ns) const
+	{
+		if (this->impl.empty() || max_slop_ns < 0) {
+			return std::nullopt;
+		}
+
+		const auto b = this->impl.begin();
+		const auto e = this->impl.end();
+
+		// First element not less than our timestamp, the nearest is either it or its predecessor.
+		const auto it = std::lower_bound(
+		    b, e, timestamp_ns, [](const T &rhe, int64_t timestamp) { return rhe.timestamp < timestamp; });
+
+		std::optional<T> best = std::nullopt;
+		time_duration_ns best_diff = max_slop_ns;
+
+		if (it != b) {
+			const auto &before = *(it - 1);
+			time_duration_ns diff = timestamp_ns - before.timestamp;
+			if (diff <= best_diff) {
+				best = before;
+				best_diff = diff;
+			}
+		}
+
+		if (it != e) {
+			const auto &after = *it;
+			time_duration_ns diff = after.timestamp - timestamp_ns;
+			// Strictly less, so ties go to the older entry.
+			if (diff < best_diff || (!best.has_value() && diff <= best_diff)) {
+				best = after;
+			}
+		}
+
+		return best;
+	}
+
 public: // Methods (thread-safe)
 	/*!
 	 * @copydoc pushOrUpdateLocked
@@ -366,6 +437,30 @@ public: // Methods (thread-safe)
 	{
 		std::unique_lock<os::Mutex> lock(this->mutex);
 		return this->getLocked(timestamp_ns, out_entry);
+	}
+
+	/*!
+	 * @copydoc getExactLocked
+	 *
+	 * Thread safe, holds @ref mutex.
+	 */
+	std::optional<T>
+	getExact(timepoint_ns timestamp_ns) const
+	{
+		std::unique_lock<os::Mutex> lock(this->mutex);
+		return this->getExactLocked(timestamp_ns);
+	}
+
+	/*!
+	 * @copydoc getNearestLocked
+	 *
+	 * Thread safe, holds @ref mutex.
+	 */
+	std::optional<T>
+	getNearest(timepoint_ns timestamp_ns, time_duration_ns max_slop_ns) const
+	{
+		std::unique_lock<os::Mutex> lock(this->mutex);
+		return this->getNearestLocked(timestamp_ns, max_slop_ns);
 	}
 };
 

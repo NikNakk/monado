@@ -125,6 +125,43 @@ try {
 }
 G_CATCH_GUARDS_WITH_RETURN(false)
 
+bool
+m_relation_history_get_exact(const m_relation_history *mrh, int64_t at_timestamp_ns, xrt_space_relation *out_relation)
+try {
+	auto rh = from_mrh(mrh);
+
+	auto entry = rh->getExact(at_timestamp_ns);
+	if (!entry.has_value()) {
+		return false;
+	}
+
+	*out_relation = entry->relation;
+
+	return true;
+}
+G_CATCH_GUARDS_WITH_RETURN(false)
+
+bool
+m_relation_history_get_nearest(const m_relation_history *mrh,
+                               int64_t at_timestamp_ns,
+                               int64_t max_slop_ns,
+                               int64_t *out_time_ns,
+                               xrt_space_relation *out_relation)
+try {
+	auto rh = from_mrh(mrh);
+
+	auto entry = rh->getNearest(at_timestamp_ns, max_slop_ns);
+	if (!entry.has_value()) {
+		return false;
+	}
+
+	*out_relation = entry->relation;
+	*out_time_ns = entry->timestamp;
+
+	return true;
+}
+G_CATCH_GUARDS_WITH_RETURN(false)
+
 uint32_t
 m_relation_history_get_size(const m_relation_history *mrh)
 try {

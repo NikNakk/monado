@@ -121,6 +121,49 @@ m_relation_history_get_latest(const struct m_relation_history *rh,
                               struct xrt_space_relation *out_relation);
 
 /*!
+ * Get the relation stored at exactly the given timestamp, if any.
+ *
+ * Unlike @ref m_relation_history_get, this never interpolates or extrapolates, and fails if there is no entry with
+ * precisely this timestamp.
+ *
+ * @param rh self
+ * @param at_timestamp_ns The exact timestamp to look up
+ * @param[out] out_relation Populated with the stored relation, if found
+ *
+ * @return false if there is no entry at that timestamp.
+ *
+ * @public @memberof m_relation_history
+ */
+bool
+m_relation_history_get_exact(const struct m_relation_history *rh,
+                             int64_t at_timestamp_ns,
+                             struct xrt_space_relation *out_relation);
+
+/*!
+ * Get the stored relation nearest to the given timestamp, if one is within @p max_slop_ns of it.
+ *
+ * Like @ref m_relation_history_get_exact, this never interpolates or extrapolates, but accepts entries that are up
+ * to @p max_slop_ns away (inclusive) from the requested timestamp. If two entries are equally close, the older one
+ * is returned.
+ *
+ * @param rh self
+ * @param at_timestamp_ns The timestamp to look up
+ * @param max_slop_ns Maximum allowed distance between @p at_timestamp_ns and the found entry, must be >= 0
+ * @param[out] out_time_ns Populated with the found entry's timestamp, if found
+ * @param[out] out_relation Populated with the stored relation, if found
+ *
+ * @return false if there is no entry within @p max_slop_ns of the timestamp.
+ *
+ * @public @memberof m_relation_history
+ */
+bool
+m_relation_history_get_nearest(const struct m_relation_history *rh,
+                               int64_t at_timestamp_ns,
+                               int64_t max_slop_ns,
+                               int64_t *out_time_ns,
+                               struct xrt_space_relation *out_relation);
+
+/*!
  * Returns the number of items in the history.
  *
  * @public @memberof m_relation_history

@@ -362,3 +362,176 @@ TEST_CASE("m_relation_history is a bounded ring buffer")
 	CHECK(m_relation_history_get(h.rh, kCount * 1000, &out) == M_RELATION_HISTORY_RESULT_EXACT);
 	CHECK(m_relation_history_get(h.rh, 1000, &out) == M_RELATION_HISTORY_RESULT_REVERSE_PREDICTED);
 }
+
+TEST_CASE("m_relation_history get_exact")
+{
+	History h;
+	xrt_space_relation out = XRT_SPACE_RELATION_ZERO;
+
+	// Empty history has nothing.
+	CHECK_FALSE(m_relation_history_get_exact(h.rh, U_TIME_1S_IN_NS, &out));
+
+	for (int64_t i = 1; i <= 3; i++) {
+		xrt_space_relation rel = make_relation((float)i);
+		REQUIRE(m_relation_history_push(h.rh, &rel, i * U_TIME_1S_IN_NS));
+	}
+
+	SECTION("hits return the stored relation, including the first and last")
+	{
+		for (int64_t i = 1; i <= 3; i++) {
+			out = XRT_SPACE_RELATION_ZERO;
+			REQUIRE(m_relation_history_get_exact(h.rh, i * U_TIME_1S_IN_NS, &out));
+			CHECK(out.pose.position.x == Approx((float)i));
+			CHECK(out.relation_flags == kPoseFlags);
+		}
+	}
+
+	SECTION("misses fail and leave the output untouched, never returning a neighbouring entry")
+	{
+		out = make_relation(-1.0f);
+
+		CHECK_FALSE(m_relation_history_get_exact(h.rh, 0, &out));
+		CHECK_FALSE(m_relation_history_get_exact(h.rh, 1 * U_TIME_1S_IN_NS - 1, &out));
+		CHECK_FALSE(m_relation_history_get_exact(h.rh, 1 * U_TIME_1S_IN_NS + 1, &out));
+		CHECK_FALSE(m_relation_history_get_exact(h.rh, 2 * U_TIME_1S_IN_NS + U_TIME_1S_IN_NS / 2, &out));
+		CHECK_FALSE(m_relation_history_get_exact(h.rh, 3 * U_TIME_1S_IN_NS + 1, &out));
+		CHECK_FALSE(m_relation_history_get_exact(h.rh, 10 * U_TIME_1S_IN_NS, &out));
+
+		CHECK(out.pose.position.x == Approx(-1.0f));
+	}
+
+	SECTION("sees updates to an existing entry")
+	{
+		xrt_space_relation updated = make_relation(20.0f);
+		REQUIRE(m_relation_history_push_or_update(h.rh, &updated, 2 * U_TIME_1S_IN_NS));
+
+		REQUIRE(m_relation_history_get_exact(h.rh, 2 * U_TIME_1S_IN_NS, &out));
+		CHECK(out.pose.position.x == Approx(20.0f));
+	}
+
+	SECTION("does not find entries after clear")
+	{
+		m_relation_history_clear(h.rh);
+		CHECK_FALSE(m_relation_history_get_exact(h.rh, 2 * U_TIME_1S_IN_NS, &out));
+	}
+}
+
+TEST_CASE("m_relation_history get_exact after the ring buffer wraps")
+{
+	History h;
+	xrt_space_relation out = XRT_SPACE_RELATION_ZERO;
+
+	constexpr int64_t kCount = 10000;
+	for (int64_t i = 1; i <= kCount; i++) {
+		xrt_space_relation rel = make_relation((float)i);
+		REQUIRE(m_relation_history_push(h.rh, &rel, i * 1000));
+	}
+
+	// Newest is kept, oldest was dropped.
+	REQUIRE(m_relation_history_get_exact(h.rh, kCount * 1000, &out));
+	CHECK(out.pose.position.x == Approx((float)kCount));
+
+	CHECK_FALSE(m_relation_history_get_exact(h.rh, 1000, &out));
+}
+
+TEST_CASE("m_relation_history get_nearest")
+{
+	History h;
+	xrt_space_relation out = XRT_SPACE_RELATION_ZERO;
+	int64_t out_ts = 0;
+
+	constexpr int64_t kSlop = U_TIME_1MS_IN_NS;
+
+	// Empty history has nothing.
+	CHECK_FALSE(m_relation_history_get_nearest(h.rh, U_TIME_1S_IN_NS, kSlop, &out_ts, &out));
+
+	for (int64_t i = 1; i <= 3; i++) {
+		xrt_space_relation rel = make_relation((float)i);
+		REQUIRE(m_relation_history_push(h.rh, &rel, i * U_TIME_1S_IN_NS));
+	}
+
+	SECTION("exact hits return the stored relation, even with zero slop")
+	{
+		for (int64_t i = 1; i <= 3; i++) {
+			out = XRT_SPACE_RELATION_ZERO;
+			REQUIRE(m_relation_history_get_nearest(h.rh, i * U_TIME_1S_IN_NS, 0, &out_ts, &out));
+			CHECK(out_ts == i * U_TIME_1S_IN_NS);
+			CHECK(out.pose.position.x == Approx((float)i));
+			CHECK(out.relation_flags == kPoseFlags);
+		}
+	}
+
+	SECTION("near misses within slop return the neighbouring entry unmodified")
+	{
+		// Just after an entry.
+		REQUIRE(m_relation_history_get_nearest(h.rh, 2 * U_TIME_1S_IN_NS + 10, kSlop, &out_ts, &out));
+		CHECK(out_ts == 2 * U_TIME_1S_IN_NS);
+		CHECK(out.pose.position.x == Approx(2.0f));
+
+		// Just before an entry.
+		REQUIRE(m_relation_history_get_nearest(h.rh, 2 * U_TIME_1S_IN_NS - 10, kSlop, &out_ts, &out));
+		CHECK(out_ts == 2 * U_TIME_1S_IN_NS);
+		CHECK(out.pose.position.x == Approx(2.0f));
+
+		// Before the front and after the back.
+		REQUIRE(m_relation_history_get_nearest(h.rh, 1 * U_TIME_1S_IN_NS - 10, kSlop, &out_ts, &out));
+		CHECK(out_ts == 1 * U_TIME_1S_IN_NS);
+		REQUIRE(m_relation_history_get_nearest(h.rh, 3 * U_TIME_1S_IN_NS + 10, kSlop, &out_ts, &out));
+		CHECK(out_ts == 3 * U_TIME_1S_IN_NS);
+	}
+
+	SECTION("slop bound is inclusive")
+	{
+		REQUIRE(m_relation_history_get_nearest(h.rh, 2 * U_TIME_1S_IN_NS + kSlop, kSlop, &out_ts, &out));
+		CHECK(out_ts == 2 * U_TIME_1S_IN_NS);
+		REQUIRE(m_relation_history_get_nearest(h.rh, 2 * U_TIME_1S_IN_NS - kSlop, kSlop, &out_ts, &out));
+		CHECK(out_ts == 2 * U_TIME_1S_IN_NS);
+	}
+
+	SECTION("picks the closer of the two neighbours")
+	{
+		constexpr int64_t kBigSlop = U_TIME_1S_IN_NS;
+
+		REQUIRE(m_relation_history_get_nearest(h.rh, 1 * U_TIME_1S_IN_NS + U_TIME_1S_IN_NS / 4, kBigSlop,
+		                                       &out_ts, &out));
+		CHECK(out_ts == 1 * U_TIME_1S_IN_NS);
+
+		REQUIRE(m_relation_history_get_nearest(h.rh, 1 * U_TIME_1S_IN_NS + 3 * U_TIME_1S_IN_NS / 4, kBigSlop,
+		                                       &out_ts, &out));
+		CHECK(out_ts == 2 * U_TIME_1S_IN_NS);
+
+		// Ties go to the older entry.
+		REQUIRE(m_relation_history_get_nearest(h.rh, 1 * U_TIME_1S_IN_NS + U_TIME_1S_IN_NS / 2, kBigSlop,
+		                                       &out_ts, &out));
+		CHECK(out_ts == 1 * U_TIME_1S_IN_NS);
+	}
+
+	SECTION("misses outside slop fail and leave the outputs untouched")
+	{
+		out = make_relation(-1.0f);
+		out_ts = -1;
+
+		CHECK_FALSE(m_relation_history_get_nearest(h.rh, 0, kSlop, &out_ts, &out));
+		CHECK_FALSE(
+		    m_relation_history_get_nearest(h.rh, 1 * U_TIME_1S_IN_NS - kSlop - 1, kSlop, &out_ts, &out));
+		CHECK_FALSE(
+		    m_relation_history_get_nearest(h.rh, 2 * U_TIME_1S_IN_NS + kSlop + 1, kSlop, &out_ts, &out));
+		CHECK_FALSE(m_relation_history_get_nearest(h.rh, 2 * U_TIME_1S_IN_NS + U_TIME_1S_IN_NS / 2, kSlop,
+		                                           &out_ts, &out));
+		CHECK_FALSE(
+		    m_relation_history_get_nearest(h.rh, 3 * U_TIME_1S_IN_NS + kSlop + 1, kSlop, &out_ts, &out));
+		CHECK_FALSE(m_relation_history_get_nearest(h.rh, 2 * U_TIME_1S_IN_NS + 1, 0, &out_ts, &out));
+
+		// Negative slop never matches, even exactly.
+		CHECK_FALSE(m_relation_history_get_nearest(h.rh, 2 * U_TIME_1S_IN_NS, -1, &out_ts, &out));
+
+		CHECK(out.pose.position.x == Approx(-1.0f));
+		CHECK(out_ts == -1);
+	}
+
+	SECTION("does not find entries after clear")
+	{
+		m_relation_history_clear(h.rh);
+		CHECK_FALSE(m_relation_history_get_nearest(h.rh, 2 * U_TIME_1S_IN_NS, kSlop, &out_ts, &out));
+	}
+}
