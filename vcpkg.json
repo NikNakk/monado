@@ -13,7 +13,12 @@
         },
         "cjson",
         "eigen3",
-        "glslang",
+        {
+            "name": "glslang",
+            "features": [
+                "tools"
+            ]
+        },
         "vulkan"
     ],
     "default-features": [
