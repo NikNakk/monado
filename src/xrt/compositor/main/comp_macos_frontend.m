@@ -533,6 +533,21 @@ macos_window_frontend_create(struct comp_macos_frontend *cwm)
 {
 	struct comp_compositor *c = cwm->c;
 
+	/*
+	 * AppKit raises an uncaught exception, aborting the service, if a window
+	 * is made off the main thread. The service creates the system on the main
+	 * thread at startup; if that fails, a client's request retries it on that
+	 * client's IPC thread, which holds the server's global lock, so handing the
+	 * work to the main loop could deadlock. Fail that retry instead: with
+	 * IPC_EXIT_WHEN_IDLE the next client gets a fresh service.
+	 */
+	if (![NSThread isMainThread]) {
+		COMP_ERROR(c,
+		           "The headset window can only be created on the main thread; the startup attempt failed, so "
+		           "restart the service to retry");
+		return false;
+	}
+
 	NSScreen *screen = macos_frontend_select_display(cwm);
 	if (screen == nil) {
 		return false;
