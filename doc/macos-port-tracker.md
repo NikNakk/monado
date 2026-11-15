@@ -157,7 +157,8 @@ merges the session/Ceres/simulator and committed quad-view work, followed by
 upstream `9dc151cd2`, on `integration/macos-upstream-2026-11-15`. The established
 Sense tracker, calibration and LED policy are preserved; coupled tracking changes
 remain explicitly deferred. Native and x86-64 builds pass, with 98/98 native
-tests including isolated service recovery. The tested result is fast-forwarded
+tests including isolated service recovery, 62/62 Linux tests and 5/5 no-Ceres
+tracking checks. The tested result is fast-forwarded
 locally into `macos-upstream-clean`, with the review branch retained. Existing
 uncommitted investigations and installed runtimes are preserved.
 
