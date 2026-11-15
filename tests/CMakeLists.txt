@@ -222,7 +222,8 @@ if(XRT_HAVE_VULKAN)
 			COMMAND ${GLSLANGVALIDATOR_COMMAND} -V --target-env spirv1.0
 				-I${CMAKE_SOURCE_DIR}/src/xrt/auxiliary/render/shaders
 				"${_shader}" --vn distortion_${_group} -o "${_header}"
-			DEPENDS "${_shader}" "${CMAKE_SOURCE_DIR}/src/xrt/auxiliary/render/shaders/srgb.inc.glsl")
+			DEPENDS "${_shader}" "${CMAKE_SOURCE_DIR}/src/xrt/auxiliary/render/shaders/srgb.inc.glsl"
+				"${CMAKE_SOURCE_DIR}/src/xrt/auxiliary/render/shaders/source_filter.inc.glsl")
 		list(APPEND _distortion_bench_headers "${_header}")
 	endforeach()
 	add_executable(
@@ -663,6 +664,13 @@ if(XRT_BUILD_DRIVER_PSVR2 AND XRT_BUILD_DRIVER_PSSENSE)
 		)
 	add_test(NAME tests_psvr2_sense_tracking COMMAND tests_psvr2_sense_tracking)
 endif()
+
+add_executable(
+	tests_visibility_mask tests_visibility_mask.cpp
+	${CMAKE_CURRENT_SOURCE_DIR}/../src/xrt/drivers/psvr2/psvr2_distortion.c
+	)
+target_link_libraries(tests_visibility_mask PRIVATE xrt-external-catch2 xrt-interfaces aux_util)
+add_test(NAME tests_visibility_mask COMMAND tests_visibility_mask)
 
 if(XRT_BUILD_DRIVER_PSSENSE)
 	add_executable(

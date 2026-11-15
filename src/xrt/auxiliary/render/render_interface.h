@@ -172,6 +172,15 @@ render_calc_time_warp_matrix(const struct xrt_pose *src_pose,
 void
 render_calc_uv_to_tangent_lengths_rect(const struct xrt_fov *fov, struct xrt_normalized_rect *out_rect);
 
+/*!
+ * For two views with the same pose, the affine map from source UV in the
+ * @p context view to source UV in the @p inset view: `inset = context * wh + xy`.
+ */
+void
+render_calc_inset_from_context_uv(const struct xrt_fov *context,
+                                  const struct xrt_fov *inset,
+                                  struct xrt_normalized_rect *out_rect);
+
 
 /*
  *
@@ -350,10 +359,26 @@ render_sub_alloc_ubo_alloc_and_write(struct vk_bundle *vk,
 /*!
  * Holds all pools and static resources for rendering.
  */
+/*!
+ * How the distortion passes sample application images.
+ */
+enum render_source_filter
+{
+	//! One hardware bilinear sample.
+	RENDER_SOURCE_FILTER_BILINEAR = 0,
+	//! Bicubic Catmull-Rom (five bilinear samples) per colour channel: sharper when magnifying.
+	RENDER_SOURCE_FILTER_CATMULL_ROM = 1,
+	//! Catmull-Rom for green only, bilinear for red and blue: most of the sharpness, half the cost.
+	RENDER_SOURCE_FILTER_CATMULL_ROM_GREEN = 2,
+};
+
 struct render_resources
 {
 	//! The count of views that we are rendering to.
 	uint32_t view_count;
+
+	//! Distortion pass source filter, from XRT_COMPOSITOR_SOURCE_FILTER.
+	enum render_source_filter source_filter;
 
 	//! Vulkan resources.
 	struct vk_bundle *vk;
@@ -1000,6 +1025,41 @@ struct render_gfx_mesh_ubo_data
 	struct xrt_normalized_rect pre_transform;
 	struct xrt_matrix_4x4 transform_scanout_begin;
 	struct xrt_matrix_4x4 transform_scanout_end;
+
+	// Quad-view inset, sampled from the second source: inset UV = context UV
+	// (before post_transform) * zw + xy, then inset_post_transform.
+	// A layer has either an inset or depth, so depth reprojection reuses these
+	// two: the depth image's sub image rect and the source UV to tangent rect.
+	union {
+		struct xrt_normalized_rect inset_from_context;
+		struct xrt_normalized_rect depth_post_transform;
+	};
+	union {
+		struct xrt_normalized_rect inset_post_transform;
+		struct xrt_normalized_rect source_uv_to_tanangle;
+	};
+	struct
+	{
+		uint32_t value;
+		//! Depth reprojection: the second source is the depth image instead of an inset.
+		uint32_t has_depth;
+		uint32_t padding[2];
+	} has_inset;
+
+	// Depth reprojection (has_inset.has_depth), as in the compute distortion
+	// pass but with the eye origin at scanout begin only (the UBO slot is full).
+	struct
+	{
+		float min_depth;
+		float max_depth;
+		float near_z;
+		float far_z;
+	} projection_depth;
+	struct
+	{
+		struct xrt_vec3 val;
+		float padding;
+	} new_origin;
 };
 
 /*!
@@ -1129,6 +1189,8 @@ render_gfx_mesh_alloc_and_write(struct render_gfx *render,
                                 const struct xrt_foveation_map_data *src_foveation,
                                 VkSampler src_sampler,
                                 VkImageView src_image_view,
+                                VkSampler inset_sampler,
+                                VkImageView inset_image_view,
                                 VkDescriptorSet *out_descriptor_set);
 
 /*!
@@ -1588,7 +1650,8 @@ struct render_compute_distortion_ubo_data
 	struct
 	{
 		uint32_t value;
-		uint32_t padding0;
+		//! Quad-view inset in the depth source slot (no depth then).
+		uint32_t has_inset;
 		uint32_t padding1;
 		uint32_t padding2;
 	} has_depth[XRT_MAX_VIEWS];
@@ -1610,6 +1673,15 @@ struct render_compute_distortion_ubo_data
 		uint32_t padding0;
 		uint32_t padding1;
 	} foveation[XRT_MAX_VIEWS];
+
+	/*
+	 * Quad-view fast path. The inset shares the context view's pose, so its
+	 * source UV is an affine function of the context source UV:
+	 * inset_uv = context_uv * zw + xy. The inset post transform maps that to
+	 * the inset sub image.
+	 */
+	struct xrt_normalized_rect inset_from_context[XRT_MAX_VIEWS];
+	struct xrt_normalized_rect inset_post_transforms[XRT_MAX_VIEWS];
 };
 
 /*!
@@ -1688,6 +1760,33 @@ render_compute_projection_timewarp(struct render_compute *render,
                                    VkImageView target_image_view,
                                    VkImageLayout target_final_layout,
                                    const struct render_viewport_data views[XRT_MAX_VIEWS]);
+
+/*!
+ * Quad views in one distortion pass: each context view with its inset blended
+ * in, without the layer squasher. Each inset must have its context view's pose.
+ * With @p do_timewarp false the context FOV is assumed to be the target FOV, as
+ * for @ref render_compute_projection_no_timewarp.
+ *
+ * @public @memberof render_compute
+ */
+void
+render_compute_projection_inset(struct render_compute *render,
+                                VkSampler src_samplers[XRT_MAX_VIEWS],
+                                VkImageView src_image_views[XRT_MAX_VIEWS],
+                                const struct xrt_normalized_rect src_rects[XRT_MAX_VIEWS],
+                                VkSampler inset_samplers[XRT_MAX_VIEWS],
+                                VkImageView inset_image_views[XRT_MAX_VIEWS],
+                                const struct xrt_normalized_rect inset_rects[XRT_MAX_VIEWS],
+                                const struct xrt_pose src_poses[XRT_MAX_VIEWS],
+                                const struct xrt_fov src_fovs[XRT_MAX_VIEWS],
+                                const struct xrt_fov inset_fovs[XRT_MAX_VIEWS],
+                                const struct xrt_pose new_poses_scanout_begin[XRT_MAX_VIEWS],
+                                const struct xrt_pose new_poses_scanout_end[XRT_MAX_VIEWS],
+                                bool do_timewarp,
+                                VkImage target_image,
+                                VkImageView target_image_view,
+                                VkImageLayout target_final_layout,
+                                const struct render_viewport_data views[XRT_MAX_VIEWS]);
 
 /*!
  * Whether projection-depth layers should use their depth for reprojection

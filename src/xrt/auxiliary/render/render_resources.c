@@ -19,11 +19,13 @@
 
 #include "render/render_interface.h"
 #include "util/u_debug.h"
+#include "util/u_logging.h"
 
 #include "cache/render_compute_pipeline_cache.h"
 #include "cache/render_shader_specialization_helpers.h"
 
 #include <stdio.h>
+#include <string.h>
 
 #ifdef XRT_OS_OSX
 DEBUG_GET_ONCE_BOOL_OPTION(macos_quad_bounds, "XRT_MACOS_COMPOSITOR_QUAD_BOUNDS", false)
@@ -31,6 +33,9 @@ DEBUG_GET_ONCE_BOOL_OPTION(macos_common_layers, "XRT_MACOS_COMPOSITOR_COMMON_LAY
 DEBUG_GET_ONCE_BOOL_OPTION(macos_gpu_pass_timing, "XRT_MACOS_GPU_PASS_TIMING", false)
 DEBUG_GET_ONCE_BOOL_OPTION(log_apple_samples, "XRT_COMPOSITOR_LOG_APPLE_SAMPLES", false)
 #endif
+
+// Distortion pass source filter: "bilinear" (default), "catmull-rom" or "catmull-rom-green".
+DEBUG_GET_ONCE_OPTION(source_filter, "XRT_COMPOSITOR_SOURCE_FILTER", NULL)
 
 
 /*
@@ -43,6 +48,7 @@ XRT_CHECK_RESULT static VkResult
 create_gfx_ubo_and_src_descriptor_set_layout(struct vk_bundle *vk,
                                              uint32_t ubo_binding,
                                              uint32_t src_binding,
+                                             uint32_t src_count,
                                              uint32_t foveation_binding,
                                              VkDescriptorSetLayout *out_descriptor_set_layout)
 {
@@ -52,7 +58,7 @@ create_gfx_ubo_and_src_descriptor_set_layout(struct vk_bundle *vk,
 	    {
 	        .binding = src_binding,
 	        .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-	        .descriptorCount = 1,
+	        .descriptorCount = src_count,
 	        .stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT,
 	    },
 	    {
@@ -462,6 +468,18 @@ render_resources_init(struct render_resources *r,
 	r->vk = vk;
 	r->shaders = shaders;
 
+	const char *source_filter = debug_get_option_source_filter();
+	r->source_filter = RENDER_SOURCE_FILTER_BILINEAR;
+	if (source_filter != NULL && strcmp(source_filter, "catmull-rom") == 0) {
+		r->source_filter = RENDER_SOURCE_FILTER_CATMULL_ROM;
+		U_LOG_I("Distortion source filter: Catmull-Rom");
+	} else if (source_filter != NULL && strcmp(source_filter, "catmull-rom-green") == 0) {
+		r->source_filter = RENDER_SOURCE_FILTER_CATMULL_ROM_GREEN;
+		U_LOG_I("Distortion source filter: Catmull-Rom for green");
+	} else if (source_filter != NULL && strcmp(source_filter, "bilinear") != 0) {
+		U_LOG_W("Unknown XRT_COMPOSITOR_SOURCE_FILTER '%s', using bilinear", source_filter);
+	}
+
 
 	/*
 	 * Constants
@@ -686,9 +704,10 @@ render_resources_init(struct render_resources *r,
 		const uint32_t mesh_shader_count = RENDER_MAX_LAYER_RUNS_COUNT(r);
 
 		struct vk_descriptor_pool_info mesh_pool_info = {
-		    // The draw's UBO and its source's foveation map.
+		    // The draw's UBO and its source's foveation map; the mesh also
+		    // samples a quad-view inset.
 		    .uniform_per_descriptor_count = 2,
-		    .sampler_per_descriptor_count = 1,
+		    .sampler_per_descriptor_count = 2,
 		    .storage_image_per_descriptor_count = 0,
 		    .storage_buffer_per_descriptor_count = 0,
 		    .descriptor_count = layer_shader_count + mesh_shader_count,
@@ -771,6 +790,7 @@ render_resources_init(struct render_resources *r,
 	    vk,                                             // vk_bundle
 	    RENDER_BINDING_LAYER_SHARED_UBO,                // ubo_binding
 	    RENDER_BINDING_LAYER_SHARED_SRC,                // src_binding
+	    1,                                              // src_count
 	    RENDER_BINDING_LAYER_PROJECTION_FOVEATION,      // foveation_binding
 	    &r->gfx.layer.shared.descriptor_set_layout);    // out_descriptor_set_layout
 	VK_CHK_WITH_RET(ret, "create_gfx_ubo_and_src_descriptor_set_layout", false);
@@ -796,6 +816,7 @@ render_resources_init(struct render_resources *r,
 	    vk,                                             // vk_bundle
 	    r->mesh.ubo_binding,                            // ubo_binding
 	    r->mesh.src_binding,                            // src_binding
+	    2,                                              // src_count: source, quad-view inset
 	    r->mesh.foveation_binding,                      // foveation_binding
 	    &r->mesh.descriptor_set_layout);                // out_mesh_descriptor_set_layout
 	VK_CHK_WITH_RET(ret, "create_gfx_ubo_and_src_descriptor_set_layout", false);
@@ -1048,6 +1069,7 @@ render_resources_init(struct render_resources *r,
 	};
 	for (size_t i = 0; i < ARRAY_SIZE(distortion_variants); i++) {
 		distortion_variants[i].use_identity_distortion = use_identity_distortion;
+		distortion_variants[i].source_filter = (uint32_t)r->source_filter;
 	}
 
 	xret = render_distortion_pipeline_cache_prewarm( //

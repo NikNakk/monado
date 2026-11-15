@@ -693,6 +693,81 @@ crc_distortion_after_squash(struct render_compute *render, const struct comp_ren
 	}
 }
 
+/// Quad-view fast path: context and inset in one distortion pass.
+static void
+crc_distortion_quad_fast_path(struct render_compute *render,
+                              const struct comp_render_dispatch_data *d,
+                              const struct comp_layer *context,
+                              const struct comp_layer *inset)
+{
+	VkSampler clamp_to_border_black = render->r->samplers.clamp_to_border_black;
+	VkImageView src_image_views[XRT_MAX_VIEWS];
+	VkSampler src_samplers[XRT_MAX_VIEWS];
+	VkImageView inset_image_views[XRT_MAX_VIEWS];
+	VkSampler inset_samplers[XRT_MAX_VIEWS];
+	struct xrt_normalized_rect src_norm_rects[XRT_MAX_VIEWS];
+	struct xrt_normalized_rect inset_norm_rects[XRT_MAX_VIEWS];
+	struct render_viewport_data target_viewport_datas[XRT_MAX_VIEWS];
+	struct xrt_fov src_fovs[XRT_MAX_VIEWS];
+	struct xrt_fov inset_fovs[XRT_MAX_VIEWS];
+	struct xrt_pose src_poses[XRT_MAX_VIEWS];
+	struct xrt_pose world_poses_scanout_begin[XRT_MAX_VIEWS];
+	struct xrt_pose world_poses_scanout_end[XRT_MAX_VIEWS];
+
+	for (uint32_t i = 0; i < d->target.view_count; i++) {
+		const struct xrt_layer_projection_view_data *cv = &context->data.proj.v[i];
+		const struct xrt_layer_projection_view_data *iv = &inset->data.proj.v[i];
+
+#ifdef XRT_OS_OSX
+		cmd_sample_projection_source_image(render, context, i, cv->sub.image_index, cv->sub.array_index);
+#endif
+		const struct comp_swapchain_image *c_image = get_layer_image(context, i, cv->sub.image_index);
+		const struct comp_swapchain_image *i_image = get_layer_image(inset, i, iv->sub.image_index);
+		src_image_views[i] = get_image_view(c_image, context->data.flags, cv->sub.array_index);
+		inset_image_views[i] = get_image_view(i_image, inset->data.flags, iv->sub.array_index);
+		src_samplers[i] = clamp_to_border_black;
+		inset_samplers[i] = clamp_to_border_black;
+
+		// No layer squasher has handled this for us already.
+		src_norm_rects[i] = cv->sub.norm_rect;
+		if (context->data.flip_y) {
+			src_norm_rects[i].y += src_norm_rects[i].h;
+			src_norm_rects[i].h = -src_norm_rects[i].h;
+		}
+		inset_norm_rects[i] = iv->sub.norm_rect;
+		if (inset->data.flip_y) {
+			inset_norm_rects[i].y += inset_norm_rects[i].h;
+			inset_norm_rects[i].h = -inset_norm_rects[i].h;
+		}
+
+		target_viewport_datas[i] = d->views[i].target.viewport_data;
+		src_fovs[i] = cv->fov;
+		inset_fovs[i] = iv->fov;
+		src_poses[i] = cv->pose;
+		world_poses_scanout_begin[i] = d->views[i].world_pose_scanout_begin;
+		world_poses_scanout_end[i] = d->views[i].world_pose_scanout_end;
+	}
+
+	render_compute_projection_inset( //
+	    render,                      //
+	    src_samplers,                //
+	    src_image_views,             //
+	    src_norm_rects,              //
+	    inset_samplers,              //
+	    inset_image_views,           //
+	    inset_norm_rects,            //
+	    src_poses,                   //
+	    src_fovs,                    //
+	    inset_fovs,                  //
+	    world_poses_scanout_begin,   //
+	    world_poses_scanout_end,     //
+	    d->do_timewarp,              //
+	    d->target.cs.image,          //
+	    d->target.cs.storage_view,   //
+	    d->target.cs.final_layout,   //
+	    target_viewport_datas);      //
+}
+
 /// Fast path
 static void
 crc_distortion_fast_path(struct render_compute *render,
@@ -1133,12 +1208,17 @@ comp_render_cs_dispatch(struct render_compute *render,
 	if (fast_path && (layer->data.type == XRT_LAYER_PROJECTION || layer->data.type == XRT_LAYER_PROJECTION_DEPTH)) {
 		render->r->gpu_pass_path = 1;
 	}
+	// The compositor only sets fast_path with two layers for an eligible quad-view pair.
+	const bool quad_fast_path = fast_path && layer_count == 2;
 	if (render->r->gpu_pass_path == 1 || layer_count == 0) {
 		crc_pass_timestamp(render, 3);
 		crc_pass_timestamp(render, 4);
 	}
 
-	if (fast_path && layer->data.type == XRT_LAYER_PROJECTION) {
+	if (quad_fast_path) {
+		crc_distortion_quad_fast_path(render, d, &layers[0], &layers[1]);
+
+	} else if (fast_path && layer->data.type == XRT_LAYER_PROJECTION) {
 		// Fast path.
 		const struct xrt_layer_projection_data *proj = &layer->data.proj;
 		const struct xrt_layer_projection_view_data *vds[XRT_MAX_VIEWS];
