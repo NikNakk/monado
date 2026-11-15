@@ -6,6 +6,7 @@
 set(tests
     tests_cxx_wrappers
     tests_deque
+    tests_dead_reckoning
     tests_generic_callbacks
     tests_glue_device
     tests_glue_frameserver
@@ -74,6 +75,7 @@ target_link_libraries(tests_cxx_wrappers PRIVATE xrt-interfaces)
 target_link_libraries(tests_glue_device PRIVATE xrt-interfaces aux_glue)
 target_link_libraries(tests_glue_frameserver PRIVATE xrt-interfaces aux_glue)
 target_link_libraries(tests_glue_traits PRIVATE xrt-interfaces aux_glue)
+target_link_libraries(tests_dead_reckoning PRIVATE aux_tracking aux_math)
 target_link_libraries(tests_history_buf PRIVATE aux_math)
 target_link_libraries(tests_lowpass_float PRIVATE aux_math)
 target_link_libraries(tests_lowpass_integer PRIVATE aux_math)

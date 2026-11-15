@@ -35,16 +35,17 @@ t_apply_dead_reckoning(struct m_ff_vec3_f32 *gyro_ff,
 	bool using_accel = accel_ff != NULL;
 
 	// @todo Make this determine the correct starting sample for gyro and accelerometer separately
-	// Find oldest imu index i that is newer than latest SLAM pose (or -1)
+	// Find the oldest IMU index at or after the latest SLAM pose (or -1)
 	int i = 0;
 	uint64_t imu_ts = UINT64_MAX;
 	while (m_ff_vec3_f32_get_timestamp(gyro_ff, i, &imu_ts)) {
 		if ((int64_t)imu_ts < base_rel_ts) {
-			i--; // Back to the oldest newer-than-SLAM IMU index (or -1)
 			break;
 		}
 		i++;
 	}
+	// Step back from the first older sample, or from one past the FIFO.
+	i--;
 
 	if (i == -1) {
 		U_LOG_W("No IMU samples received after latest SLAM pose (and frame)");
