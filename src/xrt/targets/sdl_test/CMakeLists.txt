@@ -27,6 +27,7 @@ target_link_libraries(
 		comp_util
 		comp_multi
 		ipc_server
+		target_ipc_defaults
 		st_gui
 		base
 		drv_includes

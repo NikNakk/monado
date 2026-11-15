@@ -9,6 +9,7 @@
  * @ingroup comp_main
  */
 
+#include "vk/vk_pretty_print.h"
 #include "xrt/xrt_compiler.h"
 
 #include "util/u_misc.h"
@@ -127,7 +128,7 @@ comp_window_android_create_surface(struct comp_window_android *cwa,
 	    NULL,                            //
 	    &surface);                       //
 	if (ret != VK_SUCCESS) {
-		COMP_ERROR(cwa->base.base.c, "vkCreateAndroidSurfaceKHR: %s", vk_result_string(ret));
+		COMP_ERROR(cwa->base.base.c, "vkCreateAndroidSurfaceKHR: %s", vk_str_result(ret));
 		return ret;
 	}
 
@@ -174,7 +175,7 @@ comp_window_android_init_swapchain(struct comp_target *ct, uint32_t width, uint3
 
 	ret = comp_window_android_create_surface(cwa, window, &cwa->base.surface.handle);
 	if (ret != VK_SUCCESS) {
-		COMP_ERROR(ct->c, "Failed to create surface '%s'!", vk_result_string(ret));
+		COMP_ERROR(ct->c, "Failed to create surface '%s'!", vk_str_result(ret));
 		return false;
 	}
 

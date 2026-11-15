@@ -558,62 +558,6 @@ struct xrt_layer_frame_data
  */
 
 /*!
- * Special flags for creating swapchain images.
- */
-enum xrt_swapchain_create_flags
-{
-	//! Our compositor just ignores this bit.
-	XRT_SWAPCHAIN_CREATE_PROTECTED_CONTENT = (1u << 0u),
-	//! Signals that the allocator should only allocate one image.
-	XRT_SWAPCHAIN_CREATE_STATIC_IMAGE = (1u << 1u),
-	/*!
-	 * Signals to the compositor to use the equivalent sRGB format of the UNORM swapchain.
-	 *
-	 * The swapchain must have @ref XRT_SWAPCHAIN_USAGE_MUTABLE_FORMAT and must have
-	 * both formats in the format list.
-	 */
-	XRT_SWAPCHAIN_CREATE_SAMPLE_AS_SRGB = (1u << 2u),
-	/*!
-	 * Private macOS service-Metal compatibility request: exactly three dynamic
-	 * images, with latest-completed scheduling for this client session.
-	 * Not an OpenXR create flag or an advertised extension.
-	 */
-	XRT_SWAPCHAIN_CREATE_MACOS_THREE_IMAGES = (1u << 3u),
-	/*!
-	 * Signals that the allocator should prefer maximum performance when choosing the tiling
-	 * layout of the image.
-	 *
-	 * This flag must be mirrored when importing the image, either explicitly by specifying
-	 * the flag or implicitly by providing the drm format modifier to the receiving API.
-	 */
-	XRT_SWAPCHAIN_CREATE_TILING_MAX_PERFORMANCE = (1u << 4u),
-};
-
-/*!
- * Usage of the swapchain images.
- */
-enum xrt_swapchain_usage_bits
-{
-	XRT_SWAPCHAIN_USAGE_COLOR = 0x00000001,
-	XRT_SWAPCHAIN_USAGE_DEPTH_STENCIL = 0x00000002,
-	XRT_SWAPCHAIN_USAGE_UNORDERED_ACCESS = 0x00000004,
-	XRT_SWAPCHAIN_USAGE_TRANSFER_SRC = 0x00000008,
-	XRT_SWAPCHAIN_USAGE_TRANSFER_DST = 0x00000010,
-	XRT_SWAPCHAIN_USAGE_SAMPLED = 0x00000020,
-	XRT_SWAPCHAIN_USAGE_MUTABLE_FORMAT = 0x00000040,
-	XRT_SWAPCHAIN_USAGE_INPUT_ATTACHMENT = 0x00000080,
-};
-
-/*!
- * The direction of a transition.
- */
-enum xrt_barrier_direction
-{
-	XRT_BARRIER_TO_APP = 1,
-	XRT_BARRIER_TO_COMP = 2,
-};
-
-/*!
  * Graphics-API-independent resolved foveation policy.
  *
  * This sits in the XRT interface rather than aux_foveation so compositor

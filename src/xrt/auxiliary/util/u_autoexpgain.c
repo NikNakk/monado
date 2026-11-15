@@ -19,6 +19,7 @@
 #include <math.h>
 #include <stdint.h>
 #include <stdio.h>
+#include <string.h>
 
 DEBUG_GET_ONCE_LOG_OPTION(aeg_log, "AEG_LOG", U_LOGGING_WARN)
 
@@ -112,6 +113,10 @@ struct u_autoexpgain
 
 	float exposure; //!< Currently computed exposure value to use
 	float gain;     //!< Currently computed gain value to use
+
+	//! Custom exp/gain table, used instead of the strategy's default when not empty.
+	struct u_aeg_step steps[U_AEG_MAX_STEPS];
+	int steps_count;
 };
 
 static const char *
@@ -247,30 +252,24 @@ static void
 brightness_to_expgain(struct u_autoexpgain *aeg, float brightness, float *out_exposure, float *out_gain)
 {
 
-	//! These are steps for constructing a piecewise linear function that maps
-	//! brightness into (exposure, gain) pairs.
-	struct step
-	{
-		float b; //!< Brightness
-		float e; //!< Exposure
-		float g; //!< Gain
-	};
-
 	// These tables were tuned over WMR cameras such that increasing
 	// brightness increases the histogram range more or less linearly.
-	struct step steps_t[] = {{0, 120, 16},      {0.15, 4500, 16}, {0.5, 4500, 127},
-	                         {0.55, 6000, 127}, {0.9, 6000, 255}, {1, 9000, 255}};
-	struct step steps_dr[] = {{0, 120, 16}, {0.3, 9000, 16}, {1.0, 9000, 255}};
+	const struct u_aeg_step steps_t[] = {{0, 120, 16},      {0.15, 4500, 16}, {0.5, 4500, 127},
+	                                     {0.55, 6000, 127}, {0.9, 6000, 255}, {1, 9000, 255}};
+	const struct u_aeg_step steps_dr[] = {{0, 120, 16}, {0.3, 9000, 16}, {1.0, 9000, 255}};
 
 	// Select the steps table to use based on our strategy/objective
-	struct step *steps = NULL;
+	const struct u_aeg_step *steps = NULL;
 	int steps_count = 0;
-	if (aeg->strategy == U_AEG_STRATEGY_TRACKING) {
+	if (aeg->steps_count > 0) {
+		steps = aeg->steps;
+		steps_count = aeg->steps_count;
+	} else if (aeg->strategy == U_AEG_STRATEGY_TRACKING) {
 		steps = steps_t;
-		steps_count = sizeof(steps_t) / sizeof(struct step);
+		steps_count = ARRAY_SIZE(steps_t);
 	} else if (aeg->strategy == U_AEG_STRATEGY_DYNAMIC_RANGE) {
 		steps = steps_dr;
-		steps_count = sizeof(steps_dr) / sizeof(struct step);
+		steps_count = ARRAY_SIZE(steps_dr);
 	} else {
 		AEG_ASSERT(false, "Unexpected strategy=%d", aeg->strategy);
 	}
@@ -280,24 +279,22 @@ brightness_to_expgain(struct u_autoexpgain *aeg, float brightness, float *out_ex
 	// {{0, 120, 16}, {0.2, 6000, 16}, {0.9, 6000, 255}, {1.0, 9000, 255}};
 
 	// Assertions
-	AEG_ASSERT(steps_count >= 2, "Expected at least two steps but %d found", steps_count);
-	AEG_ASSERT(steps[0].b == 0, "First step should be at b=0");
-	AEG_ASSERT(steps[steps_count - 1].b == 1, "Last step should be at b=1");
 	AEG_ASSERT(brightness >= 0 && brightness <= 1, "Invalid brightness=%f", brightness);
 
 	// Compute the piecewise function result from `steps`
 	float exposure = 0;
 	float gain = 0;
 	for (int i = 1; i < steps_count; i++) {
-		struct step s0 = steps[i - 1];
-		struct step s1 = steps[i];
+		struct u_aeg_step s0 = steps[i - 1];
+		struct u_aeg_step s1 = steps[i];
 
-		float lower_b = s0.b;
-		float higher_b = s1.b;
+		float lower_b = s0.brightness;
+		float higher_b = s1.brightness;
 
 		if (brightness >= lower_b && brightness <= higher_b) {
-			exposure = s0.e + ((brightness - lower_b) / (higher_b - lower_b)) * (s1.e - s0.e);
-			gain = s0.g + ((brightness - lower_b) / (higher_b - lower_b)) * (s1.g - s0.g);
+			float t = (brightness - lower_b) / (higher_b - lower_b);
+			exposure = s0.exposure + t * (s1.exposure - s0.exposure);
+			gain = s0.gain + t * (s1.gain - s0.gain);
 			break;
 		}
 	}
@@ -449,6 +446,29 @@ u_autoexpgain_create(enum u_aeg_strategy strategy, bool enabled_from_start, int 
 	aeg->frame_delay = frame_delay;
 
 	brightness_to_expgain(aeg, INITIAL_BRIGHTNESS, &aeg->exposure, &aeg->gain);
+
+	return aeg;
+}
+
+struct u_autoexpgain *
+u_autoexpgain_create_with_steps(enum u_aeg_strategy strategy,
+                                bool enabled_from_start,
+                                int frame_delay,
+                                const struct u_aeg_step *steps,
+                                int step_count)
+{
+	struct u_autoexpgain *aeg = u_autoexpgain_create(strategy, enabled_from_start, frame_delay);
+
+	AEG_ASSERT(step_count >= 2 && step_count <= U_AEG_MAX_STEPS, "Invalid step_count=%d", step_count);
+	AEG_ASSERT(steps[0].brightness == 0, "First step should be at b=0");
+	AEG_ASSERT(steps[step_count - 1].brightness == 1, "Last step should be at b=1");
+	for (int i = 1; i < step_count; i++) {
+		AEG_ASSERT(steps[i].brightness > steps[i - 1].brightness, "Steps must be in ascending brightness");
+	}
+	memcpy(aeg->steps, steps, sizeof(*steps) * step_count);
+	aeg->steps_count = step_count;
+
+	brightness_to_expgain(aeg, aeg->brightness.val, &aeg->exposure, &aeg->gain);
 
 	return aeg;
 }

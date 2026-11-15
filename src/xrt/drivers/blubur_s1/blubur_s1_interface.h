@@ -42,7 +42,7 @@ blubur_s1_found(struct xrt_prober *xp,
  * @ingroup drv_blubur_s1
  */
 struct blubur_s1_hmd *
-blubur_s1_hmd_create(struct os_hid_device *dev, const char *serial);
+blubur_s1_hmd_create(struct h_hid_device *dev, const char *serial);
 
 
 /*!

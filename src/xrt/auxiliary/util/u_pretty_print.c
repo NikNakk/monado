@@ -289,6 +289,36 @@ u_pp_xrt_reference_space_type(struct u_pp_delegate dg, enum xrt_reference_space_
 }
 
 void
+u_pp_xrt_swapchain_usage_bits(struct u_pp_delegate dg, enum xrt_swapchain_usage_bits bits)
+{
+	// clang-format off
+	switch (bits) {
+	case XRT_SWAPCHAIN_USAGE_COLOR:            DG("XRT_SWAPCHAIN_USAGE_COLOR"); return;
+	case XRT_SWAPCHAIN_USAGE_DEPTH_STENCIL:    DG("XRT_SWAPCHAIN_USAGE_DEPTH_STENCIL"); return;
+	case XRT_SWAPCHAIN_USAGE_UNORDERED_ACCESS: DG("XRT_SWAPCHAIN_USAGE_UNORDERED_ACCESS"); return;
+	case XRT_SWAPCHAIN_USAGE_TRANSFER_SRC:     DG("XRT_SWAPCHAIN_USAGE_TRANSFER_SRC"); return;
+	case XRT_SWAPCHAIN_USAGE_TRANSFER_DST:     DG("XRT_SWAPCHAIN_USAGE_TRANSFER_DST"); return;
+	case XRT_SWAPCHAIN_USAGE_SAMPLED:          DG("XRT_SWAPCHAIN_USAGE_SAMPLED"); return;
+	case XRT_SWAPCHAIN_USAGE_MUTABLE_FORMAT:   DG("XRT_SWAPCHAIN_USAGE_MUTABLE_FORMAT"); return;
+	case XRT_SWAPCHAIN_USAGE_INPUT_ATTACHMENT: DG("XRT_SWAPCHAIN_USAGE_INPUT_ATTACHMENT"); return;
+	}
+	// clang-format on
+
+	/*
+	 * No default case so we get warnings of missing entries.
+	 * Invalid values handled below.
+	 */
+
+	if (bits == 0) {
+		DG("XRT_SWAPCHAIN_USAGE: NO BITS SET");
+	} else if ((bits & (bits - 1)) != 0) {
+		u_pp(dg, "XRT_SWAPCHAIN_USAGE: MULTIPLE BITS SET 0x%08x", bits);
+	} else {
+		u_pp(dg, "XRT_SWAPCHAIN_USAGE: UNKNOWN BIT 0x%08x", bits);
+	}
+}
+
+void
 u_pp_padded_pretty_ms(u_pp_delegate_t dg, uint64_t value_ns)
 {
 	uint64_t in_us = value_ns / 1000;

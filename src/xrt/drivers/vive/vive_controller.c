@@ -21,7 +21,7 @@
 
 #include "util/u_var.h"
 
-#include "os/os_hid.h"
+#include "hid/h_hid.h"
 #include "os/os_threading.h"
 #include "os/os_time.h"
 
@@ -177,7 +177,7 @@ vive_controller_device_destroy(struct xrt_device *xdev)
 	m_imu_3dof_close(&d->fusion.i3dof);
 
 	if (d->controller_hid)
-		os_hid_destroy(d->controller_hid);
+		h_hid_destroy(d->controller_hid);
 
 	free(d);
 }
@@ -483,7 +483,7 @@ vive_controller_haptic_pulse(struct vive_controller_device *d, const struct xrt_
 	    .repeat_count = __cpu_to_le16(repeat_count),
 	};
 
-	return os_hid_set_feature(d->controller_hid, (uint8_t *)&report, sizeof(report));
+	return h_hid_set_feature(d->controller_hid, (uint8_t *)&report, sizeof(report));
 }
 
 static xrt_result_t
@@ -936,7 +936,7 @@ vive_controller_device_update(struct vive_controller_device *d)
 {
 	uint8_t buf[FEATURE_BUFFER_SIZE];
 
-	int ret = os_hid_read(d->controller_hid, buf, sizeof(buf), 1000);
+	int ret = h_hid_read(d->controller_hid, buf, sizeof(buf), 1000);
 	if (ret == 0) {
 		// controller off
 		return true;
@@ -973,7 +973,7 @@ vive_controller_run_thread(void *ptr)
 	struct vive_controller_device *d = (struct vive_controller_device *)ptr;
 
 	uint8_t buf[FEATURE_BUFFER_SIZE];
-	while (os_hid_read(d->controller_hid, buf, sizeof(buf), 0) > 0) {
+	while (h_hid_read(d->controller_hid, buf, sizeof(buf), 0) > 0) {
 		// Empty queue first
 	}
 
@@ -1045,7 +1045,7 @@ vive_controller_setup_ui(struct vive_controller_device *d)
 	} while (0)
 
 struct vive_controller_device *
-vive_controller_create(struct os_hid_device *controller_hid, enum watchman_gen watchman_gen, int controller_num)
+vive_controller_create(struct h_hid_device *controller_hid, enum watchman_gen watchman_gen, int controller_num)
 {
 
 	enum u_device_alloc_flags flags = U_DEVICE_ALLOC_TRACKING_NONE;

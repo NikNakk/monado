@@ -27,12 +27,8 @@
 			if (!bit) {                                                                                    \
 				continue;                                                                              \
 			}                                                                                              \
-			const char *str = FUNC(bit, true);                                                             \
-			if (str != NULL) {                                                                             \
-				PNTT("%s", str);                                                                       \
-			} else {                                                                                       \
-				PNTT("0x%08x", bit);                                                                   \
-			}                                                                                              \
+			P("\n\t\t");                                                                                   \
+			FUNC(dg, bit);                                                                                 \
 		}                                                                                                      \
 	} while (false)
 
@@ -188,16 +184,17 @@ vk_print_surface_info(struct vk_bundle *vk, struct vk_surface_info *info, enum u
 	PNT("caps.maxImageExtent: %ux%u", info->caps.maxImageExtent.width, info->caps.maxImageExtent.height);
 	PNT("caps.maxImageArrayLayers: %u", info->caps.maxImageArrayLayers);
 	PNT("caps.supportedTransforms:");
-	PRINT_BITS(info->caps.supportedTransforms, vk_surface_transform_flag_string);
-	PNT("caps.currentTransform: %s", vk_surface_transform_flag_string(info->caps.currentTransform, false));
+	PRINT_BITS(info->caps.supportedTransforms, vk_pp_surface_transform_flag_bits);
+	PNT("caps.currentTransform: ");
+	vk_pp_surface_transform_flag_bits(dg, info->caps.currentTransform);
 	PNT("caps.supportedCompositeAlpha:");
-	PRINT_BITS(info->caps.supportedCompositeAlpha, vk_composite_alpha_flag_string);
+	PRINT_BITS(info->caps.supportedCompositeAlpha, vk_pp_composite_alpha_flag_bits);
 	PNT("caps.supportedUsageFlags:");
-	PRINT_BITS(info->caps.supportedUsageFlags, vk_image_usage_flag_string);
+	PRINT_BITS(info->caps.supportedUsageFlags, vk_pp_image_usage_flag_bits);
 
 	PNT("present_modes(%u):", info->present_mode_count);
 	for (uint32_t i = 0; i < info->present_mode_count; i++) {
-		PNTT("%s", vk_present_mode_string(info->present_modes[i]));
+		PNTT("%s", vk_str_present_mode(info->present_modes[i]));
 	}
 
 #if defined(VK_KHR_get_surface_capabilities2) && defined(VK_KHR_present_id2)
@@ -210,14 +207,13 @@ vk_print_surface_info(struct vk_bundle *vk, struct vk_surface_info *info, enum u
 
 #if defined(VK_KHR_get_surface_capabilities2) && defined(VK_KHR_shared_presentable_image)
 	PNT("shared_present_caps.sharedPresentSupportedUsageFlags:");
-	PRINT_BITS(info->shared_present_caps.sharedPresentSupportedUsageFlags, vk_image_usage_flag_string);
+	PRINT_BITS(info->shared_present_caps.sharedPresentSupportedUsageFlags, vk_pp_image_usage_flag_bits);
 #endif
 
 	PNT("formats(%u):", info->format_count);
 	for (uint32_t i = 0; i < info->format_count; i++) {
 		VkSurfaceFormatKHR *f = &info->formats[i];
-		PNTT("[format = %s, colorSpace = %s]", vk_format_string(f->format),
-		     vk_color_space_string(f->colorSpace));
+		PNTT("[format = %s, colorSpace = %s]", vk_str_format(f->format), vk_str_color_space(f->colorSpace));
 	}
 
 	U_LOG_IFL(log_level, vk->log_level, "%s", sink.buffer);

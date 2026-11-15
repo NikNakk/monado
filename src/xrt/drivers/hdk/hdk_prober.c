@@ -58,7 +58,7 @@ hdk_found(struct xrt_prober *xp,
 
 	U_LOG_I("%s - Found at least the tracker of some HDK (%s) -- opening\n", __func__, name);
 
-	struct os_hid_device *hid = NULL;
+	struct h_hid_device *hid = NULL;
 	// Interface 2 is the HID interface.
 	result = xrt_prober_open_hid_interface(xp, dev, 2, &hid);
 	if (result != 0) {

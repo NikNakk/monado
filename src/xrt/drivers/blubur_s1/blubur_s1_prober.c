@@ -21,7 +21,7 @@ blubur_s1_found(struct xrt_prober *xp,
 {
 	struct xrt_prober_device *dev = devices[index];
 
-	struct os_hid_device *hid = NULL;
+	struct h_hid_device *hid = NULL;
 	int result = xrt_prober_open_hid_interface(xp, dev, 0, &hid);
 	if (result != 0) {
 		return -1;

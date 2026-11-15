@@ -2,6 +2,7 @@
 
 <!--
 Copyright 2018-2020, Collabora, Ltd. and the Monado contributors
+Copyright 2026, NVIDIA CORPORATION.
 SPDX-License-Identifier: BSL-1.0
 -->
 
@@ -88,3 +89,30 @@ Note that in this case, there are two processes involved, which have different
   provides hardware device interaction, etc.
 
 ![Out-of-process OpenXR runtime diagram](images/out-of-proc.drawio.svg)
+
+## Derived OpenXR runtimes
+
+Several OpenXR runtime libraries and matching IPC services can be built from one
+Monado tree. Start a derived project from `target.c` and `service_main.c` in
+`examples/derived_runtime/src/`. Monado's own `src/xrt/targets/openxr/target.c`
+also handles builds without `XRT_FEATURE_IPC_CLIENT`, and takes its names from
+`target_ipc_defaults.h`, which only Monado's default targets link. Fill in
+`ipc_client_connection_info` and `ipc_server_main_info` with your own socket and
+pidfile names. On Windows, also set `service_executable` in
+`ipc_client_connection_info` to the service the runtime launches when none is
+running.
+
+In the parent `CMakeLists.txt`, `monado_set_options()` turns off every Monado
+option that isn't listed with `ENABLE`, `KEEP` or `KEEP_SET`. Monado's default
+targets (`XRT_FEATURE_OPENXR`, `XRT_FEATURE_SERVICE` and related options) are
+therefore only built if you enable them. Call `monado_add_openxr_runtime()`
+after `add_subdirectory()` of Monado to build the runtime library and its dev
+manifest, and pass `INSTALL` to also install them. Systemd units for custom
+socket names can be adapted from `src/xrt/targets/service/monado.in.*`.
+
+`monado-ctl` and `libmonado` only connect to the default socket, so they can't
+reach a derived service yet.
+
+The `examples/derived_runtime` project in this repository reuses Monado's
+drivers and compositor with a separate `derived-service` and `openxr_derived`
+runtime.

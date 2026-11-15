@@ -304,3 +304,14 @@ if(ANDROID)
 
 	target_link_libraries(target_instance_no_comp PRIVATE aux_android)
 endif()
+
+####
+# IPC defaults
+#
+
+configure_file(
+	target_ipc_defaults.h.cmake_in ${CMAKE_CURRENT_BINARY_DIR}/target_ipc_defaults.h @ONLY
+	)
+
+add_library(target_ipc_defaults INTERFACE)
+target_include_directories(target_ipc_defaults INTERFACE ${CMAKE_CURRENT_BINARY_DIR})

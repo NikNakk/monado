@@ -709,9 +709,9 @@ render_distortion_images_fini(struct render_resources *r);
  * Behaviour for this function is undefined if the GPU has not completed before
  * calling this function, so make sure to call vkQueueWaitIdle or wait on the
  * fence that the work was submitted with have fully completed. See other
- * limitation mentioned for @ref vk_convert_timestamps_to_host_ns .
+ * limitation mentioned for @ref vk_convert_device_timestamps_to_host_ns .
  *
- * @see vk_convert_timestamps_to_host_ns
+ * @see vk_convert_device_timestamps_to_host_ns
  *
  * @public @memberof render_resources
  */
@@ -1437,6 +1437,17 @@ struct render_chroma_key_info
 };
 
 /*!
+ * Advanced blend factors sent to the compute layer shader.
+ */
+struct render_advanced_blend_info
+{
+	uint32_t src_factor_color;
+	uint32_t dst_factor_color;
+	uint32_t src_factor_alpha;
+	uint32_t dst_factor_alpha;
+};
+
+/*!
  * UBO data that is sent to the compute layer shaders.
  *
  * @relates render_compute
@@ -1469,7 +1480,7 @@ struct render_compute_layer_ubo_data
 			uint32_t layer_type;
 			uint32_t unpremultiplied_alpha;
 			uint32_t inverted_alpha;
-			uint32_t _padding0;
+			uint32_t advanced_blending;
 		} layer_data;
 
 		/*!
@@ -1482,7 +1493,8 @@ struct render_compute_layer_ubo_data
 			uint32_t color_image_index;
 			uint32_t depth_image_index;
 			uint32_t has_depth;
-			uint32_t _padding0;
+			//! Four 4-bit blend factors, packed to keep 128 layers below the 64 KiB UBO limit.
+			uint32_t blend_factors;
 		} image_info;
 
 		//! Cylinder/equirect2 transform; for quads the first column holds

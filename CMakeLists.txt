@@ -67,6 +67,7 @@ include(SPIR-V)
 include(GNUInstallDirs)
 include(MergeJSON)
 include(GenerateMacroLists)
+include(MonadoOpenXRRuntime)
 if(NOT GIT_DESC)
 	include(GetGitRevisionDescription)
 	git_describe(GIT_DESC "--always")
@@ -228,10 +229,6 @@ set(ILLIXR_PATH
 # This one is named differently because that's what CTest uses
 option(BUILD_TESTING "Enable building of the test suite?" ON)
 
-if(CMAKE_SYSTEM_NAME STREQUAL "Linux" OR APPLE)
-	set(XRT_HAVE_INTERNAL_HID ON)
-endif()
-
 # cmake-format: off
 option_with_deps(CMAKE_INTERPROCEDURAL_OPTIMIZATION "Enable inter-procedural (link-time) optimization" DEFAULT OFF DEPENDS HAS_IPO)
 option(XRT_HAVE_TRACY "Enable Tracy support for tracing, make sure to set XRT_FEATURE_TRACING as well." OFF)
@@ -345,13 +342,18 @@ option_with_deps(XRT_INSTALL_ABSOLUTE_SYSTEMD_UNIT_FILES "Use an absolute path t
 # Driver deps to use (sorted, though there are some internal dependencies)
 option_with_deps(XRT_HAVE_BLUETOOTH "Enable Bluetooth (legacy, non-ble)" DEPENDS BLUETOOTH_FOUND)
 option_with_deps(XRT_HAVE_GST "Enable gstreamer" DEPENDS GST_FOUND)
-option_with_deps(XRT_HAVE_HIDAPI "Enable libhidapi (used for PSVR)" DEPENDS HIDAPI_FOUND)
+option_with_deps(XRT_HAVE_HIDAPI "Enable libhidapi" DEPENDS HIDAPI_FOUND)
 option_with_deps(XRT_HAVE_JPEG "Enable jpeg code (used for some video drivers)" DEPENDS JPEG_FOUND)
 option_with_deps(XRT_HAVE_LIBUSB "Enable libusb (used for most drivers)" DEPENDS LIBUSB1_FOUND)
 option_with_deps(XRT_HAVE_LIBUVC "Enable libuvc video driver" DEPENDS LIBUVC_FOUND XRT_HAVE_LIBUSB)
 option_with_deps(XRT_HAVE_REALSENSE "Enable RealSense support" DEPENDS realsense2_FOUND)
 option_with_deps(XRT_HAVE_OPENVR "Enable OpenVR support" DEPENDS OPENVR_FOUND)
 option_with_deps(XRT_BUILD_DRIVER_UVC "Enable userspace UVC driver" DEPENDS XRT_HAVE_LIBUSB)
+
+# aux_hid uses hidraw on Linux, and hidapi elsewhere for the devices the prober finds with libusb
+if(XRT_HAVE_LINUX OR APPLE OR (XRT_HAVE_HIDAPI AND XRT_HAVE_LIBUSB AND NOT ANDROID))
+	set(XRT_HAVE_INTERNAL_HID ON)
+endif()
 
 # Drivers to build (sorted)
 option_with_deps(XRT_BUILD_DRIVER_ANDROID "Enable Android sensors driver" DEPENDS ANDROID)
@@ -394,8 +396,8 @@ option_with_deps(XRT_BUILD_DRIVER_PIMAX_P2 "Enable Pimax P2 driver" DEPENDS XRT_
 option(XRT_BUILD_DRIVER_SIMULATED "Enable simulated driver" ON)
 
 option(XRT_BUILD_SAMPLES "Enable compiling sample code implementations that will not be linked into any final targets" ON)
-set(XRT_IPC_MSG_SOCK_FILENAME monado_comp_ipc CACHE STRING "Service socket filename")
-set(XRT_IPC_SERVICE_PID_FILENAME monado.pid CACHE STRING "Service pidfile filename")
+set(XRT_IPC_MSG_SOCK_FILENAME monado_comp_ipc CACHE STRING "Socket filename of Monado's default service and runtimes")
+set(XRT_IPC_SERVICE_PID_FILENAME monado.pid CACHE STRING "Pidfile filename of Monado's default service")
 set(XRT_OXR_RUNTIME_SUFFIX monado CACHE STRING "OpenXR client library suffix")
 set(XRT_OPENVR_STATE_TRACKER_INSTALL_DIR "share" CACHE STRING "Install the OpenVR state tracker to this directory root.")
 
@@ -489,6 +491,7 @@ option(XRT_FEATURE_OPENXR_LAYER_FB_IMAGE_LAYOUT "Enable XR_FB_composition_layer_
 option(XRT_FEATURE_OPENXR_LAYER_FB_SETTINGS "Enable XR_FB_composition_layer_settings" OFF)
 option(XRT_FEATURE_OPENXR_LAYER_FB_DEPTH_TEST "Enable XR_FB_composition_layer_depth_test" OFF)
 option(XRT_FEATURE_OPENXR_LAYER_FB_PASSTHROUGH "Enable XR_FB_passthrough" ${APPLE})
+option(XRT_FEATURE_OPENXR_LAYER_MNDX_ALPHA_BLEND_SYSTEM_UI "Enable XR_MNDX_composition_layer_alpha_blend_system_ui" OFF)
 
 # Defaults for OpenXR spaces
 option(XRT_FEATURE_OPENXR_SPACE_LOCAL_FLOOR "Enable XR_EXT_local_floor" ON)
@@ -761,6 +764,7 @@ message(STATUS "#    FEATURE_OPENXR_FB_SWAPCHAIN_UPDATE_STATE:              ${XR
 	message(STATUS "#    FEATURE_OPENXR_LAYER_FB_SETTINGS:                      ${XRT_FEATURE_OPENXR_LAYER_FB_SETTINGS}")
 message(STATUS "#    FEATURE_OPENXR_META_FOVEATION_EYE_TRACKED:             ${XRT_FEATURE_OPENXR_META_FOVEATION_EYE_TRACKED}")
 message(STATUS "#    FEATURE_OPENXR_MNDX_FOVEATION_METAL:                   ${XRT_FEATURE_OPENXR_MNDX_FOVEATION_METAL}")
+	message(STATUS "#    FEATURE_OPENXR_LAYER_MNDX_ALPHA_BLEND_SYSTEM_UI:       ${XRT_FEATURE_OPENXR_LAYER_MNDX_ALPHA_BLEND_SYSTEM_UI}")
 	message(STATUS "#    FEATURE_OPENXR_OVERLAY:                                ${XRT_FEATURE_OPENXR_OVERLAY}")
 	message(STATUS "#    FEATURE_OPENXR_PERFORMANCE_SETTINGS:                   ${XRT_FEATURE_OPENXR_PERFORMANCE_SETTINGS}")
 	message(STATUS "#    FEATURE_OPENXR_PLANE_DETECTION:                        ${XRT_FEATURE_OPENXR_PLANE_DETECTION}")

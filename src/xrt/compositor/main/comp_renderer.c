@@ -11,6 +11,7 @@
  * @ingroup comp_main
  */
 
+#include "vk/vk_pretty_print.h"
 #include "render/render_interface.h"
 #include "xrt/xrt_defines.h"
 #include "xrt/xrt_frame.h"
@@ -1029,7 +1030,7 @@ renderer_create_renderings_and_fences(struct comp_renderer *r)
 		    NULL,                         //
 		    &r->fences[i]);               //
 		if (ret != VK_SUCCESS) {
-			COMP_ERROR(r->c, "vkCreateFence: %s", vk_result_string(ret));
+			COMP_ERROR(r->c, "vkCreateFence: %s", vk_str_result(ret));
 		}
 
 		char buf[] = "Comp Renderer X_XXXX_XXXX";
@@ -1222,7 +1223,7 @@ renderer_init(struct comp_renderer *r, struct comp_compositor *c, VkExtent2D scr
 	    &c->shaders,                 //
 	    scratch_extent);             //
 	if (ret != VK_SUCCESS) {
-		COMP_ERROR(c, "comp_mirror_init: %s", vk_result_string(ret));
+		COMP_ERROR(c, "comp_mirror_init: %s", vk_str_result(ret));
 		assert(false && "Whelp, can't return a error. But should never really fail.");
 	}
 }
@@ -1256,9 +1257,9 @@ renderer_wait_for_last_fence(struct comp_renderer *r)
 	ret = vk->vkWaitForFences(vk->device, 1, &r->fences[r->fenced_buffer], VK_TRUE, UINT64_MAX);
 	renderer_stage_end(r, "previous_fence_wait", fence_begin_ns, ret);
 	if (ret != VK_SUCCESS) {
-		COMP_ERROR(r->c, "vkWaitForFences: %s", vk_result_string(ret));
+		COMP_ERROR(r->c, "vkWaitForFences: %s", vk_str_result(ret));
 #ifdef XRT_OS_OSX
-		comp_metal_gpu_capture_end(vk_result_string(ret));
+		comp_metal_gpu_capture_end(vk_str_result(ret));
 #endif
 	}
 
@@ -1516,7 +1517,7 @@ renderer_acquire_swapchain_image(struct comp_renderer *r)
 	renderer_stage_end(r, "target_acquire", acquire_begin_ns, ret);
 
 	while ((ret == VK_ERROR_OUT_OF_DATE_KHR) || (ret == VK_SUBOPTIMAL_KHR)) {
-		COMP_DEBUG(r->c, "Received %s.", vk_result_string(ret));
+		COMP_DEBUG(r->c, "Received %s.", vk_str_result(ret));
 
 		if (!renderer_ensure_images_and_renderings(r, true)) {
 			// Failed on force recreate.
@@ -1531,7 +1532,7 @@ renderer_acquire_swapchain_image(struct comp_renderer *r)
 	}
 
 	if (ret != VK_SUCCESS) {
-		COMP_ERROR(r->c, "comp_target_acquire: %s", vk_result_string(ret));
+		COMP_ERROR(r->c, "comp_target_acquire: %s", vk_str_result(ret));
 	}
 
 	r->acquired_buffer = buffer_index;
@@ -1576,7 +1577,7 @@ renderer_present_swapchain_image(struct comp_renderer *r, uint64_t desired_prese
 		return ret != VK_ERROR_OUT_OF_DATE_KHR;
 	}
 	if (ret != VK_SUCCESS) {
-		COMP_ERROR(r->c, "vk_swapchain_present: %s", vk_result_string(ret));
+		COMP_ERROR(r->c, "vk_swapchain_present: %s", vk_str_result(ret));
 		return false;
 	}
 	return true;

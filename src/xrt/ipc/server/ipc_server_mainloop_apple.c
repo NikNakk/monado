@@ -53,7 +53,7 @@
  */
 
 static int
-create_listen_socket(struct ipc_server_mainloop *ml, int *out_fd)
+create_listen_socket(struct ipc_server_mainloop *ml, const char *socket_filename, int *out_fd)
 {
 	struct sockaddr_un addr = XRT_STRUCT_INIT;
 	int fd = socket(PF_UNIX, SOCK_STREAM, 0);
@@ -63,7 +63,7 @@ create_listen_socket(struct ipc_server_mainloop *ml, int *out_fd)
 	}
 
 	char sock_file[PATH_MAX];
-	int size = u_file_get_path_in_runtime_dir(XRT_IPC_MSG_SOCK_FILENAME, sock_file, PATH_MAX);
+	int size = u_file_get_path_in_runtime_dir(socket_filename, sock_file, PATH_MAX);
 	if (size == -1) {
 		U_LOG_E("Could not get socket file name");
 		close(fd);
@@ -105,10 +105,10 @@ create_listen_socket(struct ipc_server_mainloop *ml, int *out_fd)
 }
 
 static int
-init_listen_socket(struct ipc_server_mainloop *ml)
+init_listen_socket(struct ipc_server_mainloop *ml, const char *socket_filename)
 {
 	int fd = -1;
-	int ret = create_listen_socket(ml, &fd);
+	int ret = create_listen_socket(ml, socket_filename, &fd);
 	if (ret < 0) {
 		return ret;
 	}
@@ -280,7 +280,7 @@ ipc_server_mainloop_apple_poll(struct ipc_server *vs, struct ipc_server_mainloop
 }
 
 int
-ipc_server_mainloop_apple_init(struct ipc_server_mainloop *ml, bool no_stdin)
+ipc_server_mainloop_apple_init(struct ipc_server_mainloop *ml, const char *socket_filename, bool no_stdin)
 {
 	IPC_TRACE_MARKER();
 
@@ -289,7 +289,7 @@ ipc_server_mainloop_apple_init(struct ipc_server_mainloop *ml, bool no_stdin)
 	ml->socket_filename = NULL;
 	ml->no_stdin = no_stdin;
 
-	int ret = init_listen_socket(ml);
+	int ret = init_listen_socket(ml, socket_filename);
 	if (ret < 0) {
 		ipc_server_mainloop_apple_deinit(ml);
 		return ret;
@@ -334,9 +334,9 @@ ipc_server_mainloop_apple_deinit(struct ipc_server_mainloop *ml)
  * ipc_server_mainloop_apple_xpc.m; otherwise they are the main loop.
  */
 int
-ipc_server_mainloop_init(struct ipc_server_mainloop *ml, bool no_stdin)
+ipc_server_mainloop_init(struct ipc_server_mainloop *ml, const char *socket_filename, bool no_stdin)
 {
-	return ipc_server_mainloop_apple_init(ml, no_stdin);
+	return ipc_server_mainloop_apple_init(ml, socket_filename, no_stdin);
 }
 
 void

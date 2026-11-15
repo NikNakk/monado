@@ -907,6 +907,16 @@ branch-oriented companion to this document.
 
 ## Upstream sync
 
+The [2026-11-15 consolidation and upstream integration](macos-upstream-review-2026-11-15.md)
+merges the session/Ceres/simulator and committed quad-view work, followed by
+upstream `9dc151cd2`, on `integration/macos-upstream-2026-11-15`. The established
+Sense tracker, calibration and LED policy are preserved; coupled tracking changes
+remain explicitly deferred. Native and x86-64 builds pass, with 98/98 native
+tests including isolated service recovery. The tested result is fast-forwarded
+locally into `macos-upstream-clean`, with the review branch retained. Existing
+uncommitted investigations and installed runtimes are preserved.
+
+
 The [2026-11-02 upstream integration](macos-upstream-merge-review-2026-11.md)
 merges GitLab `main` through `db1903bd4`, resolving the 19 conflicted files
 from 93 new upstream commits. It adopts shutdown/IPC, generated-binding,

@@ -19,7 +19,7 @@
 
 #include "xrt/xrt_prober.h"
 
-#include "os/os_hid.h"
+#include "hid/h_hid.h"
 #include "os/os_time.h"
 #include "os/os_threading.h"
 #include "xrt/xrt_byte_order.h"
@@ -154,8 +154,8 @@ struct hydra_device;
 struct hydra_system
 {
 	struct xrt_tracking_origin base;
-	struct os_hid_device *data_hid;
-	struct os_hid_device *command_hid;
+	struct h_hid_device *data_hid;
+	struct h_hid_device *command_hid;
 
 	struct os_thread_helper usb_thread;
 
@@ -373,8 +373,8 @@ hydra_system_read_data_hid(struct hydra_system *hs)
 	assert(hs);
 	uint8_t buffer[128];
 
-	int ret = os_hid_read(hs->data_hid, buffer, sizeof(buffer),
-	                      20); // 20ms is a generous number above the 16.66ms we expect to receive reports at (60hz)
+	int ret = h_hid_read(hs->data_hid, buffer, sizeof(buffer),
+	                     20); // 20ms is a generous number above the 16.66ms we expect to receive reports at (60hz)
 
 	timepoint_ns now = os_monotonic_get_ns();
 
@@ -435,11 +435,11 @@ hydra_system_enter_motion_control(struct hydra_system *hs, timepoint_ns now)
 	         "attempt %d",
 	         hs->motion_attempt_number);
 
-	os_hid_set_feature(hs->command_hid, HYDRA_REPORT_START_MOTION, sizeof(HYDRA_REPORT_START_MOTION));
+	h_hid_set_feature(hs->command_hid, HYDRA_REPORT_START_MOTION, sizeof(HYDRA_REPORT_START_MOTION));
 
 	// Doing a throwaway get-feature now.
 	uint8_t buf[91] = {0};
-	os_hid_get_feature(hs->command_hid, 0, buf, sizeof(buf));
+	h_hid_get_feature(hs->command_hid, 0, buf, sizeof(buf));
 
 	hydra_sm_transition(&hs->sm, HYDRA_SM_LISTENING_AFTER_SET_FEATURE, now);
 }
@@ -647,16 +647,16 @@ hydra_system_remove_child(struct hydra_system *hs, struct hydra_device *hd)
 			         "Sending command to re-enter gamepad mode "
 			         "and pausing while it takes effect.");
 
-			os_hid_set_feature(hs->command_hid, HYDRA_REPORT_START_GAMEPAD,
-			                   sizeof(HYDRA_REPORT_START_GAMEPAD));
+			h_hid_set_feature(hs->command_hid, HYDRA_REPORT_START_GAMEPAD,
+			                  sizeof(HYDRA_REPORT_START_GAMEPAD));
 			os_nanosleep(2 * 1000 * 1000 * 1000);
 		}
 		if (hs->data_hid != NULL) {
-			os_hid_destroy(hs->data_hid);
+			h_hid_destroy(hs->data_hid);
 			hs->data_hid = NULL;
 		}
 		if (hs->command_hid != NULL) {
-			os_hid_destroy(hs->command_hid);
+			h_hid_destroy(hs->command_hid);
 			hs->command_hid = NULL;
 		}
 		free(hs);
@@ -737,15 +737,15 @@ hydra_found(struct xrt_prober *xp,
 	struct xrt_prober_device *dev = devices[index];
 	int ret;
 
-	struct os_hid_device *data_hid = NULL;
+	struct h_hid_device *data_hid = NULL;
 	ret = xrt_prober_open_hid_interface(xp, dev, 0, &data_hid);
 	if (ret != 0) {
 		return -1;
 	}
-	struct os_hid_device *command_hid = NULL;
+	struct h_hid_device *command_hid = NULL;
 	ret = xrt_prober_open_hid_interface(xp, dev, 1, &command_hid);
 	if (ret != 0) {
-		os_hid_destroy(data_hid);
+		h_hid_destroy(data_hid);
 		return -1;
 	}
 
@@ -763,8 +763,8 @@ hydra_found(struct xrt_prober *xp,
 		HS_ERROR(hs, "Failed to init USB thread.");
 	after_system_err:
 		free(hs);
-		os_hid_destroy(command_hid);
-		os_hid_destroy(data_hid);
+		h_hid_destroy(command_hid);
+		h_hid_destroy(data_hid);
 		return -1;
 	}
 

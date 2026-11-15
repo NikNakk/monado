@@ -232,6 +232,10 @@ if(XRT_FEATURE_RENDERDOC)
 	endif()
 endif()
 
+if(XRT_FEATURE_CLIENT_DEBUG_GUI)
+	target_link_libraries(st_oxr PRIVATE aux_util_debug_gui)
+endif()
+
 target_include_directories(
 	st_oxr
 	PRIVATE ${CMAKE_CURRENT_BINARY_DIR}

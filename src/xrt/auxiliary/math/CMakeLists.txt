@@ -43,6 +43,7 @@ add_library(
 	m_rational.hpp
 	m_relation_history.cpp
 	m_relation_history.h
+	m_relation_history.hpp
 	m_space.cpp
 	m_space.h
 	m_vec2.h
@@ -50,7 +51,7 @@ add_library(
 	)
 target_link_libraries(
 	aux_math
-	PUBLIC aux-includes aux_util Eigen3::Eigen
+	PUBLIC aux-includes aux_util aux_glue Eigen3::Eigen
 	PRIVATE xrt-optimized-math
 	)
 

@@ -3,6 +3,7 @@
 #include <algorithm>
 #include "render_compute_test_fixture.h"
 #include "util/comp_projection_fast_path.h"
+#include "util/comp_render_helpers.h"
 
 TEST_CASE("Compute timestamps remain ordered across repeated submissions", "[aux_render][gpu][timestamps]")
 {
@@ -676,6 +677,83 @@ TEST_CASE("Quad bounds preserve layer composition", "[aux_render][gpu]")
 					REQUIRE(max_error == 0);
 				}
 		}
+}
+
+TEST_CASE("Packed compute blend factors match CPU blending and skip uncovered layers", "[aux_render][gpu]")
+{
+	LayerFixture f;
+	f.init(17, 13);
+	f.init_layers();
+	auto pipeline = f.layer_pipeline(false);
+	render_compute_layer_ubo_data configs[2]{};
+	for (unsigned eye = 0; eye < 2; ++eye) {
+		auto &data = configs[eye];
+		data.view = {eye * f.width, 0, f.width, f.height};
+		data.pre_transform = {-1, -1, 2, 2};
+		data.layer_count.value = 1;
+		auto &layer = data.layers[0];
+		layer.layer_data.layer_type = LAYER_COMP_TYPE_PROJECTION;
+		layer.post_transforms = {0, 0, 1, 1};
+		layer.color_scale = {1, 1, 1, 1};
+		for (unsigned j = 0; j < 4; ++j)
+			layer.transforms.v[j * 5] = 1;
+		data.layers[1] = layer;
+		data.layers[1].image_info.color_image_index = 1;
+	}
+	auto draw = [&]() {
+		for (unsigned eye = 0; eye < 2; ++eye)
+			REQUIRE(render_buffer_write(&f.vk(), &f.layer_ubo[eye], &configs[eye], sizeof(configs[eye])) ==
+			        VK_SUCCESS);
+		f.run_layers(pipeline, 1, true);
+		return f.snapshot();
+	};
+	auto background = draw();
+	for (auto &data : configs)
+		data.layers[0].image_info.color_image_index = 1;
+	auto foreground = draw();
+	auto factor = [](unsigned kind, float src_alpha, float dst_alpha) {
+		switch (kind) {
+		case 0: return 0.f;
+		case 1: return 1.f;
+		case 2: return src_alpha;
+		case 3: return 1.f - src_alpha;
+		case 4: return dst_alpha;
+		default: return 1.f - dst_alpha;
+		}
+	};
+	for (unsigned i = 0; i < 6; ++i) {
+		xrt_layer_data layer{};
+		layer.flags = XRT_LAYER_COMPOSITION_ADVANCED_BLENDING_BIT;
+		layer.advanced_blend = {xrt_blend_factor(i), xrt_blend_factor((i + 1) % 6),
+		                        xrt_blend_factor((i + 2) % 6), xrt_blend_factor((i + 3) % 6)};
+		for (auto &data : configs) {
+			data.layer_count.value = 2;
+			data.layers[0].image_info.color_image_index = 0;
+			render_advanced_blend_info blend{};
+			apply_advanced_blend_from_layer(&layer, &data.layers[1].layer_data.advanced_blending, &blend);
+			data.layers[1].image_info.blend_factors = pack_advanced_blend(&blend);
+		}
+		auto pixels = draw();
+		unsigned max_error = 0;
+		for (size_t p = 0; p < pixels.size(); p += 4) {
+			float sa = foreground[p + 3] / 255.f, da = background[p + 3] / 255.f;
+			for (unsigned c = 0; c < 4; ++c) {
+				float sf = factor(c == 3 ? (i + 2) % 6 : i, sa, da);
+				float df = factor(c == 3 ? (i + 3) % 6 : (i + 1) % 6, sa, da);
+				int expected = int(std::lround(
+				    std::clamp(foreground[p + c] * sf + background[p + c] * df, 0.f, 255.f)));
+				max_error = std::max(max_error, unsigned(std::abs(int(pixels[p + c]) - expected)));
+			}
+		}
+		CAPTURE(i, max_error);
+		CHECK(max_error <= 2);
+	}
+	for (auto &data : configs) {
+		data.layers[1].transforms.v[12] = 4.f;
+		data.layers[1].image_info.blend_factors = 0; // ZERO/ZERO must not erase pixels outside this layer.
+		data.layers[1].color_bias = {1, 1, 1, 1};
+	}
+	CHECK(draw() == background);
 }
 
 TEST_CASE("Layer composition GPU benchmark", "[.][aux_render][gpu][layer_benchmark]")

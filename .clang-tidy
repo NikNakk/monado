@@ -72,7 +72,6 @@ Checks:       |
     -cert-oop54-cpp,
     -cert-str34-c,
     -clang-analyzer-core.NonNullParamChecker,
-    -clang-analyzer-core.NullDereference,
     -clang-analyzer-cplusplus.InnerPointer,
     -clang-analyzer-optin.core.EnumCastOutOfRange,
     -clang-analyzer-optin.performance.Padding,

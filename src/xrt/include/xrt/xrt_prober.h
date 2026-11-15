@@ -38,7 +38,7 @@ struct xrt_builder;
 struct xrt_system_devices;
 struct xrt_space_overseer;
 struct xrt_session_event_sink;
-struct os_hid_device;
+struct h_hid_device;
 struct os_serial_device;
 struct os_serial_parameters;
 
@@ -234,14 +234,14 @@ struct xrt_prober
 	 * @param xp Pointer to self
 	 * @param xpdev prober device
 	 * @param iface HID interface number
-	 * @param[out] out_hid_dev instance of @ref os_hid_device for the given interface
+	 * @param[out] out_hid_dev instance of @ref h_hid_device for the given interface
 	 *
 	 * @return 0 on success, <0 on error.
 	 */
 	int (*open_hid_interface)(struct xrt_prober *xp,
 	                          struct xrt_prober_device *xpdev,
 	                          int iface,
-	                          struct os_hid_device **out_hid_dev);
+	                          struct h_hid_device **out_hid_dev);
 
 	/*!
 	 * Open a serial device using native serial support.
@@ -249,7 +249,7 @@ struct xrt_prober
 	 * @param xp Pointer to self
 	 * @param xpdev prober device
 	 * @param parameters Serial parameters to use when opening the device
-	 * @param[out] out_hid_dev instance of @ref os_hid_device for the given interface
+	 * @param[out] out_hid_dev instance of @ref h_hid_device for the given interface
 	 *
 	 * @return 0 on success, <0 on error.
 	 */
@@ -429,7 +429,7 @@ XRT_NONNULL_ALL static inline int
 xrt_prober_open_hid_interface(struct xrt_prober *xp,
                               struct xrt_prober_device *xpdev,
                               int iface,
-                              struct os_hid_device **out_hid_dev)
+                              struct h_hid_device **out_hid_dev)
 {
 	return xp->open_hid_interface(xp, xpdev, iface, out_hid_dev);
 }

@@ -18,7 +18,12 @@
 #include "xrt/xrt_instance.h"
 #include "xrt/xrt_handles.h"
 #include "xrt/xrt_config_os.h"
+#ifdef XRT_OS_OSX
+#include "target_ipc_defaults.h"
+#endif
 #include "xrt/xrt_config_android.h"
+
+#include "os/os_time.h"
 
 #include "util/u_var.h"
 #include "util/u_misc.h"
@@ -93,35 +98,36 @@ ipc_client_socket_connect(struct ipc_connection *ipc_c, struct _JavaVM *vm, void
 
 #elif defined(XRT_OS_WINDOWS)
 
-#if defined(NO_XRT_SERVICE_LAUNCH) || !defined(XRT_SERVICE_EXECUTABLE)
+/*!
+ * Opens the pipe, retrying every 10 ms while all instances are busy (the service adds one after accepting a client).
+ */
 static HANDLE
-ipc_connect_pipe(struct ipc_connection *ipc_c, const char *pipe_name)
+ipc_open_pipe(const char *pipe_name)
 {
 	HANDLE pipe_inst = CreateFileA(pipe_name, GENERIC_READ | GENERIC_WRITE, 0, NULL, OPEN_EXISTING, 0, NULL);
-	if (pipe_inst == INVALID_HANDLE_VALUE) {
-		DWORD err = GetLastError();
-		IPC_ERROR(ipc_c, "Connect to %s failed: %lu %s", pipe_name, err, ipc_winerror(err));
+	for (int i = 0; i < 500 && pipe_inst == INVALID_HANDLE_VALUE && GetLastError() == ERROR_PIPE_BUSY; i++) {
+		Sleep(10);
+		pipe_inst = CreateFileA(pipe_name, GENERIC_READ | GENERIC_WRITE, 0, NULL, OPEN_EXISTING, 0, NULL);
 	}
 	return pipe_inst;
 }
-#else
-// N.B. quality of life fallback to try launch the XRT_SERVICE_EXECUTABLE if pipe is not found
+
 static HANDLE
-ipc_connect_pipe(struct ipc_connection *ipc_c, const char *pipe_name)
+ipc_connect_pipe(struct ipc_connection *ipc_c, const char *pipe_name, const char *service_executable)
 {
-	HANDLE pipe_inst = CreateFileA(pipe_name, GENERIC_READ | GENERIC_WRITE, 0, NULL, OPEN_EXISTING, 0, NULL);
+	HANDLE pipe_inst = ipc_open_pipe(pipe_name);
 	if (pipe_inst != INVALID_HANDLE_VALUE) {
 		return pipe_inst;
 	}
 	DWORD err = GetLastError();
 	IPC_ERROR(ipc_c, "Connect to %s failed: %lu %s", pipe_name, err, ipc_winerror(err));
-	if (err != ERROR_FILE_NOT_FOUND) {
+	if (service_executable == NULL || err != ERROR_FILE_NOT_FOUND) {
 		return INVALID_HANDLE_VALUE;
 	}
-	IPC_INFO(ipc_c, "Trying to launch " XRT_SERVICE_EXECUTABLE "...");
+	IPC_INFO(ipc_c, "Trying to launch %s...", service_executable);
 	HMODULE hmod;
 	if (!GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
-	                        (LPCSTR)ipc_connect_pipe, &hmod)) {
+	                        (LPCSTR)(uintptr_t)ipc_connect_pipe, &hmod)) {
 		err = GetLastError();
 		IPC_ERROR(ipc_c, "GetModuleHandleExA failed: %lu %s", err, ipc_winerror(err));
 		return INVALID_HANDLE_VALUE;
@@ -143,7 +149,7 @@ ipc_connect_pipe(struct ipc_connection *ipc_c, const char *pipe_name)
 	 * but never <module dir>\<exe>, so a service next to the runtime isn't found.
 	 */
 	char service_path[MAX_PATH] = {0};
-	snprintf(service_path, MAX_PATH, "%s\\%s", current_path, XRT_SERVICE_EXECUTABLE);
+	snprintf(service_path, MAX_PATH, "%s\\%s", current_path, service_executable);
 	STARTUPINFOA si = {.cb = sizeof(si)};
 	PROCESS_INFORMATION pi;
 	/*!
@@ -155,25 +161,27 @@ ipc_connect_pipe(struct ipc_connection *ipc_c, const char *pipe_name)
 		p = strrchr(service_path, '\\');
 		if (!p) {
 			err = GetLastError();
-			IPC_INFO(ipc_c, XRT_SERVICE_EXECUTABLE " not found in %s: %lu %s", service_path, err,
+			IPC_INFO(ipc_c, "%s not found in %s: %lu %s", service_executable, service_path, err,
 			         ipc_winerror(err));
 			return INVALID_HANDLE_VALUE;
 		}
 
-		snprintf(service_path, MAX_PATH, "%s\\service\\%s", current_path, XRT_SERVICE_EXECUTABLE);
+		snprintf(service_path, MAX_PATH, "%s\\service\\%s", current_path, service_executable);
 		if (!CreateProcessA(NULL, service_path, NULL, NULL, false, 0, NULL, NULL, &si, &pi)) {
 			err = GetLastError();
-			IPC_INFO(ipc_c, XRT_SERVICE_EXECUTABLE " not found at %s: %lu %s", service_path, err,
+			IPC_INFO(ipc_c, "%s not found at %s: %lu %s", service_executable, service_path, err,
 			         ipc_winerror(err));
 			return INVALID_HANDLE_VALUE;
 		}
 	}
-	IPC_INFO(ipc_c, "Launched %s (pid %d)... Waiting for %s...", service_path, pi.dwProcessId, pipe_name);
+	IPC_INFO(ipc_c, "Launched %s (pid %lu)... Waiting for %s...", service_path, pi.dwProcessId, pipe_name);
 	CloseHandle(pi.hThread);
+	int64_t start_ns = os_monotonic_get_ns();
 	for (int i = 0;; i++) {
-		pipe_inst = CreateFileA(pipe_name, GENERIC_READ | GENERIC_WRITE, 0, NULL, OPEN_EXISTING, 0, NULL);
+		pipe_inst = ipc_open_pipe(pipe_name);
 		if (pipe_inst != INVALID_HANDLE_VALUE) {
-			IPC_INFO(ipc_c, "Connected to %s after %d msec on try %d!", pipe_name, i * 100, i + 1);
+			IPC_INFO(ipc_c, "Connected to %s after %.1f msec on try %d!", pipe_name,
+			         time_ns_to_ms_f(os_monotonic_get_ns() - start_ns), i + 1);
 			break;
 		}
 		err = GetLastError();
@@ -185,22 +193,21 @@ ipc_connect_pipe(struct ipc_connection *ipc_c, const char *pipe_name)
 	CloseHandle(pi.hProcess);
 	return pipe_inst;
 }
-#endif
 
 static bool
-ipc_client_socket_connect(struct ipc_connection *ipc_c)
+ipc_client_socket_connect(struct ipc_connection *ipc_c, const struct ipc_client_connection_info *icci)
 {
 	const char pipe_prefix[] = "\\\\.\\pipe\\";
 #define prefix_len sizeof(pipe_prefix) - 1
 	char pipe_name[MAX_PATH + prefix_len];
 	snprintf(pipe_name, sizeof(pipe_name), "%s", pipe_prefix);
 
-	if (u_file_get_path_in_runtime_dir(XRT_IPC_MSG_SOCK_FILENAME, pipe_name + prefix_len, MAX_PATH) == -1) {
+	if (u_file_get_path_in_runtime_dir(icci->socket_filename, pipe_name + prefix_len, MAX_PATH) == -1) {
 		U_LOG_E("u_file_get_path_in_runtime_dir failed!");
 		return false;
 	}
 
-	HANDLE pipe_inst = ipc_connect_pipe(ipc_c, pipe_name);
+	HANDLE pipe_inst = ipc_connect_pipe(ipc_c, pipe_name, icci->service_executable);
 	if (pipe_inst == INVALID_HANDLE_VALUE) {
 		return false;
 	}
@@ -221,7 +228,7 @@ ipc_client_socket_connect(struct ipc_connection *ipc_c)
 #else
 
 static bool
-ipc_client_socket_connect_once(struct ipc_connection *ipc_c)
+ipc_client_socket_connect_once(struct ipc_connection *ipc_c, const struct ipc_client_connection_info *icci)
 {
 #ifdef SOCK_CLOEXEC
 	// Make sure the socket is not inherited by child processes. For one, when there is an fd to the socket
@@ -247,7 +254,7 @@ ipc_client_socket_connect_once(struct ipc_connection *ipc_c)
 
 	char sock_file[PATH_MAX];
 
-	ssize_t size = u_file_get_path_in_runtime_dir(XRT_IPC_MSG_SOCK_FILENAME, sock_file, PATH_MAX);
+	ssize_t size = u_file_get_path_in_runtime_dir(icci->socket_filename, sock_file, PATH_MAX);
 	if (size == -1) {
 		IPC_ERROR(ipc_c, "Could not get socket file name");
 		close(socket);
@@ -282,11 +289,15 @@ ipc_client_socket_connect_once(struct ipc_connection *ipc_c)
 
 #if defined(XRT_OS_OSX) && defined(XRT_FEATURE_SERVICE)
 static bool
-ipc_client_socket_connect(struct ipc_connection *ipc_c)
+ipc_client_socket_connect(struct ipc_connection *ipc_c, const struct ipc_client_connection_info *icci)
 {
 	/* Preserve the existing manual-service path with no XPC dependency. */
-	if (ipc_client_socket_connect_once(ipc_c)) {
+	if (ipc_client_socket_connect_once(ipc_c, icci)) {
 		return true;
+	}
+
+	if (strcmp(icci->socket_filename, XRT_IPC_MSG_SOCK_FILENAME) != 0) {
+		return false;
 	}
 
 	IPC_INFO(ipc_c, "Monado service socket is unavailable; asking launchd to activate the macOS service");
@@ -300,7 +311,7 @@ ipc_client_socket_connect(struct ipc_connection *ipc_c)
 	 * The service does not answer activateWithReply until its Unix socket is
 	 * already listening, so this retry should not require polling or sleeps.
 	 */
-	if (!ipc_client_socket_connect_once(ipc_c)) {
+	if (!ipc_client_socket_connect_once(ipc_c, icci)) {
 		IPC_ERROR(ipc_c,
 		          "Monado service reported ready over XPC but its Unix socket still could not be reached");
 		return false;
@@ -311,9 +322,9 @@ ipc_client_socket_connect(struct ipc_connection *ipc_c)
 }
 #else
 static bool
-ipc_client_socket_connect(struct ipc_connection *ipc_c)
+ipc_client_socket_connect(struct ipc_connection *ipc_c, const struct ipc_client_connection_info *icci)
 {
-	return ipc_client_socket_connect_once(ipc_c);
+	return ipc_client_socket_connect_once(ipc_c, icci);
 }
 #endif
 
@@ -411,9 +422,17 @@ ipc_client_describe_client(struct ipc_connection *ipc_c, const struct xrt_applic
 xrt_result_t
 ipc_client_connection_init(struct ipc_connection *ipc_c,
                            enum u_logging_level log_level,
+                           const struct ipc_client_connection_info *icci,
                            const struct xrt_instance_info *i_info)
 {
 	xrt_result_t xret;
+
+#ifndef XRT_OS_ANDROID
+	if (icci == NULL || icci->socket_filename == NULL) {
+		U_LOG_IFL_E(log_level, "The socket_filename must be set in ipc_client_connection_info!");
+		return XRT_ERROR_INVALID_ARGUMENT;
+	}
+#endif
 
 	U_ZERO(ipc_c);
 	ipc_c->imc.ipc_handle = XRT_IPC_HANDLE_INVALID;
@@ -440,17 +459,13 @@ ipc_client_connection_init(struct ipc_connection *ipc_c,
 
 	if (!ipc_client_socket_connect(ipc_c, vm, context)) {
 #else
-	if (!ipc_client_socket_connect(ipc_c)) {
+	if (!ipc_client_socket_connect(ipc_c, icci)) {
 #endif
 		IPC_ERROR(ipc_c,
-		          "Failed to connect to monado service process\n\n"
+		          "Failed to connect to the service process\n\n"
 		          "###\n"
 		          "#\n"
 		          "# Please make sure that the service process is running\n"
-		          "#\n"
-		          "# It is called \"monado-service\"\n"
-		          "# In build trees, it is located "
-		          "\"build-dir/src/xrt/targets/service/monado-service\"\n"
 		          "#\n"
 		          "###");
 		os_mutex_destroy(&ipc_c->send_mutex);

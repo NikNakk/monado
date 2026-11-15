@@ -587,6 +587,14 @@ oxr_instance_init_system_locked(struct oxr_logger *log, struct oxr_instance *ins
 		return ret;
 	}
 
+	if (sys->xsysd == NULL) {
+		return oxr_error(log, XR_ERROR_RUNTIME_FAILURE, "Huh?! Field sys->xsysd was NULL?");
+	} else if (should_create_compositor && sys->xsysc == NULL) {
+		return oxr_error(log, XR_ERROR_RUNTIME_FAILURE, "Huh?! Field sys->xsysc was NULL?");
+	} else if (!should_create_compositor && sys->xsysc != NULL) {
+		return oxr_error(log, XR_ERROR_RUNTIME_FAILURE, "Huh?! Field sys->xsysc was not NULL?");
+	}
+
 	int iret = os_mutex_init(&sys->view_config_mutex);
 	if (iret < 0) {
 		ret = oxr_error(log, XR_ERROR_RUNTIME_FAILURE, "Call to os_mutex_init failed: %d", iret);
@@ -608,19 +616,6 @@ oxr_instance_init_system_locked(struct oxr_logger *log, struct oxr_instance *ins
 	// Do this after creating the system.
 	u_debug_gui_start(inst->debug_ui, inst->xinst, sys->xsysd);
 #endif
-
-	ret = XR_SUCCESS;
-	if (sys->xsysd == NULL) {
-		ret = oxr_error(log, XR_ERROR_RUNTIME_FAILURE, "Huh?! Field sys->xsysd was NULL?");
-	} else if (should_create_compositor && sys->xsysc == NULL) {
-		ret = oxr_error(log, XR_ERROR_RUNTIME_FAILURE, "Huh?! Field sys->xsysc was NULL?");
-	} else if (!should_create_compositor && sys->xsysc != NULL) {
-		ret = oxr_error(log, XR_ERROR_RUNTIME_FAILURE, "Huh?! Field sys->xsysc was not NULL?");
-	}
-
-	if (ret != XR_SUCCESS) {
-		return ret;
-	}
 
 	// Did we find any HMD
 	// @todo Headless with only controllers?

@@ -9,6 +9,7 @@
  * @ingroup openvr
  */
 
+#include "vk/vk_pretty_print.h"
 #include "xrt/xrt_config_build.h"
 #include "xrt/xrt_gfx_vk.h"
 
@@ -278,7 +279,7 @@ Compositor::setupBlitPipelines(openvr_logger &logger)
 	    NULL,                                    //
 	    &this->blit.descriptor_set_layout);      //
 	if (vk_result != VK_SUCCESS) {
-		VK_ERROR(vk, "vkCreateDescriptorSetLayout failed: %s", vk_result_string(vk_result));
+		VK_ERROR(vk, "vkCreateDescriptorSetLayout failed: %s", vk_str_result(vk_result));
 		return XRT_ERROR_VULKAN;
 	}
 	VK_NAME_DESCRIPTOR_SET_LAYOUT(vk, this->blit.descriptor_set_layout,
@@ -305,7 +306,7 @@ Compositor::setupBlitPipelines(openvr_logger &logger)
 	    NULL,                               // pAllocator
 	    &this->blit.pipeline_layout);       // pPipelineLayout
 	if (vk_result != VK_SUCCESS) {
-		VK_ERROR(vk, "vkCreatePipelineLayout failed: %s", vk_result_string(vk_result));
+		VK_ERROR(vk, "vkCreatePipelineLayout failed: %s", vk_str_result(vk_result));
 		return XRT_ERROR_VULKAN;
 	}
 	VK_NAME_PIPELINE_LAYOUT(vk, this->blit.pipeline_layout, "openvr_compositor_vulkan blit pipeline layout");
@@ -364,7 +365,7 @@ Compositor::setupBlitPipelines(openvr_logger &logger)
 	// Create the sampler used for the blit operation
 	vk_result = vk_create_sampler(this->vk, VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE, &this->blit.sampler);
 	if (vk_result != VK_SUCCESS) {
-		OPENVR_LOG_ERROR(logger, "vk_create_sampler: %s", vk_result_string(vk_result));
+		OPENVR_LOG_ERROR(logger, "vk_create_sampler: %s", vk_str_result(vk_result));
 		return XRT_ERROR_VULKAN;
 	}
 	VK_NAME_SAMPLER(vk, this->blit.sampler, "OpenVR compositor blit source sampler");
@@ -372,7 +373,7 @@ Compositor::setupBlitPipelines(openvr_logger &logger)
 	vk_result = vk_create_descriptor_set(vk, this->blit.descriptor_pool, this->blit.descriptor_set_layout,
 	                                     &this->blit.descriptor_set);
 	if (vk_result != VK_SUCCESS) {
-		OPENVR_LOG_ERROR(logger, "vk_create_descriptor_set: %s", vk_result_string(vk_result));
+		OPENVR_LOG_ERROR(logger, "vk_create_descriptor_set: %s", vk_str_result(vk_result));
 		return XRT_ERROR_VULKAN;
 	}
 	VK_NAME_DESCRIPTOR_SET(vk, this->blit.descriptor_set, "OpenVR compositor blit descriptor set");
@@ -639,7 +640,7 @@ Compositor::transferAppImageToSwapchainImage(openvr_logger &logger,
 		vk_result = vk_create_view(vk, src_image, VK_IMAGE_VIEW_TYPE_2D, src_format,
 		                           first_color_level_subresource_range, &src_view);
 		if (vk_result != VK_SUCCESS) {
-			OPENVR_LOG_ERROR(logger, "vk_create_view(src): %s", vk_result_string(vk_result));
+			OPENVR_LOG_ERROR(logger, "vk_create_view(src): %s", vk_str_result(vk_result));
 			cleanup();
 			return XRT_ERROR_VULKAN;
 		}
@@ -651,7 +652,7 @@ Compositor::transferAppImageToSwapchainImage(openvr_logger &logger,
 		    vk_create_view_usage(vk, dst_image, VK_IMAGE_VIEW_TYPE_2D, storage_format,
 		                         VK_IMAGE_USAGE_STORAGE_BIT, first_color_level_subresource_range, &target_view);
 		if (vk_result != VK_SUCCESS) {
-			OPENVR_LOG_ERROR(logger, "vk_create_view(dst): %s", vk_result_string(vk_result));
+			OPENVR_LOG_ERROR(logger, "vk_create_view(dst): %s", vk_str_result(vk_result));
 			cleanup();
 			return XRT_ERROR_VULKAN;
 		}
@@ -797,7 +798,7 @@ Compositor::transferAppImageToSwapchainImage(openvr_logger &logger,
 
 	if (vk_result != VK_SUCCESS) {
 		OPENVR_LOG_ERROR(logger, "vk_cmd_pool_end_submit_wait_and_free_cmd_buffer_locked: %s",
-		                 vk_result_string(vk_result));
+		                 vk_str_result(vk_result));
 		cleanup();
 		return XRT_ERROR_VULKAN;
 	}

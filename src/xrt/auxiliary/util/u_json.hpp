@@ -96,7 +96,15 @@ public:
 	//! This is public so that make_shared works; do not use outside of this file.
 	JSONNode(cJSON *cjson, bool is_owner, const JSONNode::Ptr &parent)
 	    : cjson(cjson), is_owner(is_owner), parent(parent)
-	{}
+	{
+		if (isInvalid()) {
+			const int max_length = 64;
+			string msg = string(cJSON_GetErrorPtr()).substr(0, max_length);
+			JSON_ERROR("Invalid syntax right before: '%s'", msg.c_str());
+			throw std::runtime_error(msg);
+		}
+	}
+
 
 	//! Wrap cJSON object for easy manipulation, does not take ownership
 	JSONNode(cJSON *cjson) : JSONNode(cjson, false, nullptr) {}
@@ -105,18 +113,7 @@ public:
 	JSONNode() {}
 
 	//! Receives a json string and constructs a wrapped cJSON object out of it.
-	JSONNode(const string &content)
-	{
-		cjson = cJSON_Parse(content.c_str());
-		if (cjson == nullptr) {
-			const int max_length = 64;
-			string msg = string(cJSON_GetErrorPtr()).substr(0, max_length);
-			JSON_ERROR("Invalid syntax right before: '%s'", msg.c_str());
-			return;
-		}
-		is_owner = true;
-		parent = nullptr;
-	}
+	JSONNode(const string &content) : JSONNode(cJSON_Parse(content.c_str()), true, nullptr) {}
 
 	JSONNode(JSONNode &&node)
 	{
@@ -222,14 +219,14 @@ public:
 	}
 
 	// clang-format off
-	bool isObject() const { return cJSON_IsObject(cjson); }
-	bool isArray() const { return cJSON_IsArray(cjson); }
-	bool isString() const { return cJSON_IsString(cjson); }
-	bool isNumber() const { return cJSON_IsNumber(cjson); }
+	bool isObject() const { return isValid() && cJSON_IsObject(cjson); }
+	bool isArray() const { return isValid() && cJSON_IsArray(cjson); }
+	bool isString() const { return isValid() && cJSON_IsString(cjson); }
+	bool isNumber() const { return isValid() && cJSON_IsNumber(cjson); }
 	bool isInt() const { return isNumber() && cjson->valuedouble == cjson->valueint; }
 	bool isDouble() const { return isNumber(); }
-	bool isNull() const { return cJSON_IsNull(cjson); }
-	bool isBool() const { return cJSON_IsBool(cjson); }
+	bool isNull() const { return isValid() && cJSON_IsNull(cjson); }
+	bool isBool() const { return isValid() && cJSON_IsBool(cjson); }
 	bool isInvalid() const { return cjson == nullptr || cJSON_IsInvalid(cjson); }
 	bool isValid() const { return !isInvalid(); }
 

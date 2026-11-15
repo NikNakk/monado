@@ -1,5 +1,6 @@
 // Copyright 2019-2023, Collabora, Ltd.
 // Copyright 2026, Beyley Cardellio
+// Copyright 2026, NVIDIA CORPORATION.
 // SPDX-License-Identifier: BSL-1.0
 /*!
  * @file
@@ -21,6 +22,8 @@ U_TRACE_TARGET_SETUP(U_TRACE_WHICH_OPENVR)
 #include "xrt/xrt_instance.h"
 #include "client/ipc_client_interface.h"
 
+#include "target_ipc_defaults.h"
+
 
 xrt_result_t
 xrt_instance_create(struct xrt_instance_info *ii, struct xrt_instance **out_xinst)
@@ -29,7 +32,14 @@ xrt_instance_create(struct xrt_instance_info *ii, struct xrt_instance **out_xins
 
 	XRT_TRACE_MARKER();
 
-	return ipc_instance_create(ii, out_xinst);
+	struct ipc_client_connection_info icci = {
+	    .socket_filename = XRT_IPC_MSG_SOCK_FILENAME,
+	};
+#if defined(XRT_SERVICE_EXECUTABLE) && !defined(NO_XRT_SERVICE_LAUNCH)
+	icci.service_executable = XRT_SERVICE_EXECUTABLE;
+#endif
+
+	return ipc_instance_create(&icci, ii, out_xinst);
 }
 
 #else

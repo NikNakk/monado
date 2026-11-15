@@ -9,6 +9,7 @@
  * @ingroup comp_main
  */
 
+#include "vk/vk_pretty_print.h"
 #include "util/u_misc.h"
 
 #include "main/comp_window_direct.h"
@@ -240,7 +241,7 @@ init_swapchain(struct comp_target_swapchain *cts, VkDisplayKHR display, uint32_t
 
 	ret = comp_window_direct_create_surface(cts, display, width, height);
 	if (ret != VK_SUCCESS) {
-		COMP_ERROR(cts->base.c, "Failed to create surface! '%s'", vk_result_string(ret));
+		COMP_ERROR(cts->base.c, "Failed to create surface! '%s'", vk_str_result(ret));
 		return false;
 	}
 

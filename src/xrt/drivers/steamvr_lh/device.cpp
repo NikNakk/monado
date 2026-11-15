@@ -1444,6 +1444,10 @@ Device::handle_generic_property_read(vr::PropertyRead_t &prop)
 vr::ETrackedPropertyError
 Device::handle_property_write(const vr::PropertyWrite_t &prop)
 {
+	if (prop.writeType != vr::EPropertyWriteType::PropertyWrite_Set) {
+		return handle_generic_property_write(prop);
+	}
+
 	switch (prop.prop) {
 	case vr::Prop_ManufacturerName_String: {
 		this->manufacturer = std::string(static_cast<char *>(prop.pvBuffer), prop.unBufferSize);
@@ -1509,7 +1513,7 @@ HmdDevice::init_vive_pro_2(struct xrt_prober *xp)
 
 		if (dev->vendor_id == VP2_VID && dev->product_id == VP2_PID) {
 			DEV_INFO("Found Vive Pro 2 HID device");
-			struct os_hid_device *hid_dev = nullptr;
+			struct h_hid_device *hid_dev = nullptr;
 			ret = xrt_prober_open_hid_interface(xp, dev, 0, &hid_dev);
 			if (ret != 0) {
 				DEV_ERR("Failed to open Vive Pro 2 HID interface");
@@ -1586,6 +1590,10 @@ HmdDevice::init_pimax(pimax_p2_device *pdev)
 vr::ETrackedPropertyError
 HmdDevice::handle_property_write(const vr::PropertyWrite_t &prop)
 {
+	if (prop.writeType != vr::EPropertyWriteType::PropertyWrite_Set) {
+		return handle_generic_property_write(prop);
+	}
+
 	switch (prop.prop) {
 	case vr::Prop_ModelNumber_String: {
 		std::string model_number(static_cast<char *>(prop.pvBuffer), prop.unBufferSize);
@@ -1663,6 +1671,10 @@ HmdDevice::handle_property_write(const vr::PropertyWrite_t &prop)
 vr::ETrackedPropertyError
 ControllerDevice::handle_property_write(const vr::PropertyWrite_t &prop)
 {
+	if (prop.writeType != vr::EPropertyWriteType::PropertyWrite_Set) {
+		return handle_generic_property_write(prop);
+	}
+
 	switch (prop.prop) {
 	case vr::Prop_InputProfilePath_String: {
 		std::string_view profile =

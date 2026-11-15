@@ -1,0 +1,1 @@
+cmake: Add monado_add_openxr_runtime() for building installable OpenXR runtime libraries, also from projects that embed Monado, and build the default libopenxr_monado with it. Its support files, including the manifest template and generator, now live in cmake/openxr_runtime/.

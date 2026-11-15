@@ -1,5 +1,6 @@
 # SPDX-License-Identifier: CC0-1.0
 # SPDX-FileCopyrightText: 2018-2026 Collabora, Ltd. and the Monado contributors
+# SPDX-FileCopyrightText: 2026, NVIDIA CORPORATION.
 
 ###############################################
 # GENERATED - DO NOT EDIT
@@ -60,7 +61,7 @@ stages:
     default: false
   variables:
     MONADO_WIN_BASE_TAG: "20251201.0"
-    MONADO_WIN_MAIN_TAG: "20251201.0"
+    MONADO_WIN_MAIN_TAG: "20261113.0"
     MONADO_BASE_IMAGE_PATH: "win2022/vs2022_base"
     MONADO_MAIN_IMAGE_PATH: "win2022/vs2022"
 
@@ -462,6 +463,15 @@ debian:trixie:32bit:
     - .gitlab-ci/ci-cmake-build.sh -DCMAKE_TOOLCHAIN_FILE=.gitlab-ci/i386.cmake -DXRT_HAVE_OPENCV=OFF
     - cd build && ctest --output-on-failure
 
+
+debian:trixie:examples:
+  stage: build
+  extends:
+    - .monado.image.debian:trixie
+
+  script:
+    - .gitlab-ci/prebuild.sh
+    - .gitlab-ci/ci-cmake-build-examples.sh derived_runtime
 
 debian:bookworm:
   stage: build

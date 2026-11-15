@@ -9,6 +9,7 @@
  * @ingroup comp
  */
 
+#include "vk/vk_pretty_print.h"
 #include <errno.h>
 #include <linux/input.h>
 #include <poll.h>
@@ -184,19 +185,19 @@ comp_window_direct_wayland_create_surface(struct comp_window_direct_wayland *w,
 	ret = vk->vkGetDrmDisplayEXT(vk->physical_device, w->selected_device->drm_fd, w->selected_connector->id,
 	                             &w->vk_display);
 	if (ret != VK_SUCCESS) {
-		COMP_ERROR(w->base.base.c, "vkGetDrmDisplayEXT failed: %s", vk_result_string(ret));
+		COMP_ERROR(w->base.base.c, "vkGetDrmDisplayEXT failed: %s", vk_str_result(ret));
 		return ret;
 	}
 
 	ret = vk->vkAcquireDrmDisplayEXT(vk->physical_device, w->lease->leased_fd, w->vk_display);
 	if (ret != VK_SUCCESS) {
-		COMP_ERROR(w->base.base.c, "vkAcquireDrmDisplayEXT failed: %s", vk_result_string(ret));
+		COMP_ERROR(w->base.base.c, "vkAcquireDrmDisplayEXT failed: %s", vk_str_result(ret));
 		return ret;
 	}
 
 	ret = comp_window_direct_create_surface(&w->base, w->vk_display, width, height);
 	if (ret != VK_SUCCESS) {
-		COMP_ERROR(w->base.base.c, "Failed to create surface: %s", vk_result_string(ret));
+		COMP_ERROR(w->base.base.c, "Failed to create surface: %s", vk_str_result(ret));
 	}
 
 	return ret;

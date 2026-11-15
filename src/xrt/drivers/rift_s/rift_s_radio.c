@@ -42,19 +42,19 @@ struct rift_s_radio_command
 };
 
 static int
-get_radio_response_report(struct os_hid_device *hid, rift_s_hmd_radio_response_t *radio_response)
+get_radio_response_report(struct h_hid_device *hid, rift_s_hmd_radio_response_t *radio_response)
 {
 	int ret;
 
 	radio_response->cmd = 0xb;
-	ret = os_hid_get_feature(hid, radio_response->cmd, (uint8_t *)(radio_response),
-	                         sizeof(rift_s_hmd_radio_response_t));
+	ret = h_hid_get_feature(hid, radio_response->cmd, (uint8_t *)(radio_response),
+	                        sizeof(rift_s_hmd_radio_response_t));
 
 	return ret;
 }
 
 void
-rift_s_radio_update(rift_s_radio_state *state, struct os_hid_device *hid)
+rift_s_radio_update(rift_s_radio_state *state, struct h_hid_device *hid)
 {
 	bool read_another = false;
 
@@ -65,7 +65,7 @@ rift_s_radio_update(rift_s_radio_state *state, struct os_hid_device *hid)
 			rift_s_hmd_radio_command_t *pkt = &cmd->read_command;
 
 			pkt->cmd = 0x12;
-			os_hid_set_feature(hid, (uint8_t *)pkt, sizeof(*pkt));
+			h_hid_set_feature(hid, (uint8_t *)pkt, sizeof(*pkt));
 			// rift_s_hexdump_buffer ("ControllerFWSend", (unsigned char *)(pkt), sizeof(*pkt));
 			state->command_result_pending = true;
 		}

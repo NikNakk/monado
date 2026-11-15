@@ -90,8 +90,10 @@ cli_cmd_probe(int argc, const char **argv)
 		}
 
 		// devices with the same driver name are usually grouped, don't print duplicates
-		if (i > 0 && strcmp(entries[i - 1]->driver_name, entries[i]->driver_name) == 0) {
-			continue;
+		if (i > 0 && entries[i - 1]) {
+			if (strcmp(entries[i - 1]->driver_name, entries[i]->driver_name) == 0) {
+				continue;
+			}
 		}
 
 		printf("\t%s\n", entries[i]->driver_name);

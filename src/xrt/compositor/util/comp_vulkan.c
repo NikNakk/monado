@@ -11,6 +11,7 @@
  * @ingroup comp_util
  */
 
+#include "vk/vk_pretty_print.h"
 #include "os/os_time.h"
 
 #include <string.h>
@@ -27,7 +28,7 @@
  *
  */
 
-#define VK_ERROR_RET(VK, FUNC, MSG, RET) VK_ERROR(VK, FUNC ": %s\n\t" MSG, vk_result_string(RET))
+#define VK_ERROR_RET(VK, FUNC, MSG, RET) VK_ERROR(VK, FUNC ": %s\n\t" MSG, vk_str_result(RET))
 
 #define UUID_STR_SIZE (XRT_UUID_SIZE * 3 + 1)
 

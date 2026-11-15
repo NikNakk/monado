@@ -405,13 +405,13 @@ rift_open_system_impl(struct xrt_builder *xb,
 			return -1;
 		}
 
-		struct os_hid_device *hmd_hid_dev = NULL;
+		struct h_hid_device *hmd_hid_dev = NULL;
 		result = xrt_prober_open_hid_interface(xp, head_xpdev, 0, &hmd_hid_dev);
 		if (result != 0) {
 			return -1;
 		}
 
-		struct os_hid_device *radio_hid_dev = NULL;
+		struct h_hid_device *radio_hid_dev = NULL;
 		if (variant == RIFT_VARIANT_CV1) {
 			result = xrt_prober_open_hid_interface(xp, head_xpdev, 1, &radio_hid_dev);
 			if (result != 0) {

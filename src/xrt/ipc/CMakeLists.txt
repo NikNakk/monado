@@ -184,12 +184,6 @@ target_include_directories(
 	ipc_client PUBLIC ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_CURRENT_BINARY_DIR}
 	)
 if(WIN32)
-	if(XRT_SERVICE_EXECUTABLE)
-		target_compile_definitions(
-			ipc_client PUBLIC XRT_SERVICE_EXECUTABLE="${XRT_SERVICE_EXECUTABLE}.exe"
-			)
-	endif()
-
 	target_link_libraries(ipc_client PRIVATE winmm ws2_32)
 endif()
 target_link_libraries(ipc_client PRIVATE aux_util ipc_shared base)
@@ -323,4 +317,8 @@ elseif(WIN32)
 		)
 
 	target_link_libraries(ipc_server PRIVATE winmm)
+endif()
+
+if(APPLE)
+	target_link_libraries(ipc_client PRIVATE target_ipc_defaults)
 endif()

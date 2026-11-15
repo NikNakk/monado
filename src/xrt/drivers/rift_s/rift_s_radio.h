@@ -26,7 +26,7 @@
 #ifndef RIFT_S_RADIO_H
 #define RIFT_S_RADIO_H
 
-#include "os/os_hid.h"
+#include "hid/h_hid.h"
 #include "xrt/xrt_defines.h"
 
 typedef struct rift_s_radio_command rift_s_radio_command;
@@ -52,7 +52,7 @@ void
 rift_s_radio_state_clear(rift_s_radio_state *state);
 
 void
-rift_s_radio_update(rift_s_radio_state *state, struct os_hid_device *hid);
+rift_s_radio_update(rift_s_radio_state *state, struct h_hid_device *hid);
 void
 rift_s_radio_queue_command(rift_s_radio_state *state,
                            const uint64_t device_id,

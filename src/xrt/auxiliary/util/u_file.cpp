@@ -12,6 +12,7 @@
 
 #include "xrt/xrt_config_os.h"
 #include "util/u_file.h"
+#include "util/u_logging.h"
 
 #ifndef XRT_OS_LINUX
 
@@ -21,14 +22,8 @@
 #include <stdlib.h>
 #include <string.h>
 
-#if __cplusplus >= 201703L
 #include <filesystem>
 namespace fs = std::filesystem;
-#else
-#define _SILENCE_EXPERIMENTAL_FILESYSTEM_DEPRECATION_WARNING
-#include <experimental/filesystem>
-namespace fs = std::experimental::filesystem;
-#endif
 
 
 /*
@@ -64,7 +59,7 @@ get_config_path()
 #ifdef XRT_OS_WINDOWS
 	char *buffer = nullptr;
 	errno_t ret = _dupenv_s(&buffer, nullptr, "LOCALAPPDATA");
-	if (ret != 0) {
+	if (ret != 0 || buffer == nullptr) {
 		return {};
 	}
 
@@ -129,11 +124,15 @@ u_file_open_file_in_config_dir(const char *filename, const char *mode)
 		return file;
 	}
 
-	// Try creating the path.
+	// Try creating the path, using error_code so it doesn't throw into C callers.
 	auto directory = (config_path / filename).parent_path();
-	fs::create_directories(directory);
+	std::error_code ec;
+	fs::create_directories(directory, ec);
+	if (ec) {
+		U_LOG_E("Failed to create '%s': %s", directory.string().c_str(), ec.message().c_str());
+	}
 
-	// Do not report error.
+	// Do not report open error.
 	ret = fopen_s(&file, file_path_string.c_str(), mode);
 	if (ret == 0) {
 		return file;

@@ -112,7 +112,7 @@ rift_sensor_thread_tick(struct rift_hmd *hmd)
 		}
 	}
 
-	result = os_hid_read(hmd->hmd_dev, buf, sizeof(buf), IMU_SAMPLE_RATE);
+	result = h_hid_read(hmd->hmd_dev, buf, sizeof(buf), IMU_SAMPLE_RATE);
 	timepoint_ns recv_time_ns = os_monotonic_get_ns() - RIFT_USB_LATENCY_BIAS;
 
 	if (result < 0) {
@@ -978,13 +978,13 @@ rift_frame_node_destroy(struct xrt_frame_node *node)
 	if (hmd->lens_distortions && debug_get_bool_option_rift_use_firmware_distortion())
 		free((void *)hmd->lens_distortions);
 
-	os_hid_destroy(hmd->hmd_dev);
+	h_hid_destroy(hmd->hmd_dev);
 	if (hmd->radio_dev != NULL) {
 		if (hmd->radio_state.thread.initialized) {
 			os_thread_helper_destroy(&hmd->radio_state.thread);
 		}
 
-		os_hid_destroy(hmd->radio_dev);
+		h_hid_destroy(hmd->radio_dev);
 	}
 
 	if (hmd->device_count >= 0) {
@@ -1026,8 +1026,8 @@ variant_name(enum rift_variant variant)
  */
 
 int
-rift_devices_create(struct os_hid_device *hmd_dev,
-                    struct os_hid_device *radio_dev,
+rift_devices_create(struct h_hid_device *hmd_dev,
+                    struct h_hid_device *radio_dev,
                     enum rift_variant variant,
                     const char *serial_number,
                     struct xrt_frame_context *xfctx,

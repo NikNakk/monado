@@ -105,43 +105,6 @@ void
 vk_print_queues_info(const struct vk_bundle *vk, enum u_logging_level log_level);
 
 
-/*
- *
- * String helper functions.
- *
- */
-
-XRT_CHECK_RESULT const char *
-vk_result_string(VkResult code);
-
-XRT_CHECK_RESULT const char *
-vk_object_type_string(VkObjectType type);
-
-XRT_CHECK_RESULT const char *
-vk_physical_device_type_string(VkPhysicalDeviceType device_type);
-
-XRT_CHECK_RESULT const char *
-vk_format_string(VkFormat code);
-
-XRT_CHECK_RESULT const char *
-vk_sharing_mode_string(VkSharingMode code);
-
-XRT_CHECK_RESULT const char *
-vk_present_mode_string(VkPresentModeKHR code);
-
-XRT_CHECK_RESULT const char *
-vk_color_space_string(VkColorSpaceKHR code);
-
-XRT_CHECK_RESULT const char *
-vk_power_state_string(VkDisplayPowerStateEXT code);
-
-XRT_CHECK_RESULT const char *
-vk_queue_priority_string(VkQueueGlobalPriorityEXT priority);
-
-XRT_CHECK_RESULT const char *
-vk_format_string(VkFormat code);
-
-
 #ifdef __cplusplus
 }
 #endif

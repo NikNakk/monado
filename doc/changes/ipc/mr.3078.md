@@ -1,0 +1,1 @@
+ipc: The target now chooses the socket name, pidfile name and Windows service executable, so several services can run side by side. ipc_instance_create() and ipc_client_connection_init() take a struct ipc_client_connection_info, and the new socket_filename and pid_filename fields of ipc_server_main_info must be set except on Android.

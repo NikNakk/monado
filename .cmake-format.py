@@ -36,6 +36,16 @@ with section("parse"):
             "kwargs": {"ENABLE": "+", "KEEP": "+", "KEEP_SET": "+"},
             "pargs": {"flags": [], "nargs": "*"},
         },
+        "monado_add_openxr_runtime": {
+            "kwargs": {
+                "DEV_MANIFEST_OUTPUT": 1,
+                "LIBMONADO": 1,
+                "LINK_LIBRARIES": "+",
+                "MANIFEST_TEMPLATE": 1,
+                "SOURCES": "+",
+            },
+            "pargs": {"flags": ["INSTALL", "INSTALL_ACTIVE_RUNTIME"], "nargs": 1},
+        },
         "option_with_deps": {
             "kwargs": {"DEFAULT": 1, "DEPENDS": "+"},
             "pargs": {"flags": [], "nargs": "2+"},

@@ -1,5 +1,6 @@
 
 // Copyright 2019-2020, Collabora, Ltd.
+// Copyright 2026, NVIDIA CORPORATION.
 // SPDX-License-Identifier: BSL-1.0
 /*!
  * @file
@@ -9,7 +10,6 @@
  */
 
 #include "xrt/xrt_config.h"
-#include "xrt/xrt_config_build.h"
 
 #ifdef XRT_OS_LINUX
 
@@ -25,9 +25,9 @@
 #include "u_logging.h"
 
 XRT_MAYBE_UNUSED static inline int
-get_pidfile_path(char *buf)
+get_pidfile_path(const char *pid_filename, char *buf)
 {
-	int size = u_file_get_path_in_runtime_dir(XRT_IPC_SERVICE_PID_FILENAME, buf, PATH_MAX);
+	int size = u_file_get_path_in_runtime_dir(pid_filename, buf, PATH_MAX);
 	if (size == -1) {
 		U_LOG_W("Failed to determine runtime dir, not creating pidfile");
 		return -1;
@@ -49,11 +49,11 @@ struct u_process
 };
 
 struct u_process *
-u_process_create_if_not_running(void)
+u_process_create_if_not_running(const char *pid_filename)
 {
 #ifdef XRT_HAVE_LIBBSD
 	char tmp[PATH_MAX] = {0};
-	if (get_pidfile_path(tmp) < 0) {
+	if (get_pidfile_path(pid_filename, tmp) < 0) {
 		U_LOG_W("Failed to determine runtime dir, not creating pidfile");
 		return NULL;
 	}
@@ -65,7 +65,7 @@ u_process_create_if_not_running(void)
 	if (pfh == NULL) {
 		// other process is locking pid file
 		if (errno == EEXIST) {
-			U_LOG_E("Monado is already running, pid %d", otherpid);
+			U_LOG_E("Another service instance is already running, pid %d", otherpid);
 		}
 		U_LOG_E("Failed to create pidfile %s: %s", tmp, strerror(errno));
 		return NULL;
@@ -81,7 +81,7 @@ u_process_create_if_not_running(void)
 	struct u_process *ret = U_TYPED_CALLOC(struct u_process);
 	ret->pfh = pfh;
 
-	U_LOG_T("No other Monado instance was running, got new pidfile");
+	U_LOG_T("No other service instance was running, got new pidfile");
 	return ret;
 #else
 	struct u_process *ret = U_TYPED_CALLOC(struct u_process);

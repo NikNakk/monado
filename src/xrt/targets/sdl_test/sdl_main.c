@@ -1,5 +1,5 @@
 // Copyright 2019-2022, Collabora, Ltd.
-// Copyright 2024-2025, NVIDIA CORPORATION.
+// Copyright 2024-2026, NVIDIA CORPORATION.
 // SPDX-License-Identifier: BSL-1.0
 /*!
  * @file
@@ -10,6 +10,8 @@
 #include "util/u_trace_marker.h"
 
 #include "server/ipc_server_interface.h"
+
+#include "target_ipc_defaults.h"
 
 #include <SDL2/SDL.h>
 #include <SDL2/SDL_main.h>
@@ -30,6 +32,8 @@ main(int argc, char *argv[])
 	            .window_title = "Monado SDL Test Debug GUI",
 	            .open = U_DEBUG_GUI_OPEN_AUTO,
 	        },
+	    .socket_filename = XRT_IPC_MSG_SOCK_FILENAME,
+	    .pid_filename = XRT_IPC_SERVICE_PID_FILENAME,
 	};
 
 	return ipc_server_main(argc, argv, &ismi);

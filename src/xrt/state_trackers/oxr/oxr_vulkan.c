@@ -9,6 +9,7 @@
  * @ingroup oxr_main
  */
 
+#include "vk/vk_pretty_print.h"
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
@@ -299,7 +300,7 @@ oxr_vk_create_vulkan_instance(struct oxr_logger *log,
 		struct oxr_sink_logger slog = {0};
 
 		oxr_slog(&slog, "Creation of VkInstance:");
-		oxr_slog(&slog, "\n\tresult: %s", vk_result_string(*vulkanResult));
+		oxr_slog(&slog, "\n\tresult: %s", vk_str_result(*vulkanResult));
 		oxr_slog(&slog, "\n\tvulkanInstance: 0x%" PRIx64, (uint64_t)(intptr_t)*vulkanInstance);
 		oxr_slog(&slog, "\n\textensions:");
 		for (uint32_t i = 0; i < modified_info.enabledExtensionCount; i++) {
@@ -554,7 +555,7 @@ oxr_vk_create_vulkan_device(struct oxr_logger *log,
 		struct oxr_sink_logger slog = {0};
 
 		oxr_slog(&slog, "Creation of VkDevice:");
-		oxr_slog(&slog, "\n\tresult: %s", vk_result_string(*vulkanResult));
+		oxr_slog(&slog, "\n\tresult: %s", vk_str_result(*vulkanResult));
 		oxr_slog(&slog, "\n\tvulkanDevice: 0x%" PRIx64, (uint64_t)(intptr_t)*vulkanDevice);
 		oxr_slog(&slog, "\n\tvulkanInstance: 0x%" PRIx64, (uint64_t)(intptr_t)sys->vulkan_enable2_instance);
 #if defined(XRT_GRAPHICS_SYNC_HANDLE_IS_FD)

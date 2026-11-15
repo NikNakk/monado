@@ -59,6 +59,8 @@ add_library(
 	vk_image_readback_to_xf_pool.c
 	vk_image_readback_to_xf_pool.h
 	vk_mini_helpers.h
+	vk_pretty_print.c
+	vk_pretty_print.h
 	vk_queue_builder.c
 	vk_queue_builder.h
 	vk_queue_family.c

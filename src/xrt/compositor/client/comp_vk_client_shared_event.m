@@ -8,6 +8,7 @@
 
 #import <Metal/Metal.h>
 
+#include "vk/vk_pretty_print.h"
 #include "xrt/xrt_config_build.h"
 #include "client/comp_vk_client_shared_event.h"
 #include "util/comp_metal_semaphore_provider.h"
@@ -97,7 +98,7 @@ client_vk_shared_event_create(struct xrt_compositor_native *xcn,
 		VkSemaphore semaphore = VK_NULL_HANDLE;
 		VkResult ret = vk->vkCreateSemaphore(vk->device, &create_info, NULL, &semaphore);
 		if (ret != VK_SUCCESS) {
-			VK_ERROR(vk, "vkCreateSemaphore importing MTLSharedEvent: %s", vk_result_string(ret));
+			VK_ERROR(vk, "vkCreateSemaphore importing MTLSharedEvent: %s", vk_str_result(ret));
 			xrt_compositor_semaphore_reference(&xcsem, NULL);
 			return XRT_ERROR_VULKAN;
 		}

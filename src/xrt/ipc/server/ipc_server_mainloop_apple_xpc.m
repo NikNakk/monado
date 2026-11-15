@@ -392,11 +392,11 @@ poll_display_sleep_assertion(struct ipc_server *vs)
 }
 
 int
-ipc_server_mainloop_init(struct ipc_server_mainloop *ml, bool no_stdin)
+ipc_server_mainloop_init(struct ipc_server_mainloop *ml, const char *socket_filename, bool no_stdin)
 {
 	reset_compositor_window_tracking();
 
-	int ret = ipc_server_mainloop_apple_init(ml, no_stdin);
+	int ret = ipc_server_mainloop_apple_init(ml, socket_filename, no_stdin);
 	if (ret < 0) {
 		return ret;
 	}

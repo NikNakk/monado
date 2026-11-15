@@ -7,6 +7,7 @@
  * @ingroup comp_util
  */
 
+#include "vk/vk_pretty_print.h"
 #include "xrt/xrt_compiler.h"
 #include "xrt/xrt_handles.h"
 #include "xrt/xrt_config_os.h"
@@ -127,7 +128,7 @@ debug_wait_for_compositor_queue_idle(struct comp_swapchain *sc, uint32_t index)
 	vk_queue_unlock(vk->main_queue);
 
 	if (ret != VK_SUCCESS) {
-		VK_ERROR(vk, "Diagnostic vkQueueWaitIdle before reuse of image %u: %s", index, vk_result_string(ret));
+		VK_ERROR(vk, "Diagnostic vkQueueWaitIdle before reuse of image %u: %s", index, vk_str_result(ret));
 		return XRT_ERROR_VULKAN;
 	}
 
@@ -369,14 +370,14 @@ do_post_create_vulkan_setup(struct vk_bundle *vk,
 	if (info->create & XRT_SWAPCHAIN_CREATE_SAMPLE_AS_SRGB) {
 		VkFormat srgb_format = vk_format_convert_unorm_to_srgb(image_view_format);
 		if (srgb_format == VK_FORMAT_UNDEFINED) {
-			VK_ERROR(vk, "Could not find sRGB format for format %s", vk_format_string(image_view_format));
+			VK_ERROR(vk, "Could not find sRGB format for format %s", vk_str_format(image_view_format));
 			return XRT_ERROR_SWAPCHAIN_FORMAT_UNSUPPORTED;
 		}
 
 		image_view_format = srgb_format;
 
 		VK_DEBUG(vk, "Using sRGB format %s for swapchain image views instead of UNORM format %s",
-		         vk_format_string(image_view_format), vk_format_string((VkFormat)info->format));
+		         vk_str_format(image_view_format), vk_str_format((VkFormat)info->format));
 	}
 
 	// These views are only consumed by the compositor as sampled source images, so don't inherit any other bits
@@ -384,8 +385,7 @@ do_post_create_vulkan_setup(struct vk_bundle *vk,
 	enum xrt_swapchain_usage_bits image_view_bits = XRT_SWAPCHAIN_USAGE_SAMPLED;
 	VkImageUsageFlags image_view_usage = vk_csci_get_image_usage_flags(vk, image_view_format, image_view_bits);
 	if (image_view_usage == 0) {
-		VK_ERROR(vk, "Could not derive image view usage flags for format %s",
-		         vk_format_string(image_view_format));
+		VK_ERROR(vk, "Could not derive image view usage flags for format %s", vk_str_format(image_view_format));
 		return XRT_ERROR_SWAPCHAIN_FORMAT_UNSUPPORTED;
 	}
 
@@ -579,7 +579,7 @@ comp_swapchain_create_init(struct comp_swapchain *sc,
 	VK_DEBUG(vk, "CREATE %p %" PRIu32 "x%" PRIu32 " %s (%" PRIu32 ")", //
 	         (void *)sc,                                               //
 	         info->width, info->height,                                //
-	         vk_format_string(info->format), info->format);
+	         vk_str_format(info->format), info->format);
 
 	if ((info->create & XRT_SWAPCHAIN_CREATE_PROTECTED_CONTENT) != 0) {
 		VK_WARN(vk,
@@ -648,7 +648,7 @@ comp_swapchain_import_init(struct comp_swapchain *sc,
 	VK_DEBUG(vk, "IMPORT %p %" PRIu32 "x%" PRIu32 " %s (%" PRIu32 ")", //
 	         (void *)sc,                                               //
 	         info->width, info->height,                                //
-	         vk_format_string(info->format), info->format);
+	         vk_str_format(info->format), info->format);
 
 	set_common_fields(sc, destroy_func, vk, cscs, native_image_count);
 
@@ -719,7 +719,7 @@ comp_swapchain_shared_init(struct comp_swapchain_shared *cscs, struct vk_bundle 
 {
 	VkResult ret = vk_cmd_pool_init(vk, &cscs->pool, 0);
 	if (ret != VK_SUCCESS) {
-		VK_ERROR(vk, "vk_cmd_pool_init: %s", vk_result_string(ret));
+		VK_ERROR(vk, "vk_cmd_pool_init: %s", vk_str_result(ret));
 		return XRT_ERROR_VULKAN;
 	}
 

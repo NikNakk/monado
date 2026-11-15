@@ -9,6 +9,7 @@
  * @ingroup aux_vk
  */
 
+#include "vk/vk_pretty_print.h"
 #include <xrt/xrt_handles.h>
 
 #include "util/u_misc.h"
@@ -130,7 +131,7 @@ vk_create_and_submit_fence_native(struct vk_bundle *vk, xrt_graphics_sync_handle
 
 	ret = vk->vkCreateFence(vk->device, &create_info, NULL, &fence);
 	if (ret != VK_SUCCESS) {
-		VK_ERROR(vk, "vkCreateFence: %s", vk_result_string(ret));
+		VK_ERROR(vk, "vkCreateFence: %s", vk_str_result(ret));
 		return ret;
 	}
 
@@ -153,7 +154,7 @@ vk_create_and_submit_fence_native(struct vk_bundle *vk, xrt_graphics_sync_handle
 	vk_queue_unlock(vk->main_queue);
 
 	if (ret != VK_SUCCESS) {
-		VK_ERROR(vk, "vkQueueSubmit: %s", vk_result_string(ret));
+		VK_ERROR(vk, "vkQueueSubmit: %s", vk_str_result(ret));
 		vk->vkDestroyFence(vk->device, fence, NULL);
 		return ret;
 	}
@@ -172,7 +173,7 @@ vk_create_and_submit_fence_native(struct vk_bundle *vk, xrt_graphics_sync_handle
 
 	ret = vk->vkGetFenceFdKHR(vk->device, &get_fd_info, &native);
 	if (ret != VK_SUCCESS) {
-		VK_ERROR(vk, "vkGetFenceFdKHR: %s", vk_result_string(ret));
+		VK_ERROR(vk, "vkGetFenceFdKHR: %s", vk_str_result(ret));
 		vk->vkDestroyFence(vk->device, fence, NULL);
 		return ret;
 	}
@@ -186,7 +187,7 @@ vk_create_and_submit_fence_native(struct vk_bundle *vk, xrt_graphics_sync_handle
 
 	ret = vk->vkGetFenceWin32HandleKHR(vk->device, &get_handle_info, &native);
 	if (ret != VK_SUCCESS) {
-		VK_ERROR(vk, "vkGetFenceWin32HandleKHR: %s", vk_result_string(ret));
+		VK_ERROR(vk, "vkGetFenceWin32HandleKHR: %s", vk_str_result(ret));
 		vk->vkDestroyFence(vk->device, fence, NULL);
 		return ret;
 	}
@@ -237,7 +238,7 @@ create_semaphore_and_native(struct vk_bundle *vk,
 	    NULL,                    // pAllocator
 	    &semaphore);             // pSemaphore
 	if (ret != VK_SUCCESS) {
-		VK_ERROR(vk, "vkCreateSemaphore: %s", vk_result_string(ret));
+		VK_ERROR(vk, "vkCreateSemaphore: %s", vk_str_result(ret));
 		return ret;
 	}
 
@@ -250,7 +251,7 @@ create_semaphore_and_native(struct vk_bundle *vk,
 
 	ret = vk->vkGetSemaphoreFdKHR(vk->device, &get_fd_info, &native);
 	if (ret != VK_SUCCESS) {
-		VK_ERROR(vk, "vkGetSemaphoreFdKHR: %s", vk_result_string(ret));
+		VK_ERROR(vk, "vkGetSemaphoreFdKHR: %s", vk_str_result(ret));
 		vk->vkDestroySemaphore(vk->device, semaphore, NULL);
 		return ret;
 	}
@@ -263,7 +264,7 @@ create_semaphore_and_native(struct vk_bundle *vk,
 
 	ret = vk->vkGetSemaphoreWin32HandleKHR(vk->device, &get_handle_info, &native);
 	if (ret != VK_SUCCESS) {
-		VK_ERROR(vk, "vkGetSemaphoreWin32HandleKHR: %s", vk_result_string(ret));
+		VK_ERROR(vk, "vkGetSemaphoreWin32HandleKHR: %s", vk_str_result(ret));
 		vk->vkDestroySemaphore(vk->device, semaphore, NULL);
 		return ret;
 	}
@@ -347,7 +348,7 @@ vk_create_fence_sync_from_native(struct vk_bundle *vk, xrt_graphics_sync_handle_
 
 	ret = vk->vkCreateFence(vk->device, &create_info, NULL, &fence);
 	if (ret != VK_SUCCESS) {
-		VK_ERROR(vk, "vkCreateFence: %s", vk_result_string(ret));
+		VK_ERROR(vk, "vkCreateFence: %s", vk_str_result(ret));
 		return ret;
 	}
 
@@ -370,7 +371,7 @@ vk_create_fence_sync_from_native(struct vk_bundle *vk, xrt_graphics_sync_handle_
 	ret = vk->vkImportFenceFdKHR(vk->device, &import_info);
 	if (ret != VK_SUCCESS) {
 		vk->vkDestroyFence(vk->device, fence, NULL);
-		VK_ERROR(vk, "vkImportFenceFdKHR: %s", vk_result_string(ret));
+		VK_ERROR(vk, "vkImportFenceFdKHR: %s", vk_str_result(ret));
 		return ret;
 	}
 #elif defined(XRT_GRAPHICS_SYNC_HANDLE_IS_WIN32_HANDLE)
@@ -389,7 +390,7 @@ vk_create_fence_sync_from_native(struct vk_bundle *vk, xrt_graphics_sync_handle_
 	ret = vk->vkImportFenceWin32HandleKHR(vk->device, &import_info);
 	if (ret != VK_SUCCESS) {
 		vk->vkDestroyFence(vk->device, fence, NULL);
-		VK_ERROR(vk, "vkImportFenceFdKHR: %s", vk_result_string(ret));
+		VK_ERROR(vk, "vkImportFenceFdKHR: %s", vk_str_result(ret));
 		return ret;
 	}
 #else
@@ -417,7 +418,7 @@ create_semaphore_from_native(struct vk_bundle *vk,
 
 	ret = vk->vkCreateSemaphore(vk->device, &semaphore_create_info, NULL, out_sem);
 	if (ret != VK_SUCCESS) {
-		VK_ERROR(vk, "vkCreateSemaphore: %s", vk_result_string(ret));
+		VK_ERROR(vk, "vkCreateSemaphore: %s", vk_str_result(ret));
 		// Nothing to cleanup
 		return ret;
 	}
@@ -432,7 +433,7 @@ create_semaphore_from_native(struct vk_bundle *vk,
 
 	ret = vk->vkImportSemaphoreFdKHR(vk->device, &import_semaphore_fd_info);
 	if (ret != VK_SUCCESS) {
-		VK_ERROR(vk, "vkImportSemaphoreFdKHR: %s", vk_result_string(ret));
+		VK_ERROR(vk, "vkImportSemaphoreFdKHR: %s", vk_str_result(ret));
 		vk->vkDestroySemaphore(vk->device, *out_sem, NULL);
 		return ret;
 	}
@@ -446,7 +447,7 @@ create_semaphore_from_native(struct vk_bundle *vk,
 
 	ret = vk->vkImportSemaphoreWin32HandleKHR(vk->device, &import_semaphore_handle_info);
 	if (ret != VK_SUCCESS) {
-		VK_ERROR(vk, "vkImportSemaphoreWin32HandleKHR: %s", vk_result_string(ret));
+		VK_ERROR(vk, "vkImportSemaphoreWin32HandleKHR: %s", vk_str_result(ret));
 		vk->vkDestroySemaphore(vk->device, *out_sem, NULL);
 		return ret;
 	}

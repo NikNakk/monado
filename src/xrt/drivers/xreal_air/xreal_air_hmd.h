@@ -12,7 +12,7 @@
 #include "xrt/xrt_device.h"
 #include "xrt/xrt_prober.h"
 
-#include "os/os_hid.h"
+#include "hid/h_hid.h"
 
 #include "util/u_logging.h"
 
@@ -155,8 +155,8 @@ struct xreal_air_parsed_control
  * @ingroup drv_xreal_air
  */
 struct xrt_device *
-xreal_air_hmd_create_device(struct os_hid_device *sensor_device,
-                            struct os_hid_device *control_device,
+xreal_air_hmd_create_device(struct h_hid_device *sensor_device,
+                            struct h_hid_device *control_device,
                             enum u_logging_level log_level,
                             uint16_t max_sensor_buffer_size);
 

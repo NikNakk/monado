@@ -395,8 +395,23 @@ enumerate_blend_modes_locked(struct oxr_logger *log,
 		return oxr_error(log, XR_ERROR_RUNTIME_FAILURE, "Didn't find view configs");
 	}
 
+#ifdef OXR_HAVE_FB_composition_layer_alpha_blend
+	bool filter_opaque_only = sys->inst->extensions.FB_composition_layer_alpha_blend;
+	XrEnvironmentBlendMode blend_modes[XRT_MAX_DEVICE_BLEND_MODES];
+	uint32_t blend_mode_count = 0;
+	for (uint32_t i = 0; i < props->blend_mode_count; i++) {
+		if (filter_opaque_only && props->blend_modes[i] != XR_ENVIRONMENT_BLEND_MODE_OPAQUE) {
+			continue;
+		}
+		blend_modes[blend_mode_count++] = props->blend_modes[i];
+	}
+#else
+	uint32_t blend_mode_count = props->blend_mode_count;
+	XrEnvironmentBlendMode *blend_modes = props->blend_modes;
+#endif
+
 	OXR_TWO_CALL_HELPER(log, environmentBlendModeCapacityInput, environmentBlendModeCountOutput,
-	                    environmentBlendModes, props->blend_mode_count, props->blend_modes, XR_SUCCESS);
+	                    environmentBlendModes, blend_mode_count, blend_modes, XR_SUCCESS);
 }
 
 static XrResult

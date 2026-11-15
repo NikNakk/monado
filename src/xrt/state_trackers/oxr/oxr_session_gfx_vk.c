@@ -9,6 +9,7 @@
  * @ingroup comp_client
  */
 
+#include "vk/vk_pretty_print.h"
 #include "xrt/xrt_instance.h"
 #include "xrt/xrt_handles.h"
 #include "xrt/xrt_gfx_vk.h"
@@ -44,7 +45,7 @@ check_for_layer_mnd_enable_timeline_semaphore(struct oxr_logger *log,
 
 	ret = func(physical_device, &prop_count, NULL);
 	if (ret != VK_SUCCESS) {
-		oxr_log(log, "vkEnumerateDeviceLayerProperties: %s", vk_result_string(ret));
+		oxr_log(log, "vkEnumerateDeviceLayerProperties: %s", vk_str_result(ret));
 		return false;
 	}
 
@@ -58,7 +59,7 @@ check_for_layer_mnd_enable_timeline_semaphore(struct oxr_logger *log,
 
 	ret = func(physical_device, &prop_count, props);
 	if (ret != VK_SUCCESS) {
-		oxr_log(log, "vkEnumerateDeviceLayerProperties: %s", vk_result_string(ret));
+		oxr_log(log, "vkEnumerateDeviceLayerProperties: %s", vk_str_result(ret));
 		free(props);
 		return false;
 	}

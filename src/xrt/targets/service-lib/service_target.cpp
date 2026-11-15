@@ -1,5 +1,5 @@
 // Copyright 2020, Collabora, Ltd.
-// Copyright 2024-2025, NVIDIA CORPORATION.
+// Copyright 2024-2026, NVIDIA CORPORATION.
 // SPDX-License-Identifier: BSL-1.0
 /*!
  * @file
@@ -148,6 +148,8 @@ private:
 	        },
 	    .exit_on_disconnect = false,
 	    .no_stdin = false,
+	    .socket_filename = nullptr,
+	    .pid_filename = nullptr,
 	};
 
 	const struct ipc_server_callbacks callbacks = {

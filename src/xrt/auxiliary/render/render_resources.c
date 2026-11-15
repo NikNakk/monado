@@ -1283,7 +1283,7 @@ render_resources_get_timestamps(struct render_resources *r, uint64_t *out_gpu_st
 	struct vk_bundle *vk = r->vk;
 	VkResult ret = VK_SUCCESS;
 
-	// Simple pre-check, needed by vk_convert_timestamps_to_host_ns.
+	// Simple pre-check, needed by vk_convert_device_timestamps_to_host_ns.
 	if (!vk->has_EXT_calibrated_timestamps && !vk->has_KHR_calibrated_timestamps) {
 		return false;
 	}
@@ -1311,7 +1311,7 @@ render_resources_get_timestamps(struct render_resources *r, uint64_t *out_gpu_st
 	 * Convert from GPU context to CPU context, has to be
 	 * done fairly quickly after timestamps has been made.
 	 */
-	ret = vk_convert_timestamps_to_host_ns(vk, 2, timestamps);
+	ret = vk_convert_device_timestamps_to_host_ns(vk, 2, timestamps);
 	if (ret != VK_SUCCESS) {
 		return false;
 	}

@@ -10,7 +10,7 @@
 
 #include "xrt/xrt_prober.h"
 
-#include "os/os_hid.h"
+#include "hid/h_hid.h"
 #include "os/os_threading.h"
 #include "os/os_time.h"
 
@@ -449,7 +449,7 @@ struct pssense_device
 	struct t_constellation_tracker_tracking_source constellation_tracking_source;
 
 	bool usb;
-	struct os_hid_device *hid;
+	struct h_hid_device *hid;
 	/*!
 	 * PSSENSE_RECONNECT: the controller thread opens the HID itself when the controller connects (also after a
 	 * disconnect) instead of ending. connected is guarded by the controller thread lock.
@@ -972,7 +972,7 @@ pssense_read_packet_data(struct pssense_device *pssense,
                          timepoint_ns *out_receive_timestamp_ns)
 {
 	// Poll, don't block. Outer thread needs to run quick
-	int ret = os_hid_read_with_timestamp(pssense->hid, buffer, size, 0, out_receive_timestamp_ns);
+	int ret = h_hid_read_with_timestamp(pssense->hid, buffer, size, 0, out_receive_timestamp_ns);
 
 	// No data yet
 	if (ret == 0) {
@@ -1654,7 +1654,7 @@ pssense_set_pc_polling_rate(struct pssense_device *pssense)
 	crc = crc32_le(crc, (uint8_t *)&report, sizeof(struct pssense_set_polling_rate_feature_report) - 4);
 	report.crc = __cpu_to_le32(crc);
 
-	int ret = os_hid_set_feature(pssense->hid, (uint8_t *)&report, sizeof report);
+	int ret = h_hid_set_feature(pssense->hid, (uint8_t *)&report, sizeof report);
 	if (ret < 0) {
 		PSSENSE_ERROR(pssense, "Failed to set PC polling rate, reason %d", ret);
 		return false;
@@ -1761,9 +1761,9 @@ static bool
 pssense_try_connect(struct pssense_device *pssense)
 {
 #ifdef XRT_OS_OSX
-	struct os_hid_device *hid = NULL;
+	struct h_hid_device *hid = NULL;
 	char product[128] = {0};
-	if (os_hid_open_iokit_bluetooth(PSSENSE_VID, pssense->product_id, &hid, product, sizeof(product)) != 0) {
+	if (h_hid_open_iokit_bluetooth(PSSENSE_VID, pssense->product_id, &hid, product, sizeof(product)) != 0) {
 		return false;
 	}
 
@@ -1778,7 +1778,7 @@ pssense_try_connect(struct pssense_device *pssense)
 		os_thread_helper_lock(&pssense->controller_thread);
 		pssense->hid = NULL;
 		os_thread_helper_unlock(&pssense->controller_thread);
-		os_hid_destroy(hid);
+		h_hid_destroy(hid);
 		return false;
 	}
 	if (debug_get_bool_option_pssense_pc_polling_rate() && !pssense_set_pc_polling_rate(pssense)) {
@@ -1803,14 +1803,14 @@ static void
 pssense_disconnect(struct pssense_device *pssense, int result)
 {
 	os_thread_helper_lock(&pssense->controller_thread);
-	struct os_hid_device *hid = pssense->hid;
+	struct h_hid_device *hid = pssense->hid;
 	pssense->hid = NULL;
 	pssense->connected = false;
 	pssense_reset_connection_locked(pssense);
 	os_thread_helper_unlock(&pssense->controller_thread);
 	pssense_set_connected_bit(pssense, false);
 	if (hid != NULL) {
-		os_hid_destroy(hid);
+		h_hid_destroy(hid);
 	}
 	PSSENSE_WARN(pssense, "CONNECTION side=%c event=disconnected result=%d, waiting for it to reconnect",
 	             pssense->hand == XRT_HAND_LEFT ? 'L' : 'R', result);
@@ -1872,7 +1872,7 @@ pssense_run_thread(void *ptr)
 
 				const bool trace_write = debug_get_bool_option_pssense_timing_diag();
 				int64_t write_start_ns = trace_write ? os_monotonic_get_ns() : 0;
-				int written = os_hid_write(pssense->hid, output_report, output_size);
+				int written = h_hid_write(pssense->hid, output_report, output_size);
 				int64_t write_end_ns = trace_write ? os_monotonic_get_ns() : 0;
 				if (trace_write)
 					pssense_log_written_report(pssense, output_report, output_size, write_start_ns,
@@ -2151,8 +2151,8 @@ pssense_get_calibration_data(struct pssense_device *pssense)
 		// Calibration has to be read in two parts with two feature reads.
 		for (int i = 0; i < 2; i++) {
 			struct pssense_feature_report report_buffer = {.report_id = CALIBRATION_DATA_FEATURE_REPORT_ID};
-			int ret = os_hid_get_feature(pssense->hid, report_buffer.report_id, (uint8_t *)&report_buffer,
-			                             sizeof(report_buffer));
+			int ret = h_hid_get_feature(pssense->hid, report_buffer.report_id, (uint8_t *)&report_buffer,
+			                            sizeof(report_buffer));
 
 			if (ret < 0) {
 				PSSENSE_ERROR(pssense, "Failed to retrieve calibration report: %d", ret);
@@ -2397,7 +2397,7 @@ pssense_node_destroy(struct xrt_frame_node *node)
 	m_clock_windowed_skew_tracker_destroy(pssense->timing.clock_tracker);
 
 	if (pssense->hid != NULL) {
-		os_hid_destroy(pssense->hid);
+		h_hid_destroy(pssense->hid);
 		pssense->hid = NULL;
 	}
 
@@ -4046,7 +4046,7 @@ pssense_get_battery_status(struct xrt_device *xdev, bool *out_present, bool *out
 #define SET_INPUT(NAME) (pssense->base.inputs[PSSENSE_INDEX_##NAME].name = XRT_INPUT_PSSENSE_##NAME)
 
 static struct xrt_device *
-pssense_create_internal(struct os_hid_device *hid,
+pssense_create_internal(struct h_hid_device *hid,
                         const char *product_name,
                         uint16_t product_id,
                         bool usb,
@@ -4059,7 +4059,7 @@ pssense_create(struct xrt_prober *xp,
                struct xrt_frame_context *xfctx,
                struct t_timing_event_sink **out_timing_sink)
 {
-	struct os_hid_device *hid = NULL;
+	struct h_hid_device *hid = NULL;
 	int ret;
 
 	// On USB, we need to use interface 2, rather than 0 like on Bluetooth.
@@ -4110,7 +4110,7 @@ pssense_create_disconnected(uint16_t product_id,
 }
 
 static struct xrt_device *
-pssense_create_internal(struct os_hid_device *hid,
+pssense_create_internal(struct h_hid_device *hid,
                         const char *product_name,
                         uint16_t product_id,
                         bool usb,

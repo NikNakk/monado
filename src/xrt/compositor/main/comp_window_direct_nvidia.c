@@ -8,6 +8,7 @@
  * @ingroup comp_main
  */
 
+#include "vk/vk_pretty_print.h"
 #include "util/u_misc.h"
 #include "util/u_pretty_print.h"
 
@@ -216,7 +217,7 @@ comp_window_direct_nvidia_init(struct comp_target *ct)
 	    &display_count,                                    //
 	    &display_props);                                   //
 	if (ret != VK_SUCCESS) {
-		COMP_ERROR(ct->c, "vk_enumerate_physical_device_display_properties: %s", vk_result_string(ret));
+		COMP_ERROR(ct->c, "vk_enumerate_physical_device_display_properties: %s", vk_str_result(ret));
 		return false;
 	}
 

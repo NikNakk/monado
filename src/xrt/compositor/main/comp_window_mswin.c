@@ -9,6 +9,7 @@
  * @ingroup comp_main
  */
 
+#include "vk/vk_pretty_print.h"
 #include <stdlib.h>
 #include <string.h>
 #include "xrt/xrt_compiler.h"
@@ -54,7 +55,7 @@ static WCHAR szWindowData[] = L"MonadoWindow";
 		DWORD err = GetLastError();                                                                            \
 		char *buf = NULL;                                                                                      \
 		if (0 != FormatMessageA(FORMAT_MESSAGE_ALLOCATE_BUFFER | FORMAT_MESSAGE_FROM_SYSTEM, NULL, err,        \
-		                        LANG_SYSTEM_DEFAULT, (LPSTR)&buf, 256, NULL)) {                                \
+		                        LANG_SYSTEM_DEFAULT, (LPSTR) & buf, 256, NULL)) {                              \
 			COMP_ERROR(C, MSG_WITH_PLACEHOLDER, buf);                                                      \
 			LocalFree(buf);                                                                                \
 		} else {                                                                                               \
@@ -161,7 +162,7 @@ comp_window_mswin_create_surface(struct comp_window_mswin *w, VkSurfaceKHR *out_
 	    NULL,                          //
 	    &surface);                     //
 	if (ret != VK_SUCCESS) {
-		COMP_ERROR(w->base.base.c, "vkCreateWin32SurfaceKHR: %s", vk_result_string(ret));
+		COMP_ERROR(w->base.base.c, "vkCreateWin32SurfaceKHR: %s", vk_str_result(ret));
 		return ret;
 	}
 
@@ -179,7 +180,7 @@ comp_window_mswin_init_swapchain(struct comp_target *ct, uint32_t width, uint32_
 
 	ret = comp_window_mswin_create_surface(cwm, &cwm->base.surface.handle);
 	if (ret != VK_SUCCESS) {
-		COMP_ERROR(ct->c, "Failed to create surface '%s'!", vk_result_string(ret));
+		COMP_ERROR(ct->c, "Failed to create surface '%s'!", vk_str_result(ret));
 		return false;
 	}
 

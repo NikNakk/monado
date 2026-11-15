@@ -54,7 +54,7 @@ blubur_s1_hmd_destroy(struct xrt_device *xdev)
 	}
 
 	if (hmd->dev != NULL) {
-		os_hid_destroy(hmd->dev);
+		h_hid_destroy(hmd->dev);
 		hmd->dev = NULL;
 	}
 
@@ -389,7 +389,7 @@ blubur_s1_hmd_tick(struct blubur_s1_hmd *hmd)
 	int result;
 
 	uint8_t data[64];
-	result = os_hid_read(hmd->dev, data, sizeof data, 1000);
+	result = h_hid_read(hmd->dev, data, sizeof data, 1000);
 	if (result == 0) {
 		// timeout
 		S1_TRACE(hmd, "Read timeout");
@@ -518,7 +518,7 @@ static struct xrt_binding_profile blubur_s1_hmd_binding_profiles[] = {
 };
 
 struct blubur_s1_hmd *
-blubur_s1_hmd_create(struct os_hid_device *dev, const char *serial)
+blubur_s1_hmd_create(struct h_hid_device *dev, const char *serial)
 {
 	int ret;
 

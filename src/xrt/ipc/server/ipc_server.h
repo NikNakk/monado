@@ -407,11 +407,14 @@ ipc_server_mainloop_deinit(struct ipc_server_mainloop *ml);
 /*!
  * Initialize the mainloop object.
  *
+ * @param ml              The mainloop to initialize.
+ * @param socket_filename Socket filename (named pipe name on Windows) in the runtime dir, ignored on Android.
+ * @param no_stdin        Don't listen on stdin for a request to stop the server.
  * @return <0 on error.
  * @public @memberof ipc_server_mainloop
  */
 int
-ipc_server_mainloop_init(struct ipc_server_mainloop *ml, bool no_stdin);
+ipc_server_mainloop_init(struct ipc_server_mainloop *ml, const char *socket_filename, bool no_stdin);
 
 /*!
  * @brief Poll the mainloop.
@@ -429,7 +432,7 @@ ipc_server_mainloop_poll(struct ipc_server *vs, struct ipc_server_mainloop *ml);
  * directly as the functions above.
  */
 int
-ipc_server_mainloop_apple_init(struct ipc_server_mainloop *ml, bool no_stdin);
+ipc_server_mainloop_apple_init(struct ipc_server_mainloop *ml, const char *socket_filename, bool no_stdin);
 
 void
 ipc_server_mainloop_apple_poll(struct ipc_server *vs, struct ipc_server_mainloop *ml);

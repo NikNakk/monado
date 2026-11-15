@@ -1465,7 +1465,7 @@ oxr_create_xrt_session_and_native_compositor(struct oxr_logger *log,
                                              const struct xrt_session_info *xsi,
                                              struct oxr_session *sess)
 {
-	if (sess->sys->xsysc == NULL) {
+	if (sess == NULL || sess->sys == NULL || sess->sys->xsysc == NULL) {
 		return oxr_error(log, XR_ERROR_RUNTIME_FAILURE,
 		                 "The system compositor wasn't created, can't create native compositor!");
 	}
@@ -1730,6 +1730,10 @@ oxr_session_create_impl(struct oxr_logger *log,
 		ret = oxr_session_allocate_and_init(log, sys, OXR_SESSION_GRAPHICS_EXT_HEADLESS, out_session);
 		OXR_CHECK_XR_SUCCESS(log, ret, "Failed to allocate session");
 
+		if (*out_session == NULL) {
+			return oxr_error(log, XR_ERROR_RUNTIME_FAILURE, "Failed to allocate session");
+		}
+
 		(*out_session)->compositor = NULL;
 		(*out_session)->create_swapchain = NULL;
 
@@ -1776,6 +1780,8 @@ oxr_session_create(struct oxr_logger *log,
 			(void)cleanup_result;
 		}
 		return ret;
+	} else if (sess == NULL) {
+		return oxr_error(log, XR_ERROR_RUNTIME_FAILURE, "Failed to create XrSession");
 	}
 
 	int64_t now = os_monotonic_get_ns();

@@ -34,8 +34,8 @@
 #    placeholders below and writes this file into the build tree.
 # 2. install(SCRIPT ...) registers that generated file with the install rules.
 # 3. On "cmake --install", CMake runs the script in script mode.
-# 4. The script calls cmake/generate_openxr_runtime_manifest.py in "installed"
-#    mode, writing JSON into the build tree.
+# 4. The script calls cmake/openxr_runtime/generate_openxr_runtime_manifest.py
+#    in "installed" mode, writing JSON into the build tree.
 # 5. The script installs that JSON under the configured destination.
 #
 # Path-type and layout options (@_oxr_path_type@, relative dirs, filenames) are

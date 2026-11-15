@@ -6,6 +6,7 @@
  * @brief Import externally-created IOSurface IDs as a real Monado service swapchain.
  */
 
+#include "target_ipc_defaults.h"
 #include "client/ipc_client.h"
 #include "client/ipc_client_connection.h"
 #include "ipc_client_generated.h"
@@ -73,6 +74,7 @@ main(int argc, char **argv)
 	}
 
 	struct ipc_connection ipc_c = {0};
+	const struct ipc_client_connection_info icci = {.socket_filename = XRT_IPC_MSG_SOCK_FILENAME};
 	struct xrt_system_compositor *xsysc = NULL;
 	struct xrt_system *xsys = NULL;
 	struct xrt_session *xs = NULL;
@@ -85,7 +87,7 @@ main(int argc, char **argv)
 	snprintf(info.app_info.application_name, sizeof(info.app_info.application_name), "%s",
 	         "tests_macos_iosurface_import_probe");
 
-	xrt_result_t xret = ipc_client_connection_init(&ipc_c, U_LOGGING_INFO, &info);
+	xrt_result_t xret = ipc_client_connection_init(&ipc_c, U_LOGGING_INFO, &icci, &info);
 	if (xret != XRT_SUCCESS) {
 		return fail_xret("ipc_client_connection_init", xret);
 	}

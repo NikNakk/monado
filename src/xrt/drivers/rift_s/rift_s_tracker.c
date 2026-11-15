@@ -351,12 +351,12 @@ rift_s_tracker_create(struct xrt_tracking_origin *origin,
 	math_pose_transform(&left_cam_from_device, &t->device_from_imu, &t->left_cam_from_imu);
 
 	// Decide whether to initialize the SLAM tracker
-	bool slam_wanted = debug_get_bool_option_rift_s_slam();
-	bool slam_enabled = slam_supported && slam_wanted;
+	const bool slam_wanted = debug_get_bool_option_rift_s_slam();
+	const bool slam_enabled = slam_supported && slam_wanted;
 
 	// Decide whether to initialize the hand tracker
-	bool hand_wanted = debug_get_bool_option_rift_s_handtracking();
-	bool hand_enabled = hand_supported && hand_wanted;
+	const bool hand_wanted = debug_get_bool_option_rift_s_handtracking();
+	const bool hand_enabled = hand_supported && hand_wanted;
 
 	t->tracking.slam_enabled = slam_enabled;
 	t->tracking.hand_enabled = hand_enabled;
@@ -410,14 +410,13 @@ rift_s_tracker_create(struct xrt_tracking_origin *origin,
 			RIFT_S_WARN("Unable to setup the hand tracker");
 
 			// Disable hand tracking since it failed to init
-			hand_enabled = false;
 			t->tracking.hand_enabled = false;
 		}
 	}
 
 	// Setup sinks depending on tracking configuration
 	struct xrt_slam_sinks entry_sinks = {0};
-	if (slam_enabled && hand_enabled) {
+	if (slam_sinks && hand_sinks) {
 		struct xrt_frame_sink *entry_cam0_sink = NULL;
 		struct xrt_frame_sink *entry_cam1_sink = NULL;
 
@@ -427,9 +426,9 @@ rift_s_tracker_create(struct xrt_tracking_origin *origin,
 		entry_sinks = *slam_sinks;
 		entry_sinks.cams[0] = entry_cam0_sink;
 		entry_sinks.cams[1] = entry_cam1_sink;
-	} else if (slam_enabled) {
+	} else if (slam_sinks) {
 		entry_sinks = *slam_sinks;
-	} else if (hand_enabled) {
+	} else if (hand_sinks) {
 		entry_sinks = *hand_sinks;
 	} else {
 		entry_sinks = (struct xrt_slam_sinks){0};

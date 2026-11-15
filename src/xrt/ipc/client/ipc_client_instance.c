@@ -353,7 +353,9 @@ ipc_client_instance_destroy(struct xrt_instance *xinst)
  * @public @memberof ipc_instance
  */
 xrt_result_t
-ipc_instance_create(const struct xrt_instance_info *i_info, struct xrt_instance **out_xinst)
+ipc_instance_create(const struct ipc_client_connection_info *icci,
+                    const struct xrt_instance_info *i_info,
+                    struct xrt_instance **out_xinst)
 {
 	struct ipc_client_instance *ii = U_TYPED_CALLOC(struct ipc_client_instance);
 	ii->base.is_system_available = ipc_client_instance_is_system_available;
@@ -375,7 +377,7 @@ ipc_instance_create(const struct xrt_instance_info *i_info, struct xrt_instance 
 	}
 #endif
 
-	xret = ipc_client_connection_init(&ii->ipc_c, debug_get_log_option_ipc_log(), i_info);
+	xret = ipc_client_connection_init(&ii->ipc_c, debug_get_log_option_ipc_log(), icci, i_info);
 	if (xret != XRT_SUCCESS) {
 #ifdef XRT_OS_ANDROID
 		android_instance_base_cleanup(&(ii->android), &(ii->base));

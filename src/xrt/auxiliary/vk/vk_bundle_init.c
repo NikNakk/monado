@@ -16,6 +16,7 @@
  * @ingroup aux_vk
  */
 
+#include "vk/vk_pretty_print.h"
 #include "xrt/xrt_config_os.h"
 
 #include "util/u_pretty_print.h"
@@ -519,7 +520,7 @@ select_physical_device(struct vk_bundle *vk, int forced_index)
 	    &gpu_count,                      // out_physical_device_count
 	    &physical_devices);              // out_physical_devices
 	if (ret != VK_SUCCESS) {
-		VK_ERROR(vk, "vk_enumerate_physical_devices: %s", vk_result_string(ret));
+		VK_ERROR(vk, "vk_enumerate_physical_devices: %s", vk_str_result(ret));
 		return ret;
 	}
 	if (gpu_count == 0) {
@@ -1258,7 +1259,7 @@ vk_create_device(struct vk_bundle *vk,
 	VK_CHK_WITH_GOTO(ret, "vkCreateDevice", err_destroy);
 
 	VK_INFO(vk, "Created device and %s queue with %s.", only_compute ? "COMPUTE" : "GRAPHICS",
-	        vk_queue_priority_string(priority_info.globalPriority));
+	        vk_str_queue_global_priority(priority_info.globalPriority));
 
 	// Fill in the device features we are interested in.
 	fill_in_device_features(vk, main_queue.family_index);

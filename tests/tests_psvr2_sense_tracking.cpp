@@ -6,7 +6,7 @@
 #include "xrt/xrt_device.h"
 #include "math/m_api.h"
 #include "psvr2/psvr2.h"
-#include "os/os_hid.h"
+#include "hid/h_hid.h"
 
 #include <future>
 #include <thread>
@@ -161,19 +161,19 @@ TEST_CASE("Sense optical acceptance preserves the legacy device callback")
 
 TEST_CASE("HID receipt timestamps are optional on existing backends")
 {
-	os_hid_device hid{};
-	hid.read = [](os_hid_device *, uint8_t *, size_t, int) { return 7; };
+	h_hid_device hid{};
+	hid.read = [](h_hid_device *, uint8_t *, size_t, int) { return 7; };
 	int64_t timestamp = 123;
-	CHECK(os_hid_read_with_timestamp(&hid, nullptr, 0, 0, &timestamp) == 7);
+	CHECK(h_hid_read_with_timestamp(&hid, nullptr, 0, 0, &timestamp) == 7);
 	CHECK(timestamp == 0);
-	hid.read_with_timestamp = [](os_hid_device *, uint8_t *, size_t, int, int64_t *out) {
+	hid.read_with_timestamp = [](h_hid_device *, uint8_t *, size_t, int, int64_t *out) {
 		if (out)
 			*out = 456;
 		return 8;
 	};
-	CHECK(os_hid_read_with_timestamp(&hid, nullptr, 0, 0, &timestamp) == 8);
+	CHECK(h_hid_read_with_timestamp(&hid, nullptr, 0, 0, &timestamp) == 8);
 	CHECK(timestamp == 456);
-	CHECK(os_hid_read_with_timestamp(&hid, nullptr, 0, 0, nullptr) == 8);
+	CHECK(h_hid_read_with_timestamp(&hid, nullptr, 0, 0, nullptr) == 8);
 }
 
 TEST_CASE("Load a supplied PS VR2 calibration without hardware", "[.sense-calibration]")
@@ -197,15 +197,15 @@ TEST_CASE("Load a supplied PS VR2 calibration without hardware", "[.sense-calibr
 #include <cstring>
 
 namespace {
-struct FaultHid : os_hid_device
+struct FaultHid : h_hid_device
 {
 	std::atomic<int> writes{0};
 	std::atomic<int> reads{0};
 	std::atomic<bool> disconnected{false};
 	int feature_part = 0;
-	FaultHid() : os_hid_device{}
+	FaultHid() : h_hid_device{}
 	{
-		read = [](os_hid_device *base, uint8_t *out, size_t, int) {
+		read = [](h_hid_device *base, uint8_t *out, size_t, int) {
 			auto &self = *static_cast<FaultHid *>(base);
 			if (self.disconnected)
 				return -1;
@@ -219,11 +219,11 @@ struct FaultHid : os_hid_device
 			std::memcpy(out, &report, sizeof(report));
 			return (int)sizeof(report);
 		};
-		write = [](os_hid_device *base, const uint8_t *, size_t size) {
+		write = [](h_hid_device *base, const uint8_t *, size_t size) {
 			auto &self = *static_cast<FaultHid *>(base);
 			return ++self.writes <= 3 ? -1 : (int)size;
 		};
-		get_feature = [](os_hid_device *base, uint8_t id, uint8_t *out, size_t) {
+		get_feature = [](h_hid_device *base, uint8_t id, uint8_t *out, size_t) {
 			auto &self = *static_cast<FaultHid *>(base);
 			pssense_calibration_data calibration{};
 			calibration.accel_plus_x = calibration.accel_plus_y = calibration.accel_plus_z = 1000;
@@ -239,8 +239,8 @@ struct FaultHid : os_hid_device
 			std::memcpy(out, &report, sizeof(report));
 			return (int)sizeof(report);
 		};
-		set_feature = [](os_hid_device *, const uint8_t *, size_t size) { return (int)size; };
-		destroy = [](os_hid_device *) {};
+		set_feature = [](h_hid_device *, const uint8_t *, size_t size) { return (int)size; };
+		destroy = [](h_hid_device *) {};
 	}
 };
 struct FaultProber : xrt_prober
@@ -248,7 +248,7 @@ struct FaultProber : xrt_prober
 	FaultHid hid;
 	FaultProber() : xrt_prober{}
 	{
-		open_hid_interface = [](xrt_prober *base, xrt_prober_device *, int, os_hid_device **out) {
+		open_hid_interface = [](xrt_prober *base, xrt_prober_device *, int, h_hid_device **out) {
 			*out = &static_cast<FaultProber *>(base)->hid;
 			return 0;
 		};

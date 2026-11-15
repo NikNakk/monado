@@ -6,6 +6,23 @@ SPDX-License-Identifier: BSL-1.0
 
 # macOS / PS VR2 environment toggle audit
 
+## Consolidated rendering options (15 November 2026)
+
+The [integration review](macos-upstream-review-2026-11-15.md) consolidates these
+options without claiming hardware acceptance of the combined runtime:
+
+| Variable | Default | Effect |
+| --- | --- | --- |
+| `OXR_QUAD_INSET_GAZE` | `0` | Make emulated quad-view insets follow available eye gaze. |
+| `OXR_QUAD_INSET_DEGREES` | `0` | Override inset angular size; zero retains the normal size. |
+| `XRT_COMPOSITOR_QUAD_VIEW_FAST_PATH` | `0` | Enable eligible one-pass context/inset composition. |
+| `XRT_COMPOSITOR_SOURCE_FILTER` | bilinear | Select `catmull-rom` or `catmull-rom-green` source filtering. |
+| `PSVR2_VISIBILITY_MASK` | `0` on macOS, `1` elsewhere | Enable the new lens-derived headset mask; keep opt-in on macOS pending validation. |
+
+The graphics depth-reprojection path uses the existing
+`XRT_COMPOSITOR_DEPTH_REPROJECTION=1` opt-in and macOS additionally requires a
+build exposing `XR_KHR_composition_layer_depth`; neither default is enabled.
+
 ## Current opt-in WSI experiment (15 October 2026)
 
 The generic target is committed on `claude/macos-wsi-integration`; see

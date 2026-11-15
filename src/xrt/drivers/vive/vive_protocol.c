@@ -66,7 +66,7 @@ const struct vive_headset_power_report power_off_report = {
 #define CONFIG_JSON_MAX_SIZE (1024 * 64)
 
 char *
-vive_read_config(struct os_hid_device *hid_dev)
+vive_read_config(struct h_hid_device *hid_dev)
 {
 	XRT_TRACE_MARKER();
 
@@ -74,7 +74,7 @@ vive_read_config(struct os_hid_device *hid_dev)
 	    .id = VIVE_CONFIG_START_REPORT_ID,
 	};
 
-	int ret = os_hid_get_feature_timeout(hid_dev, &start_report, sizeof(start_report), 100);
+	int ret = h_hid_get_feature_timeout(hid_dev, &start_report, sizeof(start_report), 100);
 	if (ret < 0) {
 		// e.g. watchman receiver has no connected device (controller powered off)
 		U_LOG_I("Could not get config start report for device, connected device may be powered off (%d).", ret);
@@ -89,7 +89,7 @@ vive_read_config(struct os_hid_device *hid_dev)
 
 	uint32_t count = 0;
 	do {
-		ret = os_hid_get_feature_timeout(hid_dev, &report, sizeof(report), 100);
+		ret = h_hid_get_feature_timeout(hid_dev, &report, sizeof(report), 100);
 		if (ret < 0) {
 			U_LOG_E("Read error after %d bytes: %d", count, ret);
 			free(config_z);
@@ -150,13 +150,13 @@ vive_read_config(struct os_hid_device *hid_dev)
 }
 
 int
-vive_get_imu_range_report(struct os_hid_device *hid_dev, double *gyro_range, double *acc_range)
+vive_get_imu_range_report(struct h_hid_device *hid_dev, double *gyro_range, double *acc_range)
 {
 	struct vive_imu_range_modes_report report = {.id = VIVE_IMU_RANGE_MODES_REPORT_ID};
 
 	int ret;
 
-	ret = os_hid_get_feature_timeout(hid_dev, &report, sizeof(report), 100);
+	ret = h_hid_get_feature_timeout(hid_dev, &report, sizeof(report), 100);
 	if (ret < 0) {
 		U_LOG_I("Could not get range report, connected device may be powered off (%d)!", ret);
 		return ret;
@@ -166,7 +166,7 @@ vive_get_imu_range_report(struct os_hid_device *hid_dev, double *gyro_range, dou
 		U_LOG_W(
 		    "Invalid gyroscope and accelerometer data."
 		    "Trying to fetch again.");
-		ret = os_hid_get_feature(hid_dev, report.id, (uint8_t *)&report, sizeof(report));
+		ret = h_hid_get_feature(hid_dev, report.id, (uint8_t *)&report, sizeof(report));
 		if (ret < 0) {
 			U_LOG_E("Could not get feature report %d.", report.id);
 			return ret;
@@ -202,7 +202,7 @@ vive_get_imu_range_report(struct os_hid_device *hid_dev, double *gyro_range, dou
 }
 
 int
-vive_read_firmware(struct os_hid_device *hid_dev,
+vive_read_firmware(struct h_hid_device *hid_dev,
                    uint32_t *firmware_version,
                    uint8_t *hardware_revision,
                    uint8_t *hardware_version_micro,
@@ -214,7 +214,7 @@ vive_read_firmware(struct os_hid_device *hid_dev,
 	};
 
 	int ret;
-	ret = os_hid_get_feature(hid_dev, report.id, (uint8_t *)&report, sizeof(report));
+	ret = h_hid_get_feature(hid_dev, report.id, (uint8_t *)&report, sizeof(report));
 	if (ret < 0)
 		return ret;
 

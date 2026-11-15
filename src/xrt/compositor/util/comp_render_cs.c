@@ -1083,7 +1083,10 @@ comp_render_cs_layer(struct render_compute *render,
 		ubo_data->layers[cur_layer].layer_data.layer_type = cs_layer_type;
 		ubo_data->layers[cur_layer].layer_data.unpremultiplied_alpha = is_layer_unpremultiplied(data);
 		ubo_data->layers[cur_layer].layer_data.inverted_alpha = is_layer_alpha_inverted(data);
-
+		struct render_advanced_blend_info blend = {0};
+		apply_advanced_blend_from_layer(data, &ubo_data->layers[cur_layer].layer_data.advanced_blending,
+		                                &blend);
+		ubo_data->layers[cur_layer].image_info.blend_factors = pack_advanced_blend(&blend);
 		apply_bias_and_scale_from_layer(data, &ubo_data->layers[cur_layer].color_scale,
 		                                &ubo_data->layers[cur_layer].color_bias);
 
