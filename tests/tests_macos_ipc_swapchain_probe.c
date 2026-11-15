@@ -5,6 +5,7 @@
  * @brief Probe the macOS IPC swapchain path using a running monado-service.
  */
 
+#include "target_ipc_defaults.h"
 #include "client/ipc_client.h"
 #include "client/ipc_client_connection.h"
 #include "ipc_client_generated.h"
@@ -27,6 +28,7 @@ int
 main(void)
 {
 	struct ipc_connection ipc_c = {0};
+	const struct ipc_client_connection_info icci = {.socket_filename = XRT_IPC_MSG_SOCK_FILENAME};
 	struct xrt_system_compositor *xsysc = NULL;
 	struct xrt_system *xsys = NULL;
 	struct xrt_session *xs = NULL;
@@ -39,7 +41,7 @@ main(void)
 	snprintf(info.app_info.application_name, sizeof(info.app_info.application_name), "%s",
 	         "tests_macos_ipc_swapchain_probe");
 
-	xrt_result_t xret = ipc_client_connection_init(&ipc_c, U_LOGGING_INFO, &info);
+	xrt_result_t xret = ipc_client_connection_init(&ipc_c, U_LOGGING_INFO, &icci, &info);
 	if (xret != XRT_SUCCESS) {
 		return fail_xret("ipc_client_connection_init", xret);
 	}

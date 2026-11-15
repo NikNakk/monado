@@ -159,7 +159,7 @@ rift_s_compute_distortion(struct xrt_device *xdev, uint32_t view, float u, float
 
 #if 0
 static int
-dump_fw_block(struct os_hid_device *handle, uint8_t block_id) {
+dump_fw_block(struct h_hid_device *handle, uint8_t block_id) {
 	int res;
 	char *data = NULL;
 	int len;
@@ -229,7 +229,7 @@ rift_s_hmd_create(struct rift_s_system *sys, const unsigned char *hmd_serial_no,
 
 	hmd->last_imu_timestamp_ns = 0;
 
-	struct os_hid_device *hid_hmd = rift_s_system_hid_handle(hmd->sys);
+	struct h_hid_device *hid_hmd = rift_s_system_hid_handle(hmd->sys);
 
 	RIFT_S_DEBUG("Configuring firmware provided proximity sensor threshold %u", config->proximity_threshold);
 
@@ -346,7 +346,7 @@ rift_s_hmd_set_proximity(struct rift_s_hmd *hmd, bool prox_sensor)
 {
 	/* Enable the screen if the prox sensor is triggered, or turn it off otherwise. */
 	if (prox_sensor != hmd->display_on) {
-		struct os_hid_device *hid_hmd = rift_s_system_hid_handle(hmd->sys);
+		struct h_hid_device *hid_hmd = rift_s_system_hid_handle(hmd->sys);
 
 		rift_s_set_screen_enable(hid_hmd, prox_sensor);
 		hmd->display_on = prox_sensor;

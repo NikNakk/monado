@@ -10,6 +10,7 @@
  * @ingroup comp_client
  */
 
+#include "vk/vk_pretty_print.h"
 #include "vk/vk_compositor_flags.h"
 
 #include "util/u_misc.h"
@@ -102,7 +103,7 @@ submit_image_barrier(struct client_vk_swapchain *sc, VkCommandBuffer cmd_buffer)
 	// Note we do not submit a fence here, it's not needed.
 	ret = vk_cmd_pool_submit_cmd_buffer(vk, &c->pool, cmd_buffer);
 	if (ret != VK_SUCCESS) {
-		VK_ERROR(vk, "vk_cmd_pool_submit_cmd_buffer: %s %u", vk_result_string(ret), ret);
+		VK_ERROR(vk, "vk_cmd_pool_submit_cmd_buffer: %s %u", vk_str_result(ret), ret);
 		return XRT_ERROR_FAILED_TO_SUBMIT_VULKAN_COMMANDS;
 	}
 
@@ -135,7 +136,7 @@ setup_semaphore(struct client_vk_compositor *c)
 	VkSemaphore semaphore = VK_NULL_HANDLE;
 	ret = vk_create_timeline_semaphore_from_native(vk, handle, &semaphore);
 	if (ret != VK_SUCCESS) {
-		VK_ERROR(vk, "vkCreateSemaphore: %s", vk_result_string(ret));
+		VK_ERROR(vk, "vkCreateSemaphore: %s", vk_str_result(ret));
 		u_graphics_sync_unref(&handle);
 		xrt_compositor_semaphore_reference(&xcsem, NULL);
 		return XRT_ERROR_VULKAN;
@@ -210,7 +211,7 @@ submit_semaphore(struct client_vk_compositor *c, xrt_result_t *out_xret)
 	    VK_NULL_HANDLE);       // fence
 	vk_queue_unlock(vk->main_queue);
 	if (ret != VK_SUCCESS) {
-		VK_ERROR(vk, "vkQueueSubmit: %s", vk_result_string(ret));
+		VK_ERROR(vk, "vkQueueSubmit: %s", vk_str_result(ret));
 		*out_xret = XRT_ERROR_VULKAN;
 		return true;
 	}
@@ -829,7 +830,7 @@ client_vk_compositor_layer_commit(struct xrt_compositor *xc, xrt_graphics_sync_h
 		struct vk_bundle *vk = &c->vk;
 		VkResult ret = vk_cmd_pool_submit_cmd_buffer(vk, &c->pool, c->dcb);
 		if (ret != VK_SUCCESS) {
-			VK_ERROR(vk, "vk_cmd_pool_submit_cmd_buffer: %s %u", vk_result_string(ret), ret);
+			VK_ERROR(vk, "vk_cmd_pool_submit_cmd_buffer: %s %u", vk_str_result(ret), ret);
 			return XRT_ERROR_FAILED_TO_SUBMIT_VULKAN_COMMANDS;
 		}
 	}
@@ -1046,14 +1047,14 @@ client_vk_swapchain_create(struct xrt_compositor *xc,
 
 		ret = vk->vkEndCommandBuffer(sc->acquire[i]);
 		if (ret != VK_SUCCESS) {
-			VK_ERROR(vk, "vkEndCommandBuffer: %s", vk_result_string(ret));
+			VK_ERROR(vk, "vkEndCommandBuffer: %s", vk_str_result(ret));
 			vk_cmd_pool_unlock(&c->pool);
 			client_vk_swapchain_destroy(&sc->base.base);
 			return XRT_ERROR_VULKAN;
 		}
 		ret = vk->vkEndCommandBuffer(sc->release[i]);
 		if (ret != VK_SUCCESS) {
-			VK_ERROR(vk, "vkEndCommandBuffer: %s", vk_result_string(ret));
+			VK_ERROR(vk, "vkEndCommandBuffer: %s", vk_str_result(ret));
 			vk_cmd_pool_unlock(&c->pool);
 			client_vk_swapchain_destroy(&sc->base.base);
 			return XRT_ERROR_VULKAN;
@@ -1208,7 +1209,7 @@ client_vk_compositor_create(struct xrt_compositor_native *xcn,
 	ret = vk_cmd_pool_create_begin_insert_label_and_end_cmd_buffer_locked(
 	    vk, &c->pool, "vr-marker,frame_end,type,application", &c->dcb);
 	if (ret != VK_SUCCESS) {
-		VK_ERROR(vk, "vk_cmd_pool_create_insert_debug_label_and_end_cmd_buffer: %s", vk_result_string(ret));
+		VK_ERROR(vk, "vk_cmd_pool_create_insert_debug_label_and_end_cmd_buffer: %s", vk_str_result(ret));
 		goto err_pool;
 	}
 
@@ -1249,7 +1250,7 @@ client_vk_compositor_blit_to_swapchain(struct client_vk_compositor *c,
 
 	ret = vk_cmd_pool_create_and_begin_cmd_buffer_locked(vk, &c->pool, 0, &cmd_buffer);
 	if (ret != VK_SUCCESS) {
-		VK_ERROR(vk, "vk_cmd_pool_create_and_begin_cmd_buffer_locked: %s", vk_result_string(ret));
+		VK_ERROR(vk, "vk_cmd_pool_create_and_begin_cmd_buffer_locked: %s", vk_str_result(ret));
 		vk_cmd_pool_unlock(&c->pool);
 		return XRT_ERROR_VULKAN;
 	}
@@ -1278,7 +1279,7 @@ client_vk_compositor_blit_to_swapchain(struct client_vk_compositor *c,
 	vk_cmd_pool_unlock(&c->pool);
 
 	if (ret != VK_SUCCESS) {
-		VK_ERROR(vk, "vk_cmd_pool_end_submit_wait_and_free_cmd_buffer_locked: %s", vk_result_string(ret));
+		VK_ERROR(vk, "vk_cmd_pool_end_submit_wait_and_free_cmd_buffer_locked: %s", vk_str_result(ret));
 		return XRT_ERROR_VULKAN;
 	}
 

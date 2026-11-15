@@ -17,7 +17,7 @@ endif()
 target_link_libraries(openvr PUBLIC aux_vk aux_os aux_util aux_math)
 
 if(XRT_FEATURE_IPC_CLIENT)
-	target_link_libraries(openvr PUBLIC st_openvr ipc_client comp_client)
+	target_link_libraries(openvr PUBLIC st_openvr ipc_client comp_client target_ipc_defaults)
 else()
 	target_link_libraries(
 		openvr

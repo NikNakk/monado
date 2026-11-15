@@ -222,6 +222,7 @@ if(XRT_BUILD_DRIVER_PSSENSE)
 	target_link_libraries(
 		drv_pssense
 		PRIVATE
+			aux_hid
 			xrt-interfaces
 			tracking-includes
 			aux_os

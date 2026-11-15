@@ -38,6 +38,8 @@ add_subdirectory(foveation)
 if(APPLE)
 	add_subdirectory(metal)
 endif()
+# HID library.
+add_subdirectory(hid)
 
 # GStreamer library.
 if(XRT_HAVE_GST)

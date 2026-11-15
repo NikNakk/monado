@@ -9,6 +9,7 @@
  */
 
 
+#include "vk/vk_pretty_print.h"
 #include "comp_window_direct.h"
 
 #include "util/u_misc.h"
@@ -93,7 +94,7 @@ get_primary_display_mode(struct comp_target_swapchain *cts,
 	    &mode_count,                            //
 	    &mode_properties);                      //
 	if (ret != VK_SUCCESS) {
-		COMP_ERROR(ct->c, "vk_enumerate_display_mode_properties: %s", vk_result_string(ret));
+		COMP_ERROR(ct->c, "vk_enumerate_display_mode_properties: %s", vk_str_result(ret));
 		return VK_NULL_HANDLE;
 	}
 	if (mode_count == 0) {
@@ -189,7 +190,7 @@ comp_window_direct_create_surface(struct comp_target_swapchain *cts,
 	    &plane_property_count,                            //
 	    &plane_properties);                               //
 	if (ret != VK_SUCCESS) {
-		COMP_ERROR(cts->base.c, "vk_enumerate_physical_display_plane_properties: %s", vk_result_string(ret));
+		COMP_ERROR(cts->base.c, "vk_enumerate_physical_display_plane_properties: %s", vk_str_result(ret));
 		return VK_ERROR_INITIALIZATION_FAILED;
 	}
 
@@ -265,7 +266,7 @@ comp_window_direct_create_surface(struct comp_target_swapchain *cts,
 	    NULL,                                 //
 	    &surface);                            //
 	if (ret != VK_SUCCESS) {
-		COMP_ERROR(cts->base.c, "vkCreateDisplayPlaneSurfaceKHR: %s", vk_result_string(ret));
+		COMP_ERROR(cts->base.c, "vkCreateDisplayPlaneSurfaceKHR: %s", vk_str_result(ret));
 		return ret;
 	}
 
@@ -296,7 +297,7 @@ comp_window_direct_acquire_xlib_display(struct comp_target_swapchain *cts, Displ
 
 	ret = vk->vkAcquireXlibDisplayEXT(vk->physical_device, dpy, display);
 	if (ret != VK_SUCCESS) {
-		COMP_ERROR(cts->base.c, "vkAcquireXlibDisplayEXT: %s (0x%016" PRIx64 ")", vk_result_string(ret),
+		COMP_ERROR(cts->base.c, "vkAcquireXlibDisplayEXT: %s (0x%016" PRIx64 ")", vk_str_result(ret),
 		           (uint64_t)display);
 	}
 	if (ret == VK_ERROR_INITIALIZATION_FAILED) {
@@ -322,7 +323,7 @@ comp_window_direct_init_swapchain(
 
 	ret = comp_window_direct_create_surface(cts, display, width, height);
 	if (ret != VK_SUCCESS) {
-		COMP_ERROR(cts->base.c, "Failed to create surface! '%s'", vk_result_string(ret));
+		COMP_ERROR(cts->base.c, "Failed to create surface! '%s'", vk_str_result(ret));
 		return false;
 	}
 

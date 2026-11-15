@@ -1086,7 +1086,7 @@ struct oxr_view_config_properties
 	XrViewConfigurationView views[XRT_MAX_COMPOSITOR_VIEW_CONFIGS_VIEW_COUNT];
 
 	uint32_t blend_mode_count;
-	XrEnvironmentBlendMode blend_modes[3];
+	XrEnvironmentBlendMode blend_modes[XRT_MAX_DEVICE_BLEND_MODES];
 };
 
 /*!

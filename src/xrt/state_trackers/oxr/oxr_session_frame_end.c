@@ -107,7 +107,7 @@ convert_blend_mode(XrEnvironmentBlendMode blend_mode)
 	}
 }
 
-#ifdef OXR_HAVE_FB_composition_layer_alpha_blend
+#if defined(OXR_HAVE_FB_composition_layer_alpha_blend) || defined(OXR_HAVE_MNDX_composition_layer_alpha_blend_system_ui)
 static enum xrt_blend_factor
 convert_blend_factor(XrBlendFactorFB blend_factor)
 {
@@ -121,7 +121,7 @@ convert_blend_factor(XrBlendFactorFB blend_factor)
 	default: return XRT_BLEND_FACTOR_MAX_ENUM_FB;
 	}
 }
-#endif // OXR_HAVE_FB_composition_layer_alpha_blend
+#endif // OXR_HAVE_FB_composition_layer_alpha_blend || OXR_HAVE_MNDX_composition_layer_alpha_blend_system_ui
 
 static enum xrt_layer_composition_flags
 convert_layer_flags(struct oxr_session *sess, XrSwapchainUsageFlags xr_flags)
@@ -354,12 +354,29 @@ fill_in_sub_image(const struct oxr_swapchain *sc, const XrSwapchainSubImage *oxr
 	xsub->norm_rect.y = (float)(rect->offset.h / (double)sc->height);
 }
 
+#if defined(OXR_HAVE_FB_composition_layer_alpha_blend) || defined(OXR_HAVE_MNDX_composition_layer_alpha_blend_system_ui)
+static bool
+is_a_layer_alpha_blend_extension_enabled(struct oxr_session *sess)
+{
+	bool has_fb = false;
+#if defined(OXR_HAVE_FB_composition_layer_alpha_blend)
+	has_fb = sess->sys->inst->extensions.FB_composition_layer_alpha_blend;
+#endif
+
+	bool has_mndx = false;
+#if defined(OXR_HAVE_MNDX_composition_layer_alpha_blend_system_ui)
+	has_mndx = sess->sys->inst->extensions.MNDX_composition_layer_alpha_blend_system_ui;
+#endif
+
+	return has_fb || has_mndx;
+}
+#endif
+
 static void
 fill_in_blend_factors(struct oxr_session *sess, const XrCompositionLayerBaseHeader *layer, struct xrt_layer_data *data)
 {
-#ifdef OXR_HAVE_FB_composition_layer_alpha_blend
-	// Is the extension enabled?
-	if (!sess->sys->inst->extensions.FB_composition_layer_alpha_blend) {
+#if defined(OXR_HAVE_FB_composition_layer_alpha_blend) || defined(OXR_HAVE_MNDX_composition_layer_alpha_blend_system_ui)
+	if (!is_a_layer_alpha_blend_extension_enabled(sess)) {
 		return;
 	}
 	const XrCompositionLayerAlphaBlendFB *alphaBlend = OXR_GET_INPUT_FROM_CHAIN(
@@ -442,8 +459,8 @@ verify_blend_factors(struct oxr_logger *log,
                      uint32_t layer_index,
                      const XrCompositionLayerBaseHeader *layer)
 {
-#ifdef OXR_HAVE_FB_composition_layer_alpha_blend
-	if (!sess->sys->inst->extensions.FB_composition_layer_alpha_blend) {
+#if defined(OXR_HAVE_FB_composition_layer_alpha_blend) || defined(OXR_HAVE_MNDX_composition_layer_alpha_blend_system_ui)
+	if (!is_a_layer_alpha_blend_extension_enabled(sess)) {
 		return XR_SUCCESS;
 	}
 
@@ -451,23 +468,23 @@ verify_blend_factors(struct oxr_logger *log,
 	    layer, (XrStructureType)XR_TYPE_COMPOSITION_LAYER_ALPHA_BLEND_FB, XrCompositionLayerAlphaBlendFB);
 
 	if (alphaBlend != NULL) {
-		if (!u_verify_blend_factor_valid(alphaBlend->srcFactorColor)) {
+		if (!u_verify_blend_factor_valid((enum xrt_blend_factor)alphaBlend->srcFactorColor)) {
 			return oxr_error(
 			    log, XR_ERROR_VALIDATION_FAILURE,
 			    "(frameEndInfo->layers[%u]->pNext->srcFactorColor == 0x%08x) unknown blend factor",
 			    layer_index, alphaBlend->srcFactorColor);
 		}
-		if (!u_verify_blend_factor_valid(alphaBlend->dstFactorColor)) {
+		if (!u_verify_blend_factor_valid((enum xrt_blend_factor)alphaBlend->dstFactorColor)) {
 			return oxr_error(log, XR_ERROR_VALIDATION_FAILURE,
 			                 "(frameEndInfo->layers[%u]->dstFactorColor == 0x%08x) unknown blend factor",
 			                 layer_index, alphaBlend->dstFactorColor);
 		}
-		if (!u_verify_blend_factor_valid(alphaBlend->srcFactorAlpha)) {
+		if (!u_verify_blend_factor_valid((enum xrt_blend_factor)alphaBlend->srcFactorAlpha)) {
 			return oxr_error(log, XR_ERROR_VALIDATION_FAILURE,
 			                 "(frameEndInfo->layers[%u]->srcFactorAlpha == 0x%08x) unknown blend factor",
 			                 layer_index, alphaBlend->srcFactorAlpha);
 		}
-		if (!u_verify_blend_factor_valid(alphaBlend->dstFactorAlpha)) {
+		if (!u_verify_blend_factor_valid((enum xrt_blend_factor)alphaBlend->dstFactorAlpha)) {
 			return oxr_error(log, XR_ERROR_VALIDATION_FAILURE,
 			                 "(frameEndInfo->layers[%u]->dstFactorAlpha == 0x%08x) unknown blend factor",
 			                 layer_index, alphaBlend->dstFactorAlpha);
@@ -1920,6 +1937,15 @@ oxr_session_frame_end(struct oxr_logger *log, struct oxr_session *sess, const Xr
 		                 frameEndInfo->environmentBlendMode);
 	}
 
+#ifdef OXR_HAVE_FB_composition_layer_alpha_blend
+	if (sess->sys->inst->extensions.FB_composition_layer_alpha_blend &&
+	    frameEndInfo->environmentBlendMode != XR_ENVIRONMENT_BLEND_MODE_OPAQUE) {
+		return oxr_error(log, XR_ERROR_ENVIRONMENT_BLEND_MODE_UNSUPPORTED,
+		                 "(frameEndInfo->environmentBlendMode == %u) is not supported with "
+		                 "XR_FB_composition_layer_alpha_blend enabled.",
+		                 frameEndInfo->environmentBlendMode);
+	}
+#endif
 
 	/*
 	 * Early out for discarded frame if layer count is 0.

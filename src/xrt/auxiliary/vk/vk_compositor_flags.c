@@ -18,10 +18,12 @@
  * @ingroup aux_vk
  */
 
+#include "vk/vk_pretty_print.h"
 #include "xrt/xrt_handles.h"
 
 #include "util/u_misc.h"
 #include "util/u_debug.h"
+#include "util/u_pretty_print.h"
 
 #include "vk/vk_helpers.h"
 #include "vk/vk_compositor_flags.h"
@@ -46,13 +48,24 @@ check_feature(VkFormat format,
               VkFormatFeatureFlags format_features,
               VkFormatFeatureFlags flag)
 {
-	if ((format_features & flag) == 0) {
-		U_LOG_E("vk_csci_get_image_usage_flags: %s requested but %s not supported for format %s (%08x) (%08x)",
-		        xrt_swapchain_usage_flag_string(usage, false), vk_format_feature_flag_string(flag, false),
-		        vk_format_string(format), format_features, flag);
-		return false;
+	if ((format_features & flag) != 0) {
+		return true;
 	}
-	return true;
+
+	struct u_pp_sink_stack_only sink;
+	u_pp_delegate_t dg = u_pp_sink_stack_only_init(&sink);
+
+	u_pp(dg, "vk_csci_get_image_usage_flags: ");
+	u_pp_xrt_swapchain_usage_bits(dg, usage);
+	u_pp(dg, " requested but ");
+	vk_pp_format_feature_flag_bits(dg, flag);
+	u_pp(dg, " not supported for format ");
+	vk_pp_format(dg, format);
+	u_pp(dg, " (%08x) (%08x)", format_features, flag);
+
+	U_LOG_E("%s", sink.buffer);
+
+	return false;
 }
 
 static bool
@@ -136,7 +149,7 @@ vk_csci_get_barrier_optimal_layout(VkFormat format)
 	switch (format) {
 		VK_CSCI_FORMATS(CASE_COLOR, CASE_DS, CASE_DS, CASE_DS)
 	default: //
-		U_LOG_E("Format '%s' is not supported.", vk_format_string(format));
+		U_LOG_E("Format '%s' is not supported.", vk_str_format(format));
 		return VK_IMAGE_LAYOUT_UNDEFINED;
 	}
 
@@ -157,7 +170,7 @@ vk_csci_get_barrier_aspect_mask(VkFormat format)
 	switch (format) {
 		VK_CSCI_FORMATS(CASE_COLOR, CASE_DS, CASE_D, CASE_S)
 	default: //
-		U_LOG_E("Format '%s' is not supported.", vk_format_string(format));
+		U_LOG_E("Format '%s' is not supported.", vk_str_format(format));
 		return 0;
 	}
 
@@ -180,7 +193,7 @@ vk_csci_get_image_view_aspect(VkFormat format, enum xrt_swapchain_usage_bits bit
 	switch (format) {
 		VK_CSCI_FORMATS(CASE_COLOR, CASE_DS, CASE_D, CASE_S)
 	default: //
-		U_LOG_E("Format '%s' is not supported.", vk_format_string(format));
+		U_LOG_E("Format '%s' is not supported.", vk_str_format(format));
 		return 0;
 	}
 
@@ -286,7 +299,7 @@ vk_csci_get_image_external_support(struct vk_bundle *vk,
 	VkResult ret =
 	    vk->vkGetPhysicalDeviceImageFormatProperties2(vk->physical_device, &format_info, &format_properties);
 	if (ret != VK_SUCCESS) {
-		VK_ERROR(vk, "vkGetPhysicalDeviceImageFormatProperties2: %s", vk_result_string(ret));
+		VK_ERROR(vk, "vkGetPhysicalDeviceImageFormatProperties2: %s", vk_str_result(ret));
 		if (out_importable) {
 			*out_importable = false;
 		}
@@ -373,12 +386,12 @@ vk_csci_is_format_supported(struct vk_bundle *vk,
 	(void)create;
 #if defined(XRT_GRAPHICS_BUFFER_HANDLE_IS_AHARDWAREBUFFER)
 	if (!has_ahardware_buffer_format_conversion(format)) {
-		VK_DEBUG(vk, "Format '%s' does not map to a AHardwareBuffer format!", vk_format_string(format));
+		VK_DEBUG(vk, "Format '%s' does not map to a AHardwareBuffer format!", vk_str_format(format));
 		return false;
 	}
 
 	if (!ahardwarebuffer_is_supported(format, create, xbits)) {
-		VK_DEBUG(vk, "Format '%s' is not supported.", vk_format_string(format));
+		VK_DEBUG(vk, "Format '%s' is not supported.", vk_str_format(format));
 		return false;
 	}
 #endif
@@ -388,20 +401,20 @@ vk_csci_is_format_supported(struct vk_bundle *vk,
 	const VkFormatFeatureFlagBits bits = prop.optimalTilingFeatures;
 
 	if ((bits & VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT) == 0) {
-		VK_DEBUG(vk, "Format '%s' cannot be sampled from in optimal layout!", vk_format_string(format));
+		VK_DEBUG(vk, "Format '%s' cannot be sampled from in optimal layout!", vk_str_format(format));
 		return false;
 	}
 
 	if ((xbits & XRT_SWAPCHAIN_USAGE_COLOR) != 0 && (bits & VK_FORMAT_FEATURE_COLOR_ATTACHMENT_BIT) == 0) {
 		VK_DEBUG(vk, "Color format '%s' cannot be used as render target in optimal layout!",
-		         vk_format_string(format));
+		         vk_str_format(format));
 		return false;
 	}
 
 	if ((xbits & XRT_SWAPCHAIN_USAGE_DEPTH_STENCIL) != 0 &&
 	    (bits & VK_FORMAT_FEATURE_DEPTH_STENCIL_ATTACHMENT_BIT) == 0) {
 		VK_DEBUG(vk, "Depth/stencil format '%s' cannot be used as render target in optimal layout!",
-		         vk_format_string(format));
+		         vk_str_format(format));
 		return false;
 	}
 
@@ -448,12 +461,12 @@ vk_csci_is_format_supported(struct vk_bundle *vk,
 
 	ret = vk->vkGetPhysicalDeviceImageFormatProperties2(vk->physical_device, &format_info, &format_properties);
 	if (ret == VK_ERROR_FORMAT_NOT_SUPPORTED) {
-		VK_DEBUG(vk, "Format '%s' as external image is not supported!", vk_format_string(format));
+		VK_DEBUG(vk, "Format '%s' as external image is not supported!", vk_str_format(format));
 		return false;
 	} else if (ret != VK_SUCCESS) {
 		// This is not a expected path.
-		VK_ERROR(vk, "vkGetPhysicalDeviceImageFormatProperties2: %s for format '%s'", vk_result_string(ret),
-		         vk_format_string(format));
+		VK_ERROR(vk, "vkGetPhysicalDeviceImageFormatProperties2: %s for format '%s'", vk_str_result(ret),
+		         vk_str_format(format));
 		return false;
 	}
 
@@ -461,12 +474,12 @@ vk_csci_is_format_supported(struct vk_bundle *vk,
 	    external_format_properties.externalMemoryProperties.externalMemoryFeatures;
 
 	if ((features & VK_EXTERNAL_MEMORY_FEATURE_IMPORTABLE_BIT) == 0) {
-		VK_DEBUG(vk, "Format '%s' is not importable!", vk_format_string(format));
+		VK_DEBUG(vk, "Format '%s' is not importable!", vk_str_format(format));
 		return false;
 	}
 
 	if ((features & VK_EXTERNAL_MEMORY_FEATURE_EXPORTABLE_BIT) == 0) {
-		VK_DEBUG(vk, "Format '%s' is not exportable!", vk_format_string(format));
+		VK_DEBUG(vk, "Format '%s' is not exportable!", vk_str_format(format));
 		return false;
 	}
 

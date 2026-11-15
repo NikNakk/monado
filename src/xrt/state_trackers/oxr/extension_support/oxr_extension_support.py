@@ -128,6 +128,7 @@ EXTENSIONS = (
     ['XR_HTCX_vive_tracker_interaction', 'ALWAYS_DISABLED'],
     ['XR_MNDX_ball_on_a_stick_controller', 'XRT_FEATURE_OPENXR_INTERACTION_MNDX'],
     ['XR_MNDX_blubur_s1', 'XRT_FEATURE_OPENXR_INTERACTION_MNDX'],
+    ['XR_MNDX_composition_layer_alpha_blend_system_ui', 'XRT_FEATURE_OPENXR_LAYER_MNDX_ALPHA_BLEND_SYSTEM_UI'],
     ['XR_MNDX_egl_enable', 'XR_USE_PLATFORM_EGL'],
     ['XR_MNDX_flipvr', 'XRT_FEATURE_OPENXR_INTERACTION_MNDX'],
     ['XR_MNDX_foveation_metal', 'XRT_FEATURE_OPENXR_MNDX_FOVEATION_METAL'],

@@ -11,6 +11,7 @@
 
 #pragma once
 
+#include "vk/vk_pretty_print.h"
 #include "xrt/xrt_gfx_vk.h"
 #include "xrt/xrt_config_build.h"
 
@@ -198,7 +199,7 @@ comp_compositor(struct xrt_compositor *xc)
  *
  * @relates comp_compositor
  */
-#define CVK_ERROR(C, FUNC, MSG, RET) COMP_ERROR(C, FUNC ": %s\n\t" MSG, vk_result_string(RET));
+#define CVK_ERROR(C, FUNC, MSG, RET) COMP_ERROR(C, FUNC ": %s\n\t" MSG, vk_str_result(RET));
 
 /*!
  * Spew level logging.

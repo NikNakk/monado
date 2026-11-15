@@ -10,7 +10,7 @@
 
 #pragma once
 
-#include "os/os_hid.h"
+#include "hid/h_hid.h"
 #include "xrt/xrt_byte_order.h"
 
 #include <stdint.h>
@@ -339,13 +339,13 @@ extern const struct vive_headset_power_report power_on_report;
 extern const struct vive_headset_power_report power_off_report;
 
 char *
-vive_read_config(struct os_hid_device *hid_dev);
+vive_read_config(struct h_hid_device *hid_dev);
 
 int
-vive_get_imu_range_report(struct os_hid_device *hid_dev, double *gyro_range, double *acc_range);
+vive_get_imu_range_report(struct h_hid_device *hid_dev, double *gyro_range, double *acc_range);
 
 int
-vive_read_firmware(struct os_hid_device *hid_dev,
+vive_read_firmware(struct h_hid_device *hid_dev,
                    uint32_t *firmware_version,
                    uint8_t *hardware_revision,
                    uint8_t *hardware_version_micro,

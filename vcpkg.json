@@ -13,7 +13,12 @@
         },
         "cjson",
         "eigen3",
-        "glslang",
+        {
+            "name": "glslang",
+            "features": [
+                "tools"
+            ]
+        },
         "vulkan"
     ],
     "default-features": [
@@ -50,5 +55,5 @@
             ]
         }
     },
-    "builtin-baseline": "4334d8b4c8916018600212ab4dd4bbdc343065d1"
+    "builtin-baseline": "9eec002df1cd109f8f104cd966a763daf9751489"
 }

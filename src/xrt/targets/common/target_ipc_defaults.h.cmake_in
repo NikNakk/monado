@@ -1,0 +1,18 @@
+// Copyright 2026, NVIDIA CORPORATION.
+// SPDX-License-Identifier: BSL-1.0
+/*!
+ * @file
+ * @brief  Default IPC socket, pidfile and Windows service names for the built-in targets.
+ * @author Jakob Bornecrantz <tbornecrantz@nvidia.com>
+ */
+
+#pragma once
+
+#define XRT_IPC_MSG_SOCK_FILENAME "@XRT_IPC_MSG_SOCK_FILENAME@"
+#define XRT_IPC_SERVICE_PID_FILENAME "@XRT_IPC_SERVICE_PID_FILENAME@"
+
+/*!
+ * Windows only: the service executable the runtimes launch if no service is running,
+ * set with the XRT_SERVICE_EXECUTABLE CMake variable.
+ */
+#cmakedefine XRT_SERVICE_EXECUTABLE "@XRT_SERVICE_EXECUTABLE@.exe"

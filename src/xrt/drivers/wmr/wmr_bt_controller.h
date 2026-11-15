@@ -32,14 +32,14 @@ struct wmr_bt_connection
 
 	enum u_logging_level log_level;
 
-	struct os_hid_device *controller_hid;
+	struct h_hid_device *controller_hid;
 	struct os_thread_helper controller_thread;
 
 	struct os_mutex hid_lock;
 };
 
 struct xrt_device *
-wmr_bt_controller_create(struct os_hid_device *controller_hid,
+wmr_bt_controller_create(struct h_hid_device *controller_hid,
                          enum xrt_device_type controller_type,
                          uint16_t vid,
                          uint16_t pid,

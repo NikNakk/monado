@@ -27,6 +27,7 @@
 #include "util/u_extension_list.h"
 
 #include "vk/vk_print.h"
+#include "vk/vk_pretty_print.h"
 
 #include "os/os_threading.h"
 
@@ -405,57 +406,6 @@ vk_append_to_pnext_chain(VkBaseInStructure *head, VkBaseInStructure *new_struct)
 	new_struct->pNext = head->pNext;
 	head->pNext = new_struct;
 }
-
-
-/*
- *
- * Flag bits string functions.
- *
- */
-
-/*!
- * Returns the format feature flag if one valid bit is set,
- * if multiple bits are set, will return 'MULTIPLE BIT SET'.
- */
-XRT_CHECK_RESULT const char *
-vk_format_feature_flag_string(VkFormatFeatureFlagBits bits, bool null_on_unknown);
-
-/*!
- * Returns the swapchain create flag if one valid bit is set,
- * if multiple bits are set, will return 'MULTIPLE BIT SET'.
- */
-XRT_CHECK_RESULT const char *
-vk_swapchain_create_flag_string(VkSwapchainCreateFlagsKHR bits, bool null_on_unknown);
-
-/*!
- * Returns the image usage flag if one valid bit is set,
- * if multiple bits are set, will return 'MULTIPLE BIT SET'.
- */
-XRT_CHECK_RESULT const char *
-vk_image_usage_flag_string(VkImageUsageFlagBits bits, bool null_on_unknown);
-
-/*!
- * Returns the composite alpha flag if one valid bit is set,
- * if multiple bits are set, will return 'MULTIPLE BIT SET'.
- */
-XRT_CHECK_RESULT const char *
-vk_composite_alpha_flag_string(VkCompositeAlphaFlagBitsKHR bits, bool null_on_unknown);
-
-/*!
- * Returns the surface transform flag if one valid bit is set,
- * if multiple bits are set, will return 'MULTIPLE BIT SET'.
- */
-XRT_CHECK_RESULT const char *
-vk_surface_transform_flag_string(VkSurfaceTransformFlagBitsKHR bits, bool null_on_unknown);
-
-#ifdef VK_KHR_display
-/*!
- * Returns the display plane alpha flag if one valid bit is set,
- * if multiple bits are set, will return 'MULTIPLE BIT SET'.
- */
-XRT_CHECK_RESULT const char *
-vk_display_plane_alpha_flag_string(VkDisplayPlaneAlphaFlagBitsKHR bits, bool null_on_unknown);
-#endif
 
 
 /*
@@ -1372,6 +1322,7 @@ vk_create_timeline_semaphore_from_native(struct vk_bundle *vk, xrt_graphics_sync
  */
 
 #if defined(VK_EXT_calibrated_timestamps) || defined(VK_KHR_calibrated_timestamps) || defined(XRT_DOXYGEN)
+
 /*!
  * Convert timestamps in GPU ticks (as return by VkQueryPool timestamp queries)
  * into host CPU nanoseconds, same time domain as @ref os_monotonic_get_ns.
@@ -1392,8 +1343,89 @@ vk_create_timeline_semaphore_from_native(struct vk_bundle *vk, xrt_graphics_sync
  * @ingroup aux_vk
  */
 XRT_CHECK_RESULT VkResult
-vk_convert_timestamps_to_host_ns(struct vk_bundle *vk, uint32_t count, uint64_t *in_out_timestamps);
-#endif
+vk_convert_device_timestamps_to_host_ns(struct vk_bundle *vk, uint32_t count, uint64_t *in_out_timestamps);
+
+/*!
+ * Convert timestamps from an arbitrary domain into host CPU timestamps, in
+ * nanoseconds.
+ *
+ * Must only be used for source domains that are in nanosecond scale and do not
+ * require any pNext chain.
+ *
+ * @param vk                The Vulkan bundle.
+ * @param source_domain     Time domain to convert from.
+ * @param count             Number of timestamps to be converted.
+ * @param[in,out] in_out_timestamps Array of timestamps to be converted, done in place.
+ *
+ * @ingroup aux_vk
+ */
+XRT_CHECK_RESULT VkResult
+vk_convert_timestamps_to_host(struct vk_bundle *vk,
+                              VkTimeDomainEXT source_domain,
+                              uint32_t count,
+                              uint64_t *in_out_timestamps);
+
+/*!
+ * Convert timestamps from host CPU domain into an arbitrary domain, in
+ * nanoseconds.
+ *
+ * Must only be used for target domains that are in nanosecond scale and do not
+ * require any pNext chain.
+ *
+ * @param vk                The Vulkan bundle.
+ * @param target_domain     Time domain to convert into.
+ * @param count             Number of timestamps to be converted.
+ * @param[in,out] in_out_timestamps Array of timestamps to be converted, done in place.
+ *
+ * @ingroup aux_vk
+ */
+XRT_CHECK_RESULT VkResult
+vk_convert_timestamps_from_host(struct vk_bundle *vk,
+                                VkTimeDomainEXT target_domain,
+                                uint32_t count,
+                                uint64_t *in_out_timestamps);
+
+#if defined(VK_EXT_present_timing) || defined(XRT_DOXYGEN)
+
+/*!
+ * Convert swapchain timestamps into host CPU timestamps, in nanoseconds.
+ *
+ * @param vk                The Vulkan bundle.
+ * @param source_domain     Swapchain time domain to convert from.
+ * @param swapchain         The swapchain info to use for conversion.
+ * @param count             Number of timestamps to be converted.
+ * @param[in,out] in_out_timestamps Array of timestamps to be converted, done in place.
+ *
+ * @ingroup aux_vk
+ */
+XRT_CHECK_RESULT VkResult
+vk_convert_swapchain_timestamps_to_host(struct vk_bundle *vk,
+                                        VkTimeDomainEXT source_domain,
+                                        const VkSwapchainCalibratedTimestampInfoEXT *swapchain,
+                                        uint32_t count,
+                                        uint64_t *in_out_timestamps);
+
+/*!
+ * Convert host CPU timestamps into swapchain timestamps, in nanoseconds.
+ *
+ * @param vk                The Vulkan bundle.
+ * @param target_domain     Swapchain time domain to convert to.
+ * @param swapchain         The swapchain info to use for conversion.
+ * @param count             Number of timestamps to be converted.
+ * @param[in,out] in_out_timestamps Array of timestamps to be converted, done in place.
+ *
+ * @ingroup aux_vk
+ */
+XRT_CHECK_RESULT VkResult
+vk_convert_host_timestamps_to_swapchain(struct vk_bundle *vk,
+                                        VkTimeDomainEXT target_domain,
+                                        const VkSwapchainCalibratedTimestampInfoEXT *swapchain,
+                                        uint32_t count,
+                                        uint64_t *in_out_timestamps);
+
+#endif // defined(VK_EXT_present_timing) || defined(XRT_DOXYGEN)
+
+#endif // defined(VK_EXT_calibrated_timestamps) || defined(VK_KHR_calibrated_timestamps) || defined(XRT_DOXYGEN)
 
 
 #ifdef __cplusplus

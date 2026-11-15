@@ -323,8 +323,7 @@ predict_next_frame(struct pacing_compositor *pc, int64_t now_ns)
 	} else if (last_completed == last_predicted) {
 		// Very high probability that we missed a frame.
 		f = walk_forward_through_frames(pc, last_completed->earliest_present_time_ns, now_ns);
-	} else if (last_completed != NULL) {
-		assert(last_predicted != NULL);
+	} else if (last_completed != NULL && last_predicted != NULL) {
 		assert(last_predicted->frame_id > last_completed->frame_id);
 
 		int64_t diff_id = last_predicted->frame_id - last_completed->frame_id;
@@ -345,10 +344,11 @@ predict_next_frame(struct pacing_compositor *pc, int64_t now_ns)
 		}
 
 		f = walk_forward_through_frames(pc, adjusted_last_present_time_ns, now_ns);
-	} else {
-		assert(last_predicted != NULL);
-
+	} else if (last_predicted != NULL) {
 		f = walk_forward_through_frames(pc, last_predicted->predicted_display_time_ns, now_ns);
+	} else {
+		UPC_LOG_E("Failed to predict next frame");
+		return NULL;
 	}
 
 	f->predicted_display_time_ns = calc_display_time_from_present_time(pc, f->desired_present_time_ns);
@@ -394,6 +394,13 @@ adjust_comp_time(struct pacing_compositor *pc, struct frame *f)
 	} else {
 		// Back off the present time.
 		pc->comp_time_ns += pc->adjust_non_miss_ns;
+	}
+
+	// Clamp to [0, comp_time_max_ns].
+	if (pc->comp_time_ns > pc->comp_time_max_ns) {
+		pc->comp_time_ns = pc->comp_time_max_ns;
+	} else if (pc->comp_time_ns < 0) {
+		pc->comp_time_ns = 0;
 	}
 }
 

@@ -1,5 +1,6 @@
 # SPDX-License-Identifier: CC0-1.0
 # SPDX-FileCopyrightText: 2018-2026 Collabora, Ltd. and the Monado contributors
+# SPDX-FileCopyrightText: 2026, NVIDIA CORPORATION.
 
 {# ignore the warning, this is actually the template to edit. #}
 ###############################################
@@ -162,6 +163,11 @@ check-signoff:
     - base64 --decode ${MONADO_ANDROID_KEYSTORE} > monado-release.jks
 {% endif %}
     - .gitlab-ci/ci-gradle-build.sh {{ job.target }}
+
+{#- standalone projects under examples/ -#}
+{%- elif job.examples %}
+
+    - .gitlab-ci/ci-cmake-build-examples.sh {{ job.examples | join(' ') }}
 
 {#- regular or NDK cmake builds -#}
 {%- else %}

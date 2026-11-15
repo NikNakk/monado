@@ -49,7 +49,7 @@ cli_cmd_test(int argc, const char **argv)
 
 	xret = xrt_instance_get_prober(xi, &xp);
 	if (xret != XRT_SUCCESS) {
-		do_exit(&xi, ret);
+		return do_exit(&xi, ret);
 	}
 	if (xp != NULL) {
 		// This instance provides an xrt_prober so we can dump some
@@ -69,7 +69,7 @@ cli_cmd_test(int argc, const char **argv)
 
 		ret = xrt_prober_dump(xp, true);
 		if (ret != 0) {
-			do_exit(&xi, ret);
+			return do_exit(&xi, ret);
 		}
 	}
 

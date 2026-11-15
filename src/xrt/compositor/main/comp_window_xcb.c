@@ -8,6 +8,7 @@
  * @ingroup comp_main
  */
 
+#include "vk/vk_pretty_print.h"
 #include <xcb/xcb.h>
 #include <xcb/randr.h>
 
@@ -439,7 +440,7 @@ comp_window_xcb_create_surface(struct comp_window_xcb *w, VkSurfaceKHR *out_surf
 	    NULL,                        //
 	    &surface);                   //
 	if (ret != VK_SUCCESS) {
-		COMP_ERROR(w->base.base.c, "vkCreateXcbSurfaceKHR: %s", vk_result_string(ret));
+		COMP_ERROR(w->base.base.c, "vkCreateXcbSurfaceKHR: %s", vk_str_result(ret));
 		return ret;
 	}
 

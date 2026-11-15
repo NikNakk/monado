@@ -2,12 +2,13 @@
 
 <!--
 Copyright 2021-2022, Collabora, Ltd. and the Monado contributors
+Copyright 2026, NVIDIA CORPORATION.
 SPDX-License-Identifier: BSL-1.0
 -->
 
 [TOC]
 
-- Last updated: 12-September-2022
+- Last updated: 26-October-2026
 
 When the service starts, an `xrt_instance` is created and selected, a native
 compositor is initialized by a system compositor, a shared memory segment for
@@ -36,9 +37,11 @@ specific way each need is met is highlighted below.
 
 In an typical Linux environment, the Monado service can be launched one of two
 ways: manually, or by socket activation (e.g. from systemd). In either case,
-there is a Unix domain socket with a well-known name (known at compile time, and
-built-in to both the service executable and the client shared library) used by
-clients to connect to the service: this provides the **locating** function.
+there is a Unix domain socket with a well-known name used by clients to connect
+to the service: this provides the **locating** function. The name is not built
+into the IPC code: the service and client targets pass it in when they start.
+Monado's own targets use `XRT_IPC_MSG_SOCK_FILENAME` from
+`target_ipc_defaults.h`.
 This socket is polled in the service mainloop, using epoll, to detect any new
 client connections.
 

@@ -8,6 +8,7 @@
  * @ingroup comp_main
  */
 
+#include "vk/vk_pretty_print.h"
 #include <xcb/xcb.h>
 #include <xcb/randr.h>
 #include <X11/Xlib-xcb.h>
@@ -279,7 +280,7 @@ comp_window_direct_randr_get_output(struct comp_window_direct_randr *w, RROutput
 	VkDisplayKHR display;
 	ret = vk->vkGetRandROutputDisplayEXT(vk->physical_device, w->dpy, output, &display);
 	if (ret != VK_SUCCESS) {
-		COMP_ERROR(w->base.base.c, "vkGetRandROutputDisplayEXT: %s", vk_result_string(ret));
+		COMP_ERROR(w->base.base.c, "vkGetRandROutputDisplayEXT: %s", vk_str_result(ret));
 		return VK_NULL_HANDLE;
 	}
 
@@ -327,8 +328,8 @@ append_randr_display(struct comp_window_direct_randr *w,
 
 	if (mode_info == NULL) {
 		COMP_ERROR(w->base.base.c, "No mode with id %d found??", output_modes[0]);
+		return;
 	}
-
 
 	struct comp_window_direct_randr_display d = {
 	    .name = U_TYPED_ARRAY_CALLOC(char, name_len + 1),

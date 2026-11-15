@@ -59,8 +59,8 @@ enum rift_variant
  * @return The number of devices created, or a negative value on error.
  */
 int
-rift_devices_create(struct os_hid_device *hmd_dev,
-                    struct os_hid_device *radio_dev,
+rift_devices_create(struct h_hid_device *hmd_dev,
+                    struct h_hid_device *radio_dev,
                     enum rift_variant variant,
                     const char *serial_number,
                     struct xrt_frame_context *xfctx,

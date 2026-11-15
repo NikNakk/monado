@@ -9,6 +9,7 @@
  * @ingroup aux_vk
  */
 
+#include "vk/vk_pretty_print.h"
 #include "vk/vk_helpers.h"
 
 
@@ -75,7 +76,7 @@ vk_create_descriptor_pool(struct vk_bundle *vk,
 	    NULL,                         // pAllocator
 	    &descriptor_pool);            // pDescriptorPool
 	if (ret != VK_SUCCESS) {
-		VK_ERROR(vk, "vkCreateRenderPass failed: %s", vk_result_string(ret));
+		VK_ERROR(vk, "vkCreateRenderPass failed: %s", vk_str_result(ret));
 		return ret;
 	}
 
@@ -105,7 +106,7 @@ vk_create_descriptor_set(struct vk_bundle *vk,
 	    &alloc_info,                    // pAllocateInfo
 	    &descriptor_set);               // pDescriptorSets
 	if (ret != VK_SUCCESS) {
-		VK_DEBUG(vk, "vkAllocateDescriptorSets failed: %s", vk_result_string(ret));
+		VK_DEBUG(vk, "vkAllocateDescriptorSets failed: %s", vk_str_result(ret));
 		return ret;
 	}
 
@@ -134,7 +135,7 @@ vk_create_pipeline_layout(struct vk_bundle *vk,
 	    NULL,                         // pAllocator
 	    &pipeline_layout);            // pPipelineLayout
 	if (ret != VK_SUCCESS) {
-		VK_ERROR(vk, "vkCreatePipelineLayout failed: %s", vk_result_string(ret));
+		VK_ERROR(vk, "vkCreatePipelineLayout failed: %s", vk_str_result(ret));
 		return ret;
 	}
 
@@ -159,7 +160,7 @@ vk_create_pipeline_cache(struct vk_bundle *vk, VkPipelineCache *out_pipeline_cac
 	    NULL,                        // pAllocator
 	    &pipeline_cache);            // pPipelineCache
 	if (ret != VK_SUCCESS) {
-		VK_ERROR(vk, "vkCreatePipelineCache failed: %s", vk_result_string(ret));
+		VK_ERROR(vk, "vkCreatePipelineCache failed: %s", vk_str_result(ret));
 		return ret;
 	}
 
@@ -204,7 +205,7 @@ vk_create_compute_pipeline(struct vk_bundle *vk,
 	    NULL,                           // pAllocator
 	    &pipeline);                     // pPipelines
 	if (ret != VK_SUCCESS) {
-		VK_DEBUG(vk, "vkCreateComputePipelines failed: %s", vk_result_string(ret));
+		VK_DEBUG(vk, "vkCreateComputePipelines failed: %s", vk_str_result(ret));
 		return ret;
 	}
 

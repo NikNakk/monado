@@ -77,6 +77,30 @@ class SourceLicenseScope(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("Missing licenses: MIT", result.stdout)
 
+    def add_archive_license_text(self):
+        shutil.copyfile(ROOT / "LICENSES/GPL-3.0-or-later.txt", self.root / "LICENSES/GPL-3.0-or-later.txt")
+        self.write("experiments/alyx-vulkan/patches/xrizer-api-wall-trace.patch", self.header("GPL-3.0-or-later"))
+
+    def test_archive_license_text_is_omitted_from_temporary_source_view(self):
+        self.add_archive_license_text()
+        before = (self.root / "LICENSES/GPL-3.0-or-later.txt").read_bytes()
+        result = self.check_scope()
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(before, (self.root / "LICENSES/GPL-3.0-or-later.txt").read_bytes())
+
+    def test_archive_license_text_is_retained_when_source_uses_it(self):
+        self.add_archive_license_text()
+        self.write("src/gpl.c", self.header("GPL-3.0-or-later") + "int value;\n")
+        result = self.check_scope()
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertNotIn("License text outside source scope:", result.stdout)
+
+    def test_unrelated_unused_license_still_fails(self):
+        shutil.copyfile(ROOT / "LICENSES/MIT.txt", self.root / "LICENSES/MIT.txt")
+        result = self.check_scope()
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("Unused licenses: MIT", result.stdout)
+
     def test_ignored_generated_files_do_not_enter_source_scope(self):
         self.write(".gitignore", self.header().replace("//", "#") + "generated/\n")
         self.write("generated/capture.log", "unlicensed generated data\n")

@@ -1,6 +1,6 @@
 // Copyright 2022, Magic Leap, Inc.
 // Copyright 2020-2022, Collabora, Ltd.
-// Copyright 2025, NVIDIA CORPORATION.
+// Copyright 2025-2026, NVIDIA CORPORATION.
 // SPDX-License-Identifier: BSL-1.0
 /*!
  * @file
@@ -233,15 +233,20 @@ ipc_server_mainloop_poll(struct ipc_server *vs, struct ipc_server_mainloop *ml)
 	}
 
 	if (ConnectNamedPipe(ml->pipe_handle, nullptr)) {
-		DWORD err = GetLastError();
-		U_LOG_E("ConnectNamedPipe unexpected return TRUE treating as failure: %lu %s", err, ipc_winerror(err));
-		ipc_server_handle_failure(vs);
-		return;
+		return; // PIPE_NOWAIT: TRUE means listening again after DisconnectNamedPipe.
 	}
 
 	switch (DWORD err = GetLastError()) {
 	case ERROR_PIPE_LISTENING: return;
 	case ERROR_PIPE_CONNECTED: handle_connected_client(vs, ml); return;
+	case ERROR_NO_DATA:
+		U_LOG_I("A client closed the pipe before it was accepted.");
+		if (!DisconnectNamedPipe(ml->pipe_handle)) {
+			err = GetLastError();
+			U_LOG_E("DisconnectNamedPipe failed: %lu %s", err, ipc_winerror(err));
+			ipc_server_handle_failure(vs);
+		}
+		return;
 	default:
 		U_LOG_E("ConnectNamedPipe failed: %lu %s", err, ipc_winerror(err));
 		ipc_server_handle_failure(vs);
@@ -250,7 +255,7 @@ ipc_server_mainloop_poll(struct ipc_server *vs, struct ipc_server_mainloop *ml)
 }
 
 int
-ipc_server_mainloop_init(struct ipc_server_mainloop *ml, bool no_stdin)
+ipc_server_mainloop_init(struct ipc_server_mainloop *ml, const char *socket_filename, bool no_stdin)
 {
 	IPC_TRACE_MARKER();
 
@@ -262,7 +267,7 @@ ipc_server_mainloop_init(struct ipc_server_mainloop *ml, bool no_stdin)
 	char pipe_name[MAX_PATH + prefix_len];
 	snprintf(pipe_name, ARRAY_SIZE(pipe_name), pipe_prefix);
 
-	if (u_file_get_path_in_runtime_dir(XRT_IPC_MSG_SOCK_FILENAME, pipe_name + prefix_len, MAX_PATH) == -1) {
+	if (u_file_get_path_in_runtime_dir(socket_filename, pipe_name + prefix_len, MAX_PATH) == -1) {
 		U_LOG_E("u_file_get_path_in_runtime_dir failed!");
 		return -1;
 	}

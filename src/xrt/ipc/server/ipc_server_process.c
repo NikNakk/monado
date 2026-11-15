@@ -36,6 +36,7 @@
 
 #include "shared/ipc_protocol.h"
 #include "shared/ipc_shmem.h"
+#include "shared/ipc_utils.h"
 #include "server/ipc_server.h"
 #include "server/ipc_server_objects.h"
 #include "server/ipc_server_interface.h"
@@ -344,7 +345,7 @@ init_all(struct ipc_server *s,
          enum u_logging_level log_level,
          const struct ipc_server_callbacks *callbacks,
          void *callback_data,
-         bool exit_on_disconnect)
+         const struct ipc_server_main_info *ismi)
 {
 	xrt_result_t xret = XRT_SUCCESS;
 	int ret;
@@ -379,16 +380,16 @@ init_all(struct ipc_server *s,
 	 * @todo NULL is also returned when the pidfile can't be created, for example without a runtime dir, which is
 	 * then reported as an already running service.
 	 */
-	s->process = u_process_create_if_not_running();
+	s->process = u_process_create_if_not_running(ismi->pid_filename);
 	if (!s->process) {
-		IPC_ERROR(s, "monado-service is already running! Use XRT_LOG=trace for more information.");
+		IPC_ERROR(s, "Another service instance is already running! Use XRT_LOG=trace for more information.");
 		xret = XRT_ERROR_IPC_SERVICE_ALREADY_RUNNING;
 	}
 	IPC_CHK_WITH_GOTO(s, xret, "u_process_create_if_not_running", error);
 
 	// Yes we should be running.
 	s->running = true;
-	s->exit_on_disconnect = exit_on_disconnect;
+	s->exit_on_disconnect = ismi->exit_on_disconnect;
 	s->exit_when_idle = debug_get_bool_option_exit_when_idle();
 	s->last_client_disconnect_ns = 0;
 	uint64_t delay_ms = debug_get_num_option_exit_when_idle_delay_ms();
@@ -408,7 +409,7 @@ init_all(struct ipc_server *s,
 	xret = xrt_instance_create(NULL, &s->xinst);
 	IPC_CHK_WITH_GOTO(s, xret, "xrt_instance_create", error);
 
-	ret = ipc_server_mainloop_init(&s->ml, s->no_stdin);
+	ret = ipc_server_mainloop_init(&s->ml, ismi->socket_filename, s->no_stdin);
 	if (ret < 0) {
 		xret = XRT_ERROR_IPC_MAINLOOP_FAILED_TO_INIT;
 	}
@@ -1209,6 +1210,16 @@ ipc_server_main_common(const struct ipc_server_main_info *ismi,
 	// Log very early who we are.
 	U_LOG_IFL_I(log_level, "%s '%s' starting up...", u_runtime_description, u_git_tag);
 
+#ifndef XRT_OS_ANDROID
+	if (ismi->socket_filename == NULL || ismi->pid_filename == NULL) {
+		U_LOG_IFL_E(log_level, "Both socket_filename and pid_filename must be set in ipc_server_main_info!");
+		callbacks->init_failed(XRT_ERROR_INVALID_ARGUMENT, data);
+		return -1;
+	}
+
+	U_LOG_IFL_I(log_level, "Using socket '%s' and pidfile '%s'", ismi->socket_filename, ismi->pid_filename);
+#endif
+
 	// Allocate the server itself.
 	struct ipc_server *s = U_TYPED_CALLOC(struct ipc_server);
 
@@ -1217,6 +1228,19 @@ ipc_server_main_common(const struct ipc_server_main_info *ismi,
 
 #ifdef XRT_OS_WINDOWS
 	timeBeginPeriod(1);
+
+	// Windows 11 ignores timeBeginPeriod if the process isn't visible or audible.
+	PROCESS_POWER_THROTTLING_STATE throttling = {
+	    .Version = PROCESS_POWER_THROTTLING_CURRENT_VERSION,
+	    .ControlMask = PROCESS_POWER_THROTTLING_IGNORE_TIMER_RESOLUTION,
+	    .StateMask = 0,
+	};
+	if (!SetProcessInformation(GetCurrentProcess(), ProcessPowerThrottling, &throttling, sizeof(throttling))) {
+		DWORD err = GetLastError();
+		U_LOG_IFL_I(log_level,
+		            "SetProcessInformation(ProcessPowerThrottling) failed (expected before Windows 11): %lu %s",
+		            err, ipc_winerror(err));
+	}
 #endif
 
 	/*
@@ -1226,7 +1250,7 @@ ipc_server_main_common(const struct ipc_server_main_info *ismi,
 	 */
 	u_debug_gui_create(&ismi->udgci, &s->debug_gui);
 
-	xret = init_all(s, log_level, callbacks, data, ismi->exit_on_disconnect);
+	xret = init_all(s, log_level, callbacks, data, ismi);
 	U_LOG_CHK_ONLY_PRINT(log_level, xret, "init_all");
 	if (xret != XRT_SUCCESS) {
 		// Propagate the failure.

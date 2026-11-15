@@ -13,6 +13,7 @@
  * @ingroup comp_null
  */
 
+#include "vk/vk_pretty_print.h"
 #include "null_compositor.h"
 #include "null_interfaces.h"
 
@@ -180,7 +181,7 @@ compositor_init_vulkan(struct null_compositor *c)
 	ret = select_instances_extensions(c, required_instance_ext_builder, optional_instance_ext_builder);
 	if (ret != VK_SUCCESS) {
 		VK_ERROR(vk, "select_instances_extensions: %s\n\tFailed to select instance extensions.",
-		         vk_result_string(ret));
+		         vk_str_result(ret));
 		u_extension_list_builder_destroy(&required_instance_ext_builder);
 		u_extension_list_builder_destroy(&optional_instance_ext_builder);
 		return ret;

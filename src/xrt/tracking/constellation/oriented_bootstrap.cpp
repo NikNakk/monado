@@ -112,7 +112,10 @@ namespace {
 	          uint32_t min_blobs,
 	          View &view)
 	{
-		view = View{};
+		view.blobs.clear();
+		view.rays.clear();
+		view.led_cam.clear();
+		view.normal_cam.clear();
 		view.camera = &camera;
 		Eigen::Quaterniond q_wc(camera.Tcv_world_cam.orientation.w, camera.Tcv_world_cam.orientation.x,
 		                        camera.Tcv_world_cam.orientation.y, camera.Tcv_world_cam.orientation.z);

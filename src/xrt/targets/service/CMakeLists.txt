@@ -1,4 +1,5 @@
 # Copyright 2020-2021, Collabora, Ltd.
+# Copyright 2026, NVIDIA CORPORATION.
 # SPDX-License-Identifier: BSL-1.0
 
 add_executable(monado-service main.c)
@@ -19,6 +20,7 @@ target_link_libraries(
 		aux_util_debug_gui
 		st_prober
 		ipc_server
+		target_ipc_defaults
 		target_lists
 		target_instance
 	)

@@ -10,7 +10,7 @@
 
 #ifdef XRT_OS_OSX
 
-#include "os/os_hid.h"
+#include "hid/h_hid.h"
 
 #include <CoreFoundation/CoreFoundation.h>
 #include <IOKit/IOKitLib.h>
@@ -170,7 +170,7 @@ static int
 p_osx_hid_open_interface(struct xrt_prober *xp,
                          struct xrt_prober_device *xpdev,
                          int hid_iface,
-                         struct os_hid_device **out_hid_dev)
+                         struct h_hid_device **out_hid_dev)
 {
 	(void)xp;
 	struct prober_device *pdev = (struct prober_device *)xpdev;
@@ -180,7 +180,7 @@ p_osx_hid_open_interface(struct xrt_prober *xp,
 		return -1;
 	}
 
-	return os_hid_open_iokit(pdev->osx_hid_device, out_hid_dev);
+	return h_hid_open_iokit(pdev->osx_hid_device, out_hid_dev);
 }
 
 static bool

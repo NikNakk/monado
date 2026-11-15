@@ -10,7 +10,7 @@
  */
 
 #include "os/os_time.h"
-#include "os/os_hid.h"
+#include "hid/h_hid.h"
 
 #include "util/u_trace_marker.h"
 
@@ -46,7 +46,7 @@ read_packets(struct wmr_bt_connection *conn)
 
 	// Better cpu efficiency with blocking reads instead of multiple reads.
 	os_mutex_lock(&conn->hid_lock);
-	int size = os_hid_read(conn->controller_hid, buffer, sizeof(buffer), 500);
+	int size = h_hid_read(conn->controller_hid, buffer, sizeof(buffer), 500);
 
 	// Get the timing as close to reading packet as possible.
 	uint64_t now_ns = os_monotonic_get_ns();
@@ -77,7 +77,7 @@ send_bytes(struct wmr_controller_connection *wcc, const uint8_t *buffer, uint32_
 	struct wmr_bt_connection *conn = (struct wmr_bt_connection *)(wcc);
 
 	os_mutex_lock(&conn->hid_lock);
-	int ret = os_hid_write(conn->controller_hid, buffer, buf_size);
+	int ret = h_hid_write(conn->controller_hid, buffer, buf_size);
 	os_mutex_unlock(&conn->hid_lock);
 
 	return ret != -1 && (uint32_t)(ret) == buf_size;
@@ -92,7 +92,7 @@ read_sync(struct wmr_controller_connection *wcc, uint8_t *buffer, uint32_t buf_s
 	struct wmr_bt_connection *conn = (struct wmr_bt_connection *)(wcc);
 
 	os_mutex_lock(&conn->hid_lock);
-	int res = os_hid_read(conn->controller_hid, buffer, buf_size, timeout_ms);
+	int res = h_hid_read(conn->controller_hid, buffer, buf_size, timeout_ms);
 	os_mutex_unlock(&conn->hid_lock);
 
 	return res;
@@ -131,7 +131,7 @@ wmr_bt_connection_destroy(struct wmr_controller_connection *base)
 	os_thread_helper_destroy(&conn->controller_thread);
 
 	if (conn->controller_hid != NULL) {
-		os_hid_destroy(conn->controller_hid);
+		h_hid_destroy(conn->controller_hid);
 		conn->controller_hid = NULL;
 	}
 
@@ -147,7 +147,7 @@ wmr_bt_connection_destroy(struct wmr_controller_connection *base)
  */
 
 struct xrt_device *
-wmr_bt_controller_create(struct os_hid_device *controller_hid,
+wmr_bt_controller_create(struct h_hid_device *controller_hid,
                          enum xrt_device_type controller_type,
                          uint16_t vid,
                          uint16_t pid,

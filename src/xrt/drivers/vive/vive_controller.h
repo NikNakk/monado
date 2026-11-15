@@ -47,7 +47,7 @@ struct vive_controller_device
 {
 	struct xrt_device base;
 
-	struct os_hid_device *controller_hid;
+	struct h_hid_device *controller_hid;
 	struct os_thread_helper controller_thread;
 	struct os_mutex lock;
 
@@ -124,7 +124,7 @@ struct vive_controller_device
 };
 
 struct vive_controller_device *
-vive_controller_create(struct os_hid_device *controller_hid, enum watchman_gen watchman_gen, int controller_num);
+vive_controller_create(struct h_hid_device *controller_hid, enum watchman_gen watchman_gen, int controller_num);
 
 #ifdef __cplusplus
 }

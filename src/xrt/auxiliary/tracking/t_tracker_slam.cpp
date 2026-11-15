@@ -25,7 +25,7 @@
 #include "math/m_filter_fifo.h"
 #include "math/m_filter_one_euro.h"
 #include "math/m_predict.h"
-#include "math/m_relation_history.h"
+#include "math/m_relation_history.hpp"
 #include "math/m_space.h"
 #include "math/m_vec3.h"
 
@@ -780,12 +780,10 @@ flush_poses(TrackerSlam &t)
 		xrt_vec3 nvel{data.vx, data.vy, data.vz};
 
 		// Last relation
-		xrt_space_relation lr = XRT_SPACE_RELATION_ZERO;
-		int64_t lts;
-		t.slam_rels.get_latest(&lts, &lr);
-		xrt_quat lrot = lr.pose.orientation;
+		auto latest = t.slam_rels.getLatest().value_or(math::RelationHistoryEntry{});
+		xrt_quat lrot = latest.relation.pose.orientation;
 
-		double dt = time_ns_to_s(nts - lts);
+		double dt = time_ns_to_s(nts - latest.timestamp);
 
 		SLAM_TRACE("Dequeued SLAM pose ts=%ld p=[%f,%f,%f] r=[%f,%f,%f,%f]", //
 		           nts, data.px, data.py, data.pz, data.ox, data.oy, data.oz, data.ow);
@@ -799,7 +797,7 @@ flush_poses(TrackerSlam &t)
 
 		// Push to relationship history unless we are debugging prediction
 		if (t.dbg_pred_counter % t.dbg_pred_every == 0) {
-			t.slam_rels.push(rel, nts);
+			t.slam_rels.pushOrUpdate({rel, nts}, false);
 		}
 		t.dbg_pred_counter = (t.dbg_pred_counter + 1) % t.dbg_pred_every;
 
@@ -832,15 +830,17 @@ predict_pose(TrackerSlam &t, timepoint_ns when_ns, struct xrt_space_relation *ou
 	SLAM_DASSERT(valid_pred_type, "Invalid prediction type (%d)", t.pred_type);
 
 	// Get last relation computed purely from SLAM data
-	xrt_space_relation rel{};
-	int64_t rel_ts;
-	bool empty = !t.slam_rels.get_latest(&rel_ts, &rel);
+	auto latest = t.slam_rels.getLatest();
+	bool empty = !latest.has_value();
 
 	// Stop if there is no previous relation to use for prediction
 	if (empty) {
 		out_relation->relation_flags = XRT_SPACE_RELATION_BITMASK_NONE;
 		return;
 	}
+
+	auto &rel = latest->relation;
+	const auto rel_ts = latest->timestamp;
 
 	// Use only last SLAM pose without prediction if PREDICTION_NONE
 	if (t.pred_type == SLAM_PRED_NONE) {
@@ -851,7 +851,9 @@ predict_pose(TrackerSlam &t, timepoint_ns when_ns, struct xrt_space_relation *ou
 	// Use only SLAM data if asking for an old point in time or PREDICTION_SP_SO_SA_SL
 	SLAM_DASSERT_(rel_ts < INT64_MAX);
 	if (t.pred_type == SLAM_PRED_POSE_ONLY || when_ns <= (int64_t)rel_ts) {
-		t.slam_rels.get(when_ns, out_relation);
+		math::RelationHistoryEntry entry{};
+		t.slam_rels.get(when_ns, entry);
+		*out_relation = entry.relation;
 		return;
 	}
 
@@ -919,8 +921,11 @@ filter_pose(TrackerSlam &t, timepoint_ns when_ns, struct xrt_space_relation *out
 
 		if (out_relation->relation_flags & XRT_SPACE_RELATION_ORIENTATION_VALID_BIT) {
 			// Don't save w component as we can retrieve it knowing these are (almost) unit quaternions
-			xrt_vec3 rot = {out_relation->pose.orientation.x, out_relation->pose.orientation.y,
-			                out_relation->pose.orientation.z};
+			xrt_vec3 rot = {
+			    out_relation->pose.orientation.x,
+			    out_relation->pose.orientation.y,
+			    out_relation->pose.orientation.z,
+			};
 			m_ff_vec3_f32_push(t.filter.rot_ff, &rot, when_ns);
 		}
 

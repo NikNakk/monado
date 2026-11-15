@@ -3,11 +3,11 @@
 /*!
  * @file
  * @brief HID implementation based on macOS IOKit.
- * @ingroup aux_os
+ * @ingroup aux_hid
  */
 
-#include "os_hid.h"
-#include "os_time.h"
+#include "hid/h_hid.h"
+#include "os/os_time.h"
 
 #ifdef XRT_OS_OSX
 
@@ -39,11 +39,11 @@ struct iokit_input_report
 };
 
 /*!
- * @implements os_hid_device
+ * @implements h_hid_device
  */
 struct hid_iokit
 {
-	struct os_hid_device base;
+	struct h_hid_device base;
 
 	IOHIDDeviceRef device;
 	uint8_t *input_report_buffer;
@@ -277,7 +277,7 @@ iokit_wait_for_report_locked(struct hid_iokit *hid, int milliseconds)
 
 static int
 iokit_read_with_timestamp(
-    struct os_hid_device *ohdev, uint8_t *data, size_t length, int milliseconds, int64_t *out_timestamp_ns)
+    struct h_hid_device *ohdev, uint8_t *data, size_t length, int milliseconds, int64_t *out_timestamp_ns)
 {
 	struct hid_iokit *hid = (struct hid_iokit *)ohdev;
 	if (data == NULL || length == 0) {
@@ -320,7 +320,7 @@ iokit_read_with_timestamp(
 }
 
 static int
-iokit_read(struct os_hid_device *ohdev, uint8_t *data, size_t length, int milliseconds)
+iokit_read(struct h_hid_device *ohdev, uint8_t *data, size_t length, int milliseconds)
 {
 	return iokit_read_with_timestamp(ohdev, data, length, milliseconds, NULL);
 }
@@ -364,13 +364,13 @@ iokit_set_report(struct hid_iokit *hid, IOHIDReportType type, const uint8_t *dat
 }
 
 static int
-iokit_write(struct os_hid_device *ohdev, const uint8_t *data, size_t length)
+iokit_write(struct h_hid_device *ohdev, const uint8_t *data, size_t length)
 {
 	return iokit_set_report((struct hid_iokit *)ohdev, kIOHIDReportTypeOutput, data, length);
 }
 
 static int
-iokit_get_feature(struct os_hid_device *ohdev, uint8_t report_num, uint8_t *data, size_t length)
+iokit_get_feature(struct h_hid_device *ohdev, uint8_t report_num, uint8_t *data, size_t length)
 {
 	struct hid_iokit *hid = (struct hid_iokit *)ohdev;
 	if (data == NULL || length == 0) {
@@ -405,7 +405,7 @@ iokit_get_feature(struct os_hid_device *ohdev, uint8_t report_num, uint8_t *data
 }
 
 static int
-iokit_get_feature_timeout(struct os_hid_device *ohdev, void *data, size_t length, uint32_t timeout)
+iokit_get_feature_timeout(struct h_hid_device *ohdev, void *data, size_t length, uint32_t timeout)
 {
 	(void)timeout;
 	if (data == NULL || length == 0) {
@@ -417,13 +417,13 @@ iokit_get_feature_timeout(struct os_hid_device *ohdev, void *data, size_t length
 }
 
 static int
-iokit_set_feature(struct os_hid_device *ohdev, const uint8_t *data, size_t length)
+iokit_set_feature(struct h_hid_device *ohdev, const uint8_t *data, size_t length)
 {
 	return iokit_set_report((struct hid_iokit *)ohdev, kIOHIDReportTypeFeature, data, length);
 }
 
 static int
-iokit_get_physical_address(struct os_hid_device *ohdev, uint8_t *data, size_t length)
+iokit_get_physical_address(struct h_hid_device *ohdev, uint8_t *data, size_t length)
 {
 	struct hid_iokit *hid = (struct hid_iokit *)ohdev;
 	if (data == NULL || length == 0) {
@@ -443,7 +443,7 @@ iokit_get_physical_address(struct os_hid_device *ohdev, uint8_t *data, size_t le
 }
 
 static void
-iokit_destroy(struct os_hid_device *ohdev)
+iokit_destroy(struct h_hid_device *ohdev)
 {
 	struct hid_iokit *hid = (struct hid_iokit *)ohdev;
 	CFRunLoopRef run_loop = NULL;
@@ -482,7 +482,7 @@ iokit_destroy(struct os_hid_device *ohdev)
 }
 
 int
-os_hid_open_iokit(void *native_device, struct os_hid_device **out_hid)
+h_hid_open_iokit(void *native_device, struct h_hid_device **out_hid)
 {
 	if (native_device == NULL || out_hid == NULL) {
 		return -1;
@@ -567,8 +567,8 @@ os_hid_open_iokit(void *native_device, struct os_hid_device **out_hid)
 }
 
 int
-os_hid_open_iokit_bluetooth(
-    uint16_t vendor_id, uint16_t product_id, struct os_hid_device **out_hid, char *out_product, size_t product_size)
+h_hid_open_iokit_bluetooth(
+    uint16_t vendor_id, uint16_t product_id, struct h_hid_device **out_hid, char *out_product, size_t product_size)
 {
 	if (out_hid == NULL) {
 		return -1;
@@ -618,7 +618,7 @@ os_hid_open_iokit_bluetooth(
 					                   kCFStringEncodingUTF8);
 				}
 			}
-			ret = os_hid_open_iokit(device, out_hid);
+			ret = h_hid_open_iokit(device, out_hid);
 		}
 		CFRelease(device);
 	}

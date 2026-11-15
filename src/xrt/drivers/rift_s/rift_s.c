@@ -52,7 +52,7 @@ static void
 rift_s_system_free(struct rift_s_system *sys);
 
 static int
-read_camera_calibration(struct os_hid_device *hid_hmd, struct rift_s_camera_calibration_block *calibration)
+read_camera_calibration(struct h_hid_device *hid_hmd, struct rift_s_camera_calibration_block *calibration)
 {
 	char *json = NULL;
 	int json_len = 0;
@@ -68,7 +68,7 @@ read_camera_calibration(struct os_hid_device *hid_hmd, struct rift_s_camera_cali
 }
 
 static int
-read_hmd_fw_imu_calibration(struct os_hid_device *hid_hmd, struct rift_s_imu_calibration *imu_calibration)
+read_hmd_fw_imu_calibration(struct h_hid_device *hid_hmd, struct rift_s_imu_calibration *imu_calibration)
 {
 	char *json = NULL;
 	int json_len = 0;
@@ -84,7 +84,7 @@ read_hmd_fw_imu_calibration(struct os_hid_device *hid_hmd, struct rift_s_imu_cal
 }
 
 static int
-read_hmd_proximity_threshold(struct os_hid_device *hid_hmd, int *proximity_threshold)
+read_hmd_proximity_threshold(struct h_hid_device *hid_hmd, int *proximity_threshold)
 {
 	char *json = NULL;
 	int json_len = 0;
@@ -100,7 +100,7 @@ read_hmd_proximity_threshold(struct os_hid_device *hid_hmd, int *proximity_thres
 }
 
 static int
-read_hmd_config(struct os_hid_device *hid_hmd, struct rift_s_hmd_config *config)
+read_hmd_config(struct h_hid_device *hid_hmd, struct rift_s_hmd_config *config)
 {
 	int ret;
 
@@ -147,9 +147,9 @@ read_hmd_config(struct os_hid_device *hid_hmd, struct rift_s_hmd_config *config)
 struct rift_s_system *
 rift_s_system_create(struct xrt_prober *xp,
                      const unsigned char *hmd_serial_no,
-                     struct os_hid_device *hid_hmd,
-                     struct os_hid_device *hid_status,
-                     struct os_hid_device *hid_controllers)
+                     struct h_hid_device *hid_hmd,
+                     struct h_hid_device *hid_status,
+                     struct h_hid_device *hid_controllers)
 {
 	int ret;
 
@@ -269,7 +269,7 @@ rift_s_system_free(struct rift_s_system *sys)
 
 	for (int i = 0; i < 3; i++) {
 		if (sys->handles[i] != NULL)
-			os_hid_destroy(sys->handles[i]);
+			h_hid_destroy(sys->handles[i]);
 	}
 
 	/* Free the camera */
@@ -309,7 +309,7 @@ rift_s_system_reference(struct rift_s_system **dst, struct rift_s_system *src)
 	}
 }
 
-struct os_hid_device *
+struct h_hid_device *
 rift_s_system_hid_handle(struct rift_s_system *sys)
 {
 	return sys->handles[HMD_HID];
@@ -385,7 +385,7 @@ update_tracked_device_types(struct rift_s_system *sys)
 {
 	int res;
 	rift_s_devices_list_t dev_list;
-	struct os_hid_device *hid = sys->handles[HMD_HID];
+	struct h_hid_device *hid = sys->handles[HMD_HID];
 
 	res = rift_s_read_devices_list(hid, &dev_list);
 	if (res < 0)
@@ -515,7 +515,7 @@ handle_packets(struct rift_s_system *sys)
 			continue;
 
 		while (ret) {
-			int size = os_hid_read(sys->handles[i], buf, FEATURE_BUFFER_SIZE, 0);
+			int size = h_hid_read(sys->handles[i], buf, FEATURE_BUFFER_SIZE, 0);
 			if (size < 0) {
 				RIFT_S_ERROR("error reading from HMD device");
 				ret = false;

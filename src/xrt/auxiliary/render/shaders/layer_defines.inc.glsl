@@ -23,4 +23,12 @@
 //! Inset part of a split quad view projection layer.
 #define LAYER_COMP_TYPE_INSET 6
 
+//! These values must match enum xrt_blend_factor.
+#define LAYER_BLEND_FACTOR_ZERO 0
+#define LAYER_BLEND_FACTOR_ONE 1
+#define LAYER_BLEND_FACTOR_SRC_ALPHA 2
+#define LAYER_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA 3
+#define LAYER_BLEND_FACTOR_DST_ALPHA 4
+#define LAYER_BLEND_FACTOR_ONE_MINUS_DST_ALPHA 5
+
 #endif // LAYER_DEFINES_INC_GLSL

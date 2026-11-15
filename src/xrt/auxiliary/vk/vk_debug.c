@@ -7,6 +7,7 @@
  * @ingroup aux_vk
  */
 
+#include "vk/vk_pretty_print.h"
 #include "vk/vk_helpers.h"
 
 
@@ -37,7 +38,7 @@ vk_name_object(struct vk_bundle *vk, VkObjectType type, uint64_t object, const c
 
 	VkResult ret = vk->vkSetDebugUtilsObjectNameEXT(vk->device, &name_info);
 	if (ret != VK_SUCCESS) {
-		VK_ERROR(vk, "vkSetDebugUtilsObjectNameEXT: %s", vk_result_string(ret));
+		VK_ERROR(vk, "vkSetDebugUtilsObjectNameEXT: %s", vk_str_result(ret));
 	}
 }
 

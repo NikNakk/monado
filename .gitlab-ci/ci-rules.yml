@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: MIT
 # SPDX-FileCopyrightText: 2018-2023 the Mesa contributors
 # SPDX-FileCopyrightText: 2018-2023 Collabora, Ltd. and the Monado contributors
+# SPDX-FileCopyrightText: 2026, NVIDIA CORPORATION.
 
 # YAML anchors for rule conditions
 # --------------------------------
@@ -23,6 +24,7 @@
     # All paths, 1 hours have been wasted trying to combine the above arrays.
     - changes: &paths-all-files
         # Code
+        - "examples/**/*"
         - "scripts/**/*"
         - "src/**/*"
         # Doc

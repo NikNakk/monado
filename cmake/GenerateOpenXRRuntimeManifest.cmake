@@ -52,13 +52,13 @@ The following functions are provided by this module:
 get_filename_component(_OXR_MANIFEST_CMAKE_DIR "${CMAKE_CURRENT_LIST_FILE}"
                        PATH)
 set(_OXR_MANIFEST_SCRIPT
-    "${_OXR_MANIFEST_CMAKE_DIR}/generate_openxr_runtime_manifest.py"
+    "${_OXR_MANIFEST_CMAKE_DIR}/openxr_runtime/generate_openxr_runtime_manifest.py"
     CACHE INTERNAL "" FORCE)
 set(_OXR_MANIFEST_TEMPLATE
-    "${_OXR_MANIFEST_CMAKE_DIR}/openxr_manifest.in.json"
+    "${_OXR_MANIFEST_CMAKE_DIR}/openxr_runtime/openxr_manifest.in.json"
     CACHE INTERNAL "" FORCE)
 set(_OXR_MANIFEST_INSTALL_SCRIPT
-    "${_OXR_MANIFEST_CMAKE_DIR}/GenerateOpenXRRuntimeManifest.cmake.in"
+    "${_OXR_MANIFEST_CMAKE_DIR}/openxr_runtime/GenerateOpenXRRuntimeManifest.cmake.in"
     CACHE INTERNAL "" FORCE)
 
 function(generate_openxr_runtime_manifest_buildtree)

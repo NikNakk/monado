@@ -20,9 +20,7 @@ struct layer_data
 	uint layer_type;
 	uint unpremultiplied_alpha;
 	uint inverted_alpha;
-
-	// This struct is used in an array, gets padded to vec4.
-	uint _padding0;
+	uint advanced_blending;
 };
 
 struct image_info
@@ -32,7 +30,7 @@ struct image_info
 	uint has_depth;
 
 	// This struct is used in an array, gets padded to vec4.
-	uint _padding0;
+	uint blend_factors;
 };
 
 // Must match render_chroma_key_info in C code.
@@ -239,8 +237,10 @@ vec2 transform_uv_subimage(vec2 uv, uint layer)
 	return values.xy;
 }
 
-vec4 do_cylinder(vec2 view_uv, uint layer)
+vec4 do_cylinder(vec2 view_uv, uint layer, out bool covered)
 {
+	covered = false;
+
 	// Get ray position in model space.
 	const vec3 ray_origin = (LAYER.mv_inverse * vec4(0, 0, 0, 1)).xyz;
 
@@ -323,6 +323,8 @@ vec4 do_cylinder(vec2 view_uv, uint layer)
 	const float ymax = height / 2;
 
 	if (y < ymax && y > ymin && lon < uhan && lon > lhan) {
+		covered = true;
+
 		// map configured display region to whole texture
 		vec2 offset = vec2(lhan, ymin);
 		vec2 extent = vec2(uhan - lhan, ymax - ymin);
@@ -344,8 +346,10 @@ vec4 do_cylinder(vec2 view_uv, uint layer)
 	return out_color;
 }
 
-vec4 do_equirect2(vec2 view_uv, uint layer)
+vec4 do_equirect2(vec2 view_uv, uint layer, out bool covered)
 {
+	covered = false;
+
 	// Get ray position in model space.
 	const vec3 ray_origin = (LAYER.mv_inverse * vec4(0, 0, 0, 1)).xyz;
 
@@ -422,6 +426,8 @@ vec4 do_equirect2(vec2 view_uv, uint layer)
 	const float lvan = lower_vertical_angle / PI + 0.5f;
 
 	if (lat < uvan && lat > lvan && lon < uhan && lon > lhan) {
+		covered = true;
+
 		// map configured display region to whole texture
 		vec2 ll_offset = vec2(lhan, lvan);
 		vec2 ll_extent = vec2(uhan - lhan, uvan - lvan);
@@ -560,7 +566,7 @@ vec2 transform_uv_foveation(vec2 uv, uint layer)
 	return vec2(mix(x0, x1, local.x), mix(y0, y1, local.y));
 }
 
-vec4 do_projection_uv(vec2 view_uv, uint layer, out vec2 out_uv)
+vec4 do_projection_uv(vec2 view_uv, uint layer, out vec2 out_uv, out bool covered)
 {
 	uint source_image_index = LAYER.image_info.color_image_index;
 
@@ -579,10 +585,10 @@ vec4 do_projection_uv(vec2 view_uv, uint layer, out vec2 out_uv)
 	out_uv = view_uv;
 
 	// Reject coordinates outside the view frustum.
-	bool in_frustum_bounds =
+	covered =
 		all(greaterThanEqual(view_uv, vec2(0.0))) &&
 		all(lessThan(view_uv, vec2(1.0)));
-	if (!in_frustum_bounds) {
+	if (!covered) {
 		return vec4(0.0);
 	}
 
@@ -605,7 +611,10 @@ vec4 do_projection_uv(vec2 view_uv, uint layer, out vec2 out_uv)
 vec4 do_projection_inset(vec2 view_uv, uint layer, out float out_inset_blend_factor)
 {
 	vec2 uv = vec2(0.0, 0.0);
-	vec4 colour = do_projection_uv(view_uv, layer, uv);
+
+	// Covered is always true here, can ignore the out-argument
+	bool covered = false;
+	vec4 colour = do_projection_uv(view_uv, layer, uv, covered);
 
 	vec2 negative_edges = smoothstep(0, k_inset_blend_edge, uv);
 	vec2 positive_edges = smoothstep(1.0, 1.0 - k_inset_blend_edge, uv);
@@ -615,10 +624,10 @@ vec4 do_projection_inset(vec2 view_uv, uint layer, out float out_inset_blend_fac
 	return colour;
 }
 
-vec4 do_projection(vec2 view_uv, uint layer)
+vec4 do_projection(vec2 view_uv, uint layer, out bool covered)
 {
 	vec2 uv = vec2(0.5, 0.5);
-	return do_projection_uv(view_uv, layer, uv);
+	return do_projection_uv(view_uv, layer, uv, covered);
 }
 
 vec3 get_direction(vec2 uv)
@@ -640,8 +649,9 @@ vec3 get_direction(vec2 uv)
 	return direction;
 }
 
-vec4 do_quad(vec2 view_uv, uint layer)
+vec4 do_quad(vec2 view_uv, uint layer, out bool covered)
 {
+	covered = false;
 	// mv_inverse is used by cylinder/equirect layers. For quads, its first
 	// column holds conservative min/max view UVs when this variant is enabled.
 	if (k_use_quad_bounds) {
@@ -709,6 +719,8 @@ vec4 do_quad(vec2 view_uv, uint layer)
 			intersection_ps.y <= LAYER.quad_extent.y / 2.;
 
 		if (in_plane_bounds) {
+			covered = true;
+
 			// intersection_ps is in [-quad_extent .. quad_extent]. Transform to  [0 .. quad_extent], then scale to [ 0 .. 1 ] for sampling
 			vec2 plane_uv = (intersection_ps.xy + LAYER.quad_extent / 2.) / LAYER.quad_extent;
 
@@ -733,6 +745,26 @@ vec4 do_quad(vec2 view_uv, uint layer)
 	return vec4(colour);
 }
 
+float get_blend_factor(uint factor, float src_alpha, float dst_alpha)
+{
+	switch (factor) {
+	case LAYER_BLEND_FACTOR_ZERO:
+		return 0.0;
+	case LAYER_BLEND_FACTOR_ONE:
+		return 1.0;
+	case LAYER_BLEND_FACTOR_SRC_ALPHA:
+		return src_alpha;
+	case LAYER_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA:
+		return 1.0 - src_alpha;
+	case LAYER_BLEND_FACTOR_DST_ALPHA:
+		return dst_alpha;
+	case LAYER_BLEND_FACTOR_ONE_MINUS_DST_ALPHA:
+		return 1.0 - dst_alpha;
+	default:
+		return 0.0;
+	}
+}
+
 vec4 do_layers(vec2 view_uv)
 {
 	vec4 accum = vec4(0, 0, 0, 0);
@@ -740,32 +772,33 @@ vec4 do_layers(vec2 view_uv)
 	int layer_count = ubo.layer_count.x;
 	for (uint layer = 0; layer < layer_count; layer++) {
 		vec4 rgba = vec4(0, 0, 0, 0);
+		bool covered = false;
 
 		if (k_use_common_layers) {
 			if (layer == 0) {
-				rgba = do_projection(view_uv, layer);
+				rgba = do_projection(view_uv, layer, covered);
 				rgba.a = invert_alpha(rgba.a, layer);
 			} else {
-				rgba = do_quad(view_uv, layer);
+				rgba = do_quad(view_uv, layer, covered);
 			}
 		} else {
 			switch (LAYER.layer_data.layer_type) {
 			case LAYER_COMP_TYPE_NOOP:
 				continue;
 			case LAYER_COMP_TYPE_QUAD:
-				rgba = do_quad(view_uv, layer);
+				rgba = do_quad(view_uv, layer, covered);
 				// Quad alpha inversion is done inside
 				break;
 			case LAYER_COMP_TYPE_CYLINDER:
-				rgba = do_cylinder(view_uv, layer);
+				rgba = do_cylinder(view_uv, layer, covered);
 				rgba.a = invert_alpha(rgba.a, layer);
 				break;
 			case LAYER_COMP_TYPE_EQUIRECT2:
-				rgba = do_equirect2(view_uv, layer);
+				rgba = do_equirect2(view_uv, layer, covered);
 				rgba.a = invert_alpha(rgba.a, layer);
 				break;
 			case LAYER_COMP_TYPE_PROJECTION:
-				rgba = do_projection(view_uv, layer);
+				rgba = do_projection(view_uv, layer, covered);
 				rgba.a = invert_alpha(rgba.a, layer);
 				rgba = apply_chroma_key(rgba, layer);
 				break;
@@ -774,7 +807,7 @@ vec4 do_layers(vec2 view_uv)
 				continue;
 			case LAYER_COMP_TYPE_INSET:
 				float inset_blend_factor = 0.0;
-				vec4 context_rgba = do_projection(view_uv, layer - 1);
+				vec4 context_rgba = do_projection(view_uv, layer - 1, covered);
 				vec4 inset_rgba = do_projection_inset(view_uv, layer, inset_blend_factor);
 
 				/*
@@ -789,17 +822,36 @@ vec4 do_layers(vec2 view_uv)
 			}
 		}
 
+		// Layers that don't cover this pixel must not participate in blending
+		if (!covered) {
+			continue;
+		}
+
 		// Apply color scale and bias
 		rgba = clamp(rgba * LAYER.color_scale + LAYER.color_bias, 0.0, 1.0);
 
-		if (LAYER.layer_data.unpremultiplied_alpha != 0) {
-			// Unpremultipled blend factor of src.a.
-			accum.rgb = mix(accum.rgb, rgba.rgb, rgba.a);
+		if (LAYER.layer_data.advanced_blending != 0) {
+			float src_factor_color =
+				get_blend_factor(((LAYER.image_info.blend_factors >> 0u) & 15u), rgba.a, accum.a);
+			float dst_factor_color =
+				get_blend_factor(((LAYER.image_info.blend_factors >> 4u) & 15u), rgba.a, accum.a);
+			float src_factor_alpha =
+				get_blend_factor(((LAYER.image_info.blend_factors >> 8u) & 15u), rgba.a, accum.a);
+			float dst_factor_alpha =
+				get_blend_factor(((LAYER.image_info.blend_factors >> 12u) & 15u), rgba.a, accum.a);
+
+			accum.rgb = rgba.rgb * src_factor_color + accum.rgb * dst_factor_color;
+			accum.a = rgba.a * src_factor_alpha + accum.a * dst_factor_alpha;
 		} else {
-			// Premultiplied blend factor of 1.
-			accum.rgb = (accum.rgb * (1 - rgba.a)) + rgba.rgb;
+			float src_rgb_factor = mix(
+				1.0,
+				rgba.a,
+				LAYER.layer_data.unpremultiplied_alpha != 0u
+			);
+
+			accum.rgb = rgba.rgb * src_rgb_factor + accum.rgb * (1.0 - rgba.a);
+			accum.a = fma(1.0 - rgba.a, accum.a, rgba.a);
 		}
-		accum.a = fma((1.f - rgba.a), accum.a, rgba.a);
 	}
 
 	return accum;

@@ -647,7 +647,9 @@ def generate_bindings_c(output, b, rebindings):
 
     # Generate profile templates
     profile_templates = '\n'.join(generate_profile_template_entry(profile) for profile in b.profiles)
-    rebinding_names = [name for name in sorted(rebindings.keys()) if not is_rebinding_helper(rebindings[name])]
+    # Do not sort: order is priority (first match wins at runtime), and the
+    # merged JSON is already ordered by the numeric prefix of the source files.
+    rebinding_names = [name for name in rebindings.keys() if not is_rebinding_helper(rebindings[name])]
     rebinding_profile_templates = '\n'.join(
         generate_rebinding_profile_template_entry(name, rebindings[name])
         for name in rebinding_names)

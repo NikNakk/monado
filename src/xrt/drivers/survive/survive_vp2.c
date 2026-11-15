@@ -28,7 +28,7 @@ survive_vp2_init(struct survive_device *survive, struct survive_system *sys)
 		struct xrt_prober_device *d = devices[i];
 		if (d->vendor_id == VP2_VID && d->product_id == VP2_PID) {
 			SURVIVE_DEBUG(survive, "Found Vive Pro 2 device in USB list");
-			struct os_hid_device *hid;
+			struct h_hid_device *hid;
 			result = xrt_prober_open_hid_interface(sys->xp, d, 0, &hid);
 			if (result != XRT_SUCCESS) {
 				SURVIVE_ERROR(survive, "Failed to open Vive Pro 2 HID interface, got err %d", result);

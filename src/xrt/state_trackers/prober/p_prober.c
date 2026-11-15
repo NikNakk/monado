@@ -22,13 +22,17 @@
 #include "util/u_pretty_print.h"
 #include "util/u_trace_marker.h"
 
-#include "os/os_hid.h"
+#include "hid/h_hid.h"
 #include "os/os_serial.h"
 
 #include "p_prober.h"
 
 #ifdef XRT_HAVE_V4L2
 #include "v4l2/v4l2_interface.h"
+#endif
+
+#if !defined(XRT_OS_LINUX) && defined(XRT_HAVE_HIDAPI)
+#include <hidapi.h>
 #endif
 
 #ifdef XRT_BUILD_DRIVER_VF
@@ -107,7 +111,7 @@ static int
 p_open_hid_interface(struct xrt_prober *xp,
                      struct xrt_prober_device *xpdev,
                      int hid_iface,
-                     struct os_hid_device **out_hid_dev);
+                     struct h_hid_device **out_hid_dev);
 
 static int
 p_open_serial_device(struct xrt_prober *xp,
@@ -1214,11 +1218,28 @@ p_select_device(struct xrt_prober *xp, struct xrt_device **xdevs, size_t xdev_co
 	return 0;
 }
 
+#if !defined(XRT_OS_LINUX) && defined(XRT_HAVE_HIDAPI)
+static bool
+hidapi_serial_equals(const wchar_t *hid_serial, const char *serial)
+{
+	size_t i = 0;
+	for (; serial[i] != '\0'; i++) {
+		// libusb gives '?' for every non-ASCII character.
+		bool unknown = serial[i] == '?' && hid_serial[i] >= 0x80;
+		if (hid_serial[i] != (wchar_t)(unsigned char)serial[i] && !unknown) {
+			return false;
+		}
+	}
+
+	return hid_serial[i] == L'\0';
+}
+#endif
+
 static int
 p_open_hid_interface(struct xrt_prober *xp,
                      struct xrt_prober_device *xpdev,
                      int hid_iface,
-                     struct os_hid_device **out_hid_dev)
+                     struct h_hid_device **out_hid_dev)
 {
 	XRT_TRACE_MARKER();
 
@@ -1233,7 +1254,7 @@ p_open_hid_interface(struct xrt_prober *xp,
 			continue;
 		}
 
-		ret = os_hid_open_hidraw(hidraw->path, out_hid_dev);
+		ret = h_hid_open_hidraw(hidraw->path, out_hid_dev);
 		if (ret != 0) {
 			U_LOG_E("Failed to open device '%s' got '%i'", hidraw->path, ret);
 			return ret;
@@ -1244,6 +1265,40 @@ p_open_hid_interface(struct xrt_prober *xp,
 
 	U_LOG_E("Could not find the requested hid interface (%i) on the device!", hid_iface);
 	return -1;
+
+#elif defined(XRT_HAVE_HIDAPI)
+	unsigned char serial[256] = {0};
+	bool have_serial =
+	    p_get_string_descriptor(xp, xpdev, XRT_PROBER_STRING_SERIAL_NUMBER, serial, sizeof(serial)) > 0;
+
+	struct hid_device_info *devs = hid_enumerate(pdev->base.vendor_id, pdev->base.product_id);
+	ret = -1;
+
+	for (struct hid_device_info *cur = devs; cur != NULL; cur = cur->next) {
+		int iface = cur->interface_number >= 0 ? cur->interface_number : 0;
+		if (iface != hid_iface) {
+			continue;
+		}
+
+		bool have_hid_serial = cur->serial_number != NULL && cur->serial_number[0] != L'\0';
+		if (have_serial && have_hid_serial && !hidapi_serial_equals(cur->serial_number, (const char *)serial)) {
+			continue;
+		}
+
+		// An interface is listed once per top-level collection, try the next.
+		ret = h_hid_open_hidapi(cur->path, out_hid_dev);
+		if (ret == 0) {
+			break;
+		}
+		U_LOG_D("Failed to open device '%s' got '%i'", cur->path, ret);
+	}
+
+	hid_free_enumeration(devs);
+
+	if (ret != 0) {
+		U_LOG_E("Could not open the requested hid interface (%i) on the device!", hid_iface);
+	}
+	return ret;
 
 #elif defined(XRT_OS_WINDOWS)
 	(void)pdev;

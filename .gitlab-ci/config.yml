@@ -1,5 +1,6 @@
 # SPDX-License-Identifier: CC0-1.0
 # SPDX-FileCopyrightText: 2018-2026, Collabora, Ltd. and the Monado contributors
+# SPDX-FileCopyrightText: 2026, NVIDIA CORPORATION.
 
 # Please run the following from the repo root after modifying this file:
 #   make -f .gitlab-ci/ci-scripts.mk
@@ -125,6 +126,10 @@ distributions:
               CMAKE_TOOLCHAIN_FILE: .gitlab-ci/i386.cmake
               # OpenCV doesn't play nicely with us in multi-arch.
               XRT_HAVE_OPENCV: "OFF"
+
+          - name: "debian:trixie:examples"
+            examples:
+              - derived_runtime
 
       - codename: bookworm
         script: i386_and_proclamation_container_prep.sh

@@ -8,6 +8,7 @@
  * @ingroup aux_vk
  */
 
+#include "vk/vk_pretty_print.h"
 #include "vk/vk_cmd.h"
 #include "vk/vk_cmd_pool.h"
 
@@ -38,7 +39,7 @@ vk_cmd_pool_init_for_queue(struct vk_bundle *vk,
 
 	ret = vk->vkCreateCommandPool(vk->device, &cmd_pool_info, NULL, &pool->pool);
 	if (ret != VK_SUCCESS) {
-		VK_ERROR(vk, "vkCreateCommandPool: %s", vk_result_string(ret));
+		VK_ERROR(vk, "vkCreateCommandPool: %s", vk_str_result(ret));
 		os_mutex_destroy(&pool->mutex);
 	}
 
@@ -77,7 +78,7 @@ vk_cmd_pool_create_cmd_buffer_locked(struct vk_bundle *vk, struct vk_cmd_pool *p
 
 	ret = vk->vkAllocateCommandBuffers(vk->device, &cmd_buffer_info, &cmd_buffer);
 	if (ret != VK_SUCCESS) {
-		VK_ERROR(vk, "vkAllocateCommandBuffers: %s", vk_result_string(ret));
+		VK_ERROR(vk, "vkAllocateCommandBuffers: %s", vk_str_result(ret));
 		// Nothing to cleanup
 		return ret;
 	}
@@ -98,7 +99,7 @@ vk_cmd_pool_create_and_begin_cmd_buffer_locked(struct vk_bundle *vk,
 
 	ret = vk_cmd_pool_create_cmd_buffer_locked(vk, pool, &cmd_buffer);
 	if (ret != VK_SUCCESS) {
-		VK_ERROR(vk, "vk_cmd_pool_create_cmd_buffer_locked: %s", vk_result_string(ret));
+		VK_ERROR(vk, "vk_cmd_pool_create_cmd_buffer_locked: %s", vk_str_result(ret));
 		// Nothing to cleanup
 		return ret;
 	}
@@ -112,7 +113,7 @@ vk_cmd_pool_create_and_begin_cmd_buffer_locked(struct vk_bundle *vk,
 	ret = vk->vkBeginCommandBuffer(cmd_buffer, &begin_info);
 
 	if (ret != VK_SUCCESS) {
-		VK_ERROR(vk, "vkBeginCommandBuffer: %s", vk_result_string(ret));
+		VK_ERROR(vk, "vkBeginCommandBuffer: %s", vk_str_result(ret));
 		goto err_buffer;
 	}
 
@@ -142,7 +143,7 @@ vk_cmd_pool_submit_cmd_buffer_locked(struct vk_bundle *vk, struct vk_cmd_pool *p
 	ret = vk_cmd_submit_locked(vk, pool->queue, 1, &submitInfo, VK_NULL_HANDLE);
 
 	if (ret != VK_SUCCESS) {
-		VK_ERROR(vk, "vk_cmd_submit_locked: %s", vk_result_string(ret));
+		VK_ERROR(vk, "vk_cmd_submit_locked: %s", vk_str_result(ret));
 	}
 
 	return ret;
@@ -162,7 +163,7 @@ vk_cmd_pool_create_begin_insert_label_and_end_cmd_buffer_locked(struct vk_bundle
 	ret = vk_cmd_pool_create_and_begin_cmd_buffer_locked(vk, pool, 0, &cmd_buffer);
 	if (ret != VK_SUCCESS) {
 		vk_cmd_pool_unlock(pool);
-		VK_ERROR(vk, "vk_cmd_pool_create_and_begin_cmd_buffer_locked: %s", vk_result_string(ret));
+		VK_ERROR(vk, "vk_cmd_pool_create_and_begin_cmd_buffer_locked: %s", vk_str_result(ret));
 		return ret;
 	}
 
@@ -171,7 +172,7 @@ vk_cmd_pool_create_begin_insert_label_and_end_cmd_buffer_locked(struct vk_bundle
 	ret = vk->vkEndCommandBuffer(cmd_buffer);
 	if (ret != VK_SUCCESS) {
 		vk_cmd_pool_unlock(pool);
-		VK_ERROR(vk, "vkEndCommandBuffer: %s", vk_result_string(ret));
+		VK_ERROR(vk, "vkEndCommandBuffer: %s", vk_str_result(ret));
 		return ret;
 	}
 	vk_cmd_pool_unlock(pool);

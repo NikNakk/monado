@@ -33,20 +33,6 @@ extern "C" {
 
 /*
  *
- * String pretty printing
- *
- */
-
-/*!
- * Returns xrt swapchain_usage flag if one valid bit is set,
- * if multiple bits are set, will return 'MULTIPLE BIT SET'.
- */
-XRT_CHECK_RESULT const char *
-xrt_swapchain_usage_flag_string(enum xrt_swapchain_usage_bits bits, bool null_on_unknown);
-
-
-/*
- *
  * Compositor buffer and swapchain image flags helpers, in the vk_compositor_flags.c file.
  *
  */

@@ -25,7 +25,7 @@
 #include "math/m_space.h"
 #include "math/m_vec3.h"
 
-#include "os/os_hid.h"
+#include "hid/h_hid.h"
 
 #include "util/u_device.h"
 #include "util/u_trace_marker.h"

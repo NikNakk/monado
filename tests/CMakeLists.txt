@@ -32,6 +32,7 @@ set(tests
     tests_rational
     tests_relation_chain
     tests_space_overseer
+    tests_relation_history
     tests_vector
     tests_worker
     tests_pose
@@ -147,6 +148,7 @@ target_link_libraries(tests_rational PRIVATE aux_math)
 target_link_libraries(tests_relation_chain PRIVATE aux_math)
 target_link_libraries(tests_space_overseer PRIVATE xrt-interfaces base aux_math aux_os)
 target_link_libraries(tests_floor_calibration PRIVATE xrt-interfaces base aux_math aux_os)
+target_link_libraries(tests_relation_history PRIVATE aux_math)
 target_link_libraries(tests_pose PRIVATE aux_math)
 if(NOT MSVC)
 	target_link_libraries(tests_psvr2_tracking_share PRIVATE aux_tracking)
@@ -379,13 +381,13 @@ if(APPLE)
 
 	add_executable(tests_macos_iosurface_import_probe tests_macos_iosurface_import_probe.c)
 	target_link_libraries(
-		tests_macos_iosurface_import_probe PRIVATE ipc_client xrt-interfaces aux_util
+		tests_macos_iosurface_import_probe PRIVATE target_ipc_defaults ipc_client xrt-interfaces aux_util
 		)
 	set_target_properties(tests_macos_iosurface_import_probe PROPERTIES FOLDER monado_tests)
 
 	add_executable(tests_macos_ipc_swapchain_probe tests_macos_ipc_swapchain_probe.c)
 	target_link_libraries(
-		tests_macos_ipc_swapchain_probe PRIVATE ipc_client xrt-interfaces aux_util
+		tests_macos_ipc_swapchain_probe PRIVATE target_ipc_defaults ipc_client xrt-interfaces aux_util
 		)
 	set_target_properties(tests_macos_ipc_swapchain_probe PROPERTIES FOLDER monado_tests)
 
@@ -696,6 +698,8 @@ if(APPLE AND TARGET psvr2-openxr-test)
 			aux_metal_foveation
 			"-framework Foundation"
 			"-framework Metal"
+			"-framework CoreGraphics"
+			"-framework ImageIO"
 		)
 	add_test(NAME tests_psvr2_controller_visuals COMMAND tests_psvr2_controller_visuals)
 endif()

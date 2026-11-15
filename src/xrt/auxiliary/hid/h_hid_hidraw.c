@@ -5,10 +5,10 @@
  * @brief  Hid implementation based on hidraw.
  * @author Jakob Bornecrantz <jakob@collabora.com>
  * @author Rylie Pavlik <rylie.pavlik@collabora.com>
- * @ingroup aux_os
+ * @ingroup aux_hid
  */
 
-#include "os_hid.h"
+#include "h_hid.h"
 
 #ifdef XRT_OS_LINUX
 
@@ -29,17 +29,17 @@
 #include <stdio.h>
 
 /*!
- * @implements os_hid_device
+ * @implements h_hid_device
  */
 struct hid_hidraw
 {
-	struct os_hid_device base;
+	struct h_hid_device base;
 
 	int fd;
 };
 
 static int
-os_hidraw_read(struct os_hid_device *ohdev, uint8_t *data, size_t length, int milliseconds)
+h_hidraw_read(struct h_hid_device *ohdev, uint8_t *data, size_t length, int milliseconds)
 {
 	struct hid_hidraw *hrdev = (struct hid_hidraw *)ohdev;
 
@@ -47,7 +47,7 @@ os_hidraw_read(struct os_hid_device *ohdev, uint8_t *data, size_t length, int mi
 }
 
 static int
-os_hidraw_write(struct os_hid_device *ohdev, const uint8_t *data, size_t length)
+h_hidraw_write(struct h_hid_device *ohdev, const uint8_t *data, size_t length)
 {
 	struct hid_hidraw *hrdev = (struct hid_hidraw *)ohdev;
 
@@ -55,7 +55,7 @@ os_hidraw_write(struct os_hid_device *ohdev, const uint8_t *data, size_t length)
 }
 
 static int
-os_hidraw_get_feature(struct os_hid_device *ohdev, uint8_t report_num, uint8_t *data, size_t length)
+h_hidraw_get_feature(struct h_hid_device *ohdev, uint8_t report_num, uint8_t *data, size_t length)
 {
 	struct hid_hidraw *hrdev = (struct hid_hidraw *)ohdev;
 	// The ioctl expects the report number in the first byte of the buffer,
@@ -65,14 +65,14 @@ os_hidraw_get_feature(struct os_hid_device *ohdev, uint8_t report_num, uint8_t *
 }
 
 static int
-os_hidraw_get_physical_address(struct os_hid_device *ohdev, uint8_t *data, size_t length)
+h_hidraw_get_physical_address(struct h_hid_device *ohdev, uint8_t *data, size_t length)
 {
 	struct hid_hidraw *hrdev = (struct hid_hidraw *)ohdev;
 	return ioctl(hrdev->fd, HIDIOCGRAWPHYS(length), data);
 }
 
 static int
-os_hidraw_get_feature_timeout(struct os_hid_device *ohdev, void *data, size_t length, uint32_t timeout)
+h_hidraw_get_feature_timeout(struct h_hid_device *ohdev, void *data, size_t length, uint32_t timeout)
 {
 	struct hid_hidraw *hrdev = (struct hid_hidraw *)ohdev;
 
@@ -94,7 +94,7 @@ os_hidraw_get_feature_timeout(struct os_hid_device *ohdev, void *data, size_t le
 }
 
 static int
-os_hidraw_set_feature(struct os_hid_device *ohdev, const uint8_t *data, size_t length)
+h_hidraw_set_feature(struct h_hid_device *ohdev, const uint8_t *data, size_t length)
 {
 	struct hid_hidraw *hrdev = (struct hid_hidraw *)ohdev;
 
@@ -102,7 +102,7 @@ os_hidraw_set_feature(struct os_hid_device *ohdev, const uint8_t *data, size_t l
 }
 
 static void
-os_hidraw_destroy(struct os_hid_device *ohdev)
+h_hidraw_destroy(struct h_hid_device *ohdev)
 {
 	struct hid_hidraw *hrdev = (struct hid_hidraw *)ohdev;
 
@@ -111,17 +111,17 @@ os_hidraw_destroy(struct os_hid_device *ohdev)
 }
 
 int
-os_hid_open_hidraw(const char *path, struct os_hid_device **out_hid)
+h_hid_open_hidraw(const char *path, struct h_hid_device **out_hid)
 {
 	struct hid_hidraw *hrdev = U_TYPED_CALLOC(struct hid_hidraw);
 
-	hrdev->base.read = os_hidraw_read;
-	hrdev->base.write = os_hidraw_write;
-	hrdev->base.get_feature = os_hidraw_get_feature;
-	hrdev->base.get_feature_timeout = os_hidraw_get_feature_timeout;
-	hrdev->base.set_feature = os_hidraw_set_feature;
-	hrdev->base.get_physical_address = os_hidraw_get_physical_address;
-	hrdev->base.destroy = os_hidraw_destroy;
+	hrdev->base.read = h_hidraw_read;
+	hrdev->base.write = h_hidraw_write;
+	hrdev->base.get_feature = h_hidraw_get_feature;
+	hrdev->base.get_feature_timeout = h_hidraw_get_feature_timeout;
+	hrdev->base.set_feature = h_hidraw_set_feature;
+	hrdev->base.get_physical_address = h_hidraw_get_physical_address;
+	hrdev->base.destroy = h_hidraw_destroy;
 	hrdev->fd = open(path, O_RDWR);
 	if (hrdev->fd < 0) {
 		free(hrdev);

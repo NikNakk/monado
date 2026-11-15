@@ -7,6 +7,7 @@
  * @ingroup comp_util
  */
 
+#include "vk/vk_pretty_print.h"
 #include "util/u_handles.h"
 
 #include "util/comp_semaphore.h"
@@ -42,7 +43,7 @@ comp_semaphore_wait(struct xrt_compositor_semaphore *xcsem, uint64_t value, uint
 		return XRT_TIMEOUT;
 	}
 	if (ret != VK_SUCCESS) {
-		VK_ERROR(vk, "vkWaitSemaphores: %s", vk_result_string(ret));
+		VK_ERROR(vk, "vkWaitSemaphores: %s", vk_str_result(ret));
 		return XRT_ERROR_VULKAN;
 	}
 
@@ -167,7 +168,7 @@ comp_semaphore_create_metal_shared_event(struct vk_bundle *vk,
 	VkSemaphore semaphore = VK_NULL_HANDLE;
 	VkResult ret = vk->vkCreateSemaphore(vk->device, &create_info, NULL, &semaphore);
 	if (ret != VK_SUCCESS) {
-		VK_ERROR(vk, "vkCreateSemaphore for Metal shared event: %s", vk_result_string(ret));
+		VK_ERROR(vk, "vkCreateSemaphore for Metal shared event: %s", vk_str_result(ret));
 		return XRT_ERROR_VULKAN;
 	}
 
@@ -251,7 +252,7 @@ comp_semaphore_import_metal_shared_event(struct vk_bundle *vk,
 	VkSemaphore semaphore = VK_NULL_HANDLE;
 	VkResult ret = vk->vkCreateSemaphore(vk->device, &create_info, NULL, &semaphore);
 	if (ret != VK_SUCCESS) {
-		VK_ERROR(vk, "vkCreateSemaphore importing MTLSharedEvent: %s", vk_result_string(ret));
+		VK_ERROR(vk, "vkCreateSemaphore importing MTLSharedEvent: %s", vk_str_result(ret));
 		return XRT_ERROR_VULKAN;
 	}
 

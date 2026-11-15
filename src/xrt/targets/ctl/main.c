@@ -20,6 +20,8 @@
 #include "ipc_client_generated.h"
 #include "xrt/xrt_results.h"
 
+#include "target_ipc_defaults.h"
+
 #include <getopt.h>
 #include <ctype.h>
 #include <math.h>
@@ -610,7 +612,12 @@ main(int argc, char *argv[])
 	    .app_info.application_name = "monado-ctl",
 	};
 
-	xrt_result_t xret = ipc_client_connection_init(&ipc_c, U_LOGGING_INFO, &info);
+	//! @todo Allow connecting to services other than the default one.
+	struct ipc_client_connection_info icci = {
+	    .socket_filename = XRT_IPC_MSG_SOCK_FILENAME,
+	};
+
+	xrt_result_t xret = ipc_client_connection_init(&ipc_c, U_LOGGING_INFO, &icci, &info);
 	if (xret != XRT_SUCCESS) {
 		U_LOG_E("ipc_client_connection_init: %u", xret);
 		return -1;

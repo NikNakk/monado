@@ -12,6 +12,7 @@
 #import <Metal/Metal.h>
 #import <QuartzCore/QuartzCore.h>
 
+#include "vk/vk_pretty_print.h"
 #include "main/comp_window.h"
 #include "main/comp_macos_presenter.h"
 #include "main/comp_macos_frontend.h"
@@ -1366,8 +1367,7 @@ macos_release_source_image_after_render(struct comp_window_macos *cwm,
 		vk_queue_unlock(present_queue);
 	}
 	if (ret != VK_SUCCESS) {
-		COMP_ERROR(ct->c, "Vulkan wait before releasing macOS source image %u: %s", index,
-		           vk_result_string(ret));
+		COMP_ERROR(ct->c, "Vulkan wait before releasing macOS source image %u: %s", index, vk_str_result(ret));
 		atomic_store_explicit(&cwm->present_completion_failed, true, memory_order_release);
 		return;
 	}
@@ -1733,7 +1733,7 @@ comp_window_macos_init_vulkan(struct comp_target *ct, uint32_t preferred_width, 
 	if (ret != VK_SUCCESS) {
 		COMP_WARN(ct->c,
 		          "Could not create macOS render-complete timeline semaphore: %s; using queue-idle fallback",
-		          vk_result_string(ret));
+		          vk_str_result(ret));
 		ct->semaphores.render_complete = VK_NULL_HANDLE;
 		ct->semaphores.render_complete_is_timeline = false;
 		macos_disable_drawable_slot_without_shared_event(cwm);
@@ -1856,12 +1856,12 @@ comp_window_macos_create_images(struct comp_target *ct,
 	};
 	VkResult ret = vk_ic_allocate(vk, &info, MACOS_TARGET_IMAGE_COUNT, &cwm->vkic);
 	if (ret != VK_SUCCESS) {
-		COMP_ERROR(ct->c, "Could not allocate macOS compositor images: %s", vk_result_string(ret));
+		COMP_ERROR(ct->c, "Could not allocate macOS compositor images: %s", vk_str_result(ret));
 		return;
 	}
 	ret = vk_ic_get_handles(vk, &cwm->vkic, MACOS_TARGET_IMAGE_COUNT, cwm->io_surfaces);
 	if (ret != VK_SUCCESS) {
-		COMP_ERROR(ct->c, "Could not export macOS compositor IOSurfaces: %s", vk_result_string(ret));
+		COMP_ERROR(ct->c, "Could not export macOS compositor IOSurfaces: %s", vk_str_result(ret));
 		comp_window_macos_free_images(cwm);
 		return;
 	}
@@ -1891,7 +1891,7 @@ comp_window_macos_create_images(struct comp_target *ct,
 		ret = vk_create_view(vk, ct->images[i].handle, VK_IMAGE_VIEW_TYPE_2D, VK_FORMAT_B8G8R8A8_UNORM, range,
 		                     &ct->images[i].view);
 		if (ret != VK_SUCCESS) {
-			COMP_ERROR(ct->c, "Could not create macOS compositor image view: %s", vk_result_string(ret));
+			COMP_ERROR(ct->c, "Could not create macOS compositor image view: %s", vk_str_result(ret));
 			comp_window_macos_free_images(cwm);
 			return;
 		}
@@ -2042,7 +2042,7 @@ macos_execute_present_job(struct comp_window_macos *cwm, const struct macos_pres
 	}
 	uint64_t after_vk_wait_ns = os_monotonic_get_ns();
 	if (ret != VK_SUCCESS) {
-		COMP_ERROR(ct->c, "Vulkan render-complete wait before Metal presentation: %s", vk_result_string(ret));
+		COMP_ERROR(ct->c, "Vulkan render-complete wait before Metal presentation: %s", vk_str_result(ret));
 		atomic_store_explicit(&cwm->present_completion_failed, true, memory_order_release);
 		return ret;
 	}

@@ -63,6 +63,20 @@ bool
 m_relation_history_push(struct m_relation_history *rh, struct xrt_space_relation const *in_relation, int64_t timestamp);
 
 /*!
+ * Pushes a new pose to the history, or updates an existing one.
+ *
+ * If the history is full, it will also pop a pose out of the other side of the buffer.
+ *
+ * @return false if the timestamp is not new or doesn't match an older timestamp
+ *
+ * @public @memberof m_relation_history
+ */
+bool
+m_relation_history_push_or_update(struct m_relation_history *rh,
+                                  struct xrt_space_relation const *in_relation,
+                                  int64_t timestamp);
+
+/*!
  * Pushes a new pose to the history, estimating linear and angular velocity based on the previous entry if the input
  * relation does not have valid velocity data.
  *
@@ -107,6 +121,49 @@ m_relation_history_get_latest(const struct m_relation_history *rh,
                               struct xrt_space_relation *out_relation);
 
 /*!
+ * Get the relation stored at exactly the given timestamp, if any.
+ *
+ * Unlike @ref m_relation_history_get, this never interpolates or extrapolates, and fails if there is no entry with
+ * precisely this timestamp.
+ *
+ * @param rh self
+ * @param at_timestamp_ns The exact timestamp to look up
+ * @param[out] out_relation Populated with the stored relation, if found
+ *
+ * @return false if there is no entry at that timestamp.
+ *
+ * @public @memberof m_relation_history
+ */
+bool
+m_relation_history_get_exact(const struct m_relation_history *rh,
+                             int64_t at_timestamp_ns,
+                             struct xrt_space_relation *out_relation);
+
+/*!
+ * Get the stored relation nearest to the given timestamp, if one is within @p max_slop_ns of it.
+ *
+ * Like @ref m_relation_history_get_exact, this never interpolates or extrapolates, but accepts entries that are up
+ * to @p max_slop_ns away (inclusive) from the requested timestamp. If two entries are equally close, the older one
+ * is returned.
+ *
+ * @param rh self
+ * @param at_timestamp_ns The timestamp to look up
+ * @param max_slop_ns Maximum allowed distance between @p at_timestamp_ns and the found entry, must be >= 0
+ * @param[out] out_time_ns Populated with the found entry's timestamp, if found
+ * @param[out] out_relation Populated with the stored relation, if found
+ *
+ * @return false if there is no entry within @p max_slop_ns of the timestamp.
+ *
+ * @public @memberof m_relation_history
+ */
+bool
+m_relation_history_get_nearest(const struct m_relation_history *rh,
+                               int64_t at_timestamp_ns,
+                               int64_t max_slop_ns,
+                               int64_t *out_time_ns,
+                               struct xrt_space_relation *out_relation);
+
+/*!
  * Returns the number of items in the history.
  *
  * @public @memberof m_relation_history
@@ -132,90 +189,4 @@ m_relation_history_destroy(struct m_relation_history **rh);
 
 #ifdef __cplusplus
 }
-#endif
-
-
-#ifdef __cplusplus
-namespace xrt::auxiliary::math {
-
-/*!
- * C++ interface for @ref m_relation_history, non-copyable/deletable.
- *
- * @ingroup aux_math
- */
-class RelationHistory
-{
-public:
-	/*!
-	 * @copydoc m_relation_history_result
-	 */
-	typedef m_relation_history_result Result;
-
-
-private:
-	m_relation_history *mPtr{nullptr};
-
-
-public:
-	// clang-format off
-	RelationHistory() noexcept { m_relation_history_create(&mPtr); }
-	~RelationHistory() { m_relation_history_destroy(&mPtr); }
-	// clang-format on
-
-	// Special non-copyable reference.
-	RelationHistory(RelationHistory const &) = delete;
-	RelationHistory(RelationHistory &&) = delete;
-	RelationHistory &
-	operator=(RelationHistory const &) = delete;
-	RelationHistory &
-	operator=(RelationHistory &&) = delete;
-
-
-	/*!
-	 * @copydoc m_relation_history_push
-	 */
-	bool
-	push(xrt_space_relation const &relation, int64_t ts) noexcept
-	{
-		return m_relation_history_push(mPtr, &relation, ts);
-	}
-
-	/*!
-	 * @copydoc m_relation_history_get
-	 */
-	Result
-	get(int64_t at_time_ns, xrt_space_relation *out_relation) const noexcept
-	{
-		return m_relation_history_get(mPtr, at_time_ns, out_relation);
-	}
-
-	/*!
-	 * @copydoc m_relation_history_get_latest
-	 */
-	bool
-	get_latest(int64_t *out_time_ns, xrt_space_relation *out_relation) const noexcept
-	{
-		return m_relation_history_get_latest(mPtr, out_time_ns, out_relation);
-	}
-
-	/*!
-	 * @copydoc m_relation_history_get_size
-	 */
-	size_t
-	size() const noexcept
-	{
-		return m_relation_history_get_size(mPtr);
-	}
-
-	/*!
-	 * @copydoc m_relation_history_clear
-	 */
-	void
-	clear() noexcept
-	{
-		return m_relation_history_clear(mPtr);
-	}
-};
-
-} // namespace xrt::auxiliary::math
 #endif

@@ -21,7 +21,7 @@
 #define __RIFT_S_PROTOCOL__
 
 #include <stdlib.h>
-#include "os/os_hid.h"
+#include "hid/h_hid.h"
 #include "xrt/xrt_defines.h"
 
 #define FEATURE_BUFFER_SIZE 256
@@ -266,37 +266,37 @@ typedef struct
 } rift_s_devices_list_t;
 
 int
-rift_s_read_firmware_version(struct os_hid_device *hid);
+rift_s_read_firmware_version(struct h_hid_device *hid);
 int
-rift_s_read_panel_info(struct os_hid_device *hid, rift_s_panel_info_t *panel_info);
+rift_s_read_panel_info(struct h_hid_device *hid, rift_s_panel_info_t *panel_info);
 int
-rift_s_read_imu_config_info(struct os_hid_device *hid, struct rift_s_imu_config_info_t *imu_config);
+rift_s_read_imu_config_info(struct h_hid_device *hid, struct rift_s_imu_config_info_t *imu_config);
 int
-rift_s_read_fw_proximity_threshold(struct os_hid_device *hid, int *proximity_threshold);
+rift_s_read_fw_proximity_threshold(struct h_hid_device *hid, int *proximity_threshold);
 int
-rift_s_protocol_set_proximity_threshold(struct os_hid_device *hid, uint16_t threshold);
+rift_s_protocol_set_proximity_threshold(struct h_hid_device *hid, uint16_t threshold);
 int
-rift_s_hmd_enable(struct os_hid_device *hid, bool enable);
+rift_s_hmd_enable(struct h_hid_device *hid, bool enable);
 int
-rift_s_set_screen_enable(struct os_hid_device *hid, bool enable);
+rift_s_set_screen_enable(struct h_hid_device *hid, bool enable);
 
 void
-rift_s_send_keepalive(struct os_hid_device *hid);
+rift_s_send_keepalive(struct h_hid_device *hid);
 
 void
 rift_s_protocol_camera_report_init(rift_s_camera_report_t *camera_report);
 int
-rift_s_protocol_send_camera_report(struct os_hid_device *hid, rift_s_camera_report_t *camera_report);
+rift_s_protocol_send_camera_report(struct h_hid_device *hid, rift_s_camera_report_t *camera_report);
 
 bool
 rift_s_parse_hmd_report(rift_s_hmd_report_t *report, const unsigned char *buf, int size);
 bool
 rift_s_parse_controller_report(rift_s_controller_report_t *report, const unsigned char *buf, int size);
 int
-rift_s_read_firmware_block(struct os_hid_device *handle, uint8_t block_id, char **data_out, int *len_out);
+rift_s_read_firmware_block(struct h_hid_device *handle, uint8_t block_id, char **data_out, int *len_out);
 
 int
-rift_s_read_devices_list(struct os_hid_device *handle, rift_s_devices_list_t *dev_list);
+rift_s_read_devices_list(struct h_hid_device *handle, rift_s_devices_list_t *dev_list);
 
 void
 rift_s_hexdump_buffer(const char *label, const unsigned char *buf, int length); // Debugging

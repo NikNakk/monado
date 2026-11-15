@@ -154,6 +154,15 @@ u_pp_xrt_result(struct u_pp_delegate dg, xrt_result_t xret);
 void
 u_pp_xrt_reference_space_type(struct u_pp_delegate dg, enum xrt_reference_space_type type);
 
+/*!
+ * Pretty prints a single @ref xrt_swapchain_usage_bits bit, if no, multiple or
+ * an unknown bit is set it says so and prints the hex value.
+ *
+ * @ingroup aux_pretty
+ */
+void
+u_pp_xrt_swapchain_usage_bits(struct u_pp_delegate dg, enum xrt_swapchain_usage_bits bits);
+
 
 /*!
  * Pretty prints a milliseconds padded to be at least 16 characters, the

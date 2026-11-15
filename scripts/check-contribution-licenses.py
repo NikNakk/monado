@@ -4,6 +4,7 @@
 """Run full REUSE validation on the source scope, retaining archives unchanged."""
 
 import argparse
+import json
 from pathlib import Path, PurePosixPath
 import shutil
 import subprocess
@@ -20,6 +21,33 @@ ARCHIVE_DIRECTORIES = (
     "doc/alyx-vulkan-results/",
     "experiments/alyx-vulkan/patches/",
 )
+
+
+# This text belongs to the excluded external xrizer patch, not Monado source.
+# Only omit it from the temporary view when REUSE itself confirms it is unused
+# there; a source reference to it keeps the license in scope and is validated.
+ARCHIVE_LICENSE_TEXTS = {
+    "GPL-3.0-or-later": "experiments/alyx-vulkan/patches/xrizer-api-wall-trace.patch",
+}
+
+
+def omit_unused_archive_license_texts(root, source_view):
+    report = subprocess.run(
+        ["reuse", "--root", str(source_view), "lint", "--json"],
+        capture_output=True, text=True, check=False,
+    )
+    unused = json.loads(report.stdout)["non_compliant"]["unused_licenses"]
+    omitted = 0
+    for license_id, archive in ARCHIVE_LICENSE_TEXTS.items():
+        archive_path = root / archive
+        if license_id not in unused or not archive_path.is_file():
+            continue
+        if ("SPDX-" + f"License-Identifier: {license_id}") not in archive_path.read_text():
+            continue
+        (source_view / "LICENSES" / f"{license_id}.txt").unlink()
+        print(f"  License text outside source scope: {license_id} (used by {archive})", flush=True)
+        omitted += 1
+    return omitted
 
 
 def stage_source(root, destination):
@@ -59,6 +87,7 @@ def main():
     with tempfile.TemporaryDirectory(prefix="monado-source-license-") as temporary:
         source_view = Path(temporary)
         included, excluded = stage_source(root, source_view)
+        included -= omit_unused_archive_license_texts(root, source_view)
         print(f"Source license scope: {included} files; {excluded} archived files excluded.", flush=True)
         for path in ARCHIVE_DIRECTORIES:
             print(f"  Archive outside source scope: {path}", flush=True)

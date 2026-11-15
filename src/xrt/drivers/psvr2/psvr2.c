@@ -75,7 +75,11 @@
 
 DEBUG_GET_ONCE_FLOAT_OPTION(psvr2_default_brightness, "PSVR2_DEFAULT_BRIGHTNESS", 1.0f)
 // Hidden-area mask from the lens distortion; off gives Monado's default corner triangles.
+#ifdef XRT_OS_OSX
+DEBUG_GET_ONCE_BOOL_OPTION(psvr2_visibility_mask, "PSVR2_VISIBILITY_MASK", false)
+#else
 DEBUG_GET_ONCE_BOOL_OPTION(psvr2_visibility_mask, "PSVR2_VISIBILITY_MASK", true)
+#endif
 // Squared lens radius the mask keeps; 0 keeps the whole panel. The distortion table ends at 1, so the
 // default hides only the panel corners beyond it.
 DEBUG_GET_ONCE_FLOAT_OPTION(psvr2_visibility_mask_r2, "PSVR2_VISIBILITY_MASK_R2", 1.0f)

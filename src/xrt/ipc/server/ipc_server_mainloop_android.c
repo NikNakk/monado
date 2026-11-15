@@ -1,4 +1,5 @@
 // Copyright 2020-2021, Collabora, Ltd.
+// Copyright 2026, NVIDIA CORPORATION.
 // SPDX-License-Identifier: BSL-1.0
 /*!
  * @file
@@ -139,8 +140,10 @@ ipc_server_mainloop_poll(struct ipc_server *vs, struct ipc_server_mainloop *ml)
 }
 
 int
-ipc_server_mainloop_init(struct ipc_server_mainloop *ml, bool no_stdin)
+ipc_server_mainloop_init(struct ipc_server_mainloop *ml, const char *socket_filename, bool no_stdin)
 {
+	(void)socket_filename; // unused on Android
+
 	int ret = init_pipe(ml);
 	if (ret < 0) {
 		ipc_server_mainloop_deinit(ml);

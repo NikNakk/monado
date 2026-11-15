@@ -3239,8 +3239,9 @@ load_lens_textures(application &app)
 		const size_t width = swapchain.width, height = swapchain.height, stride = width * 4;
 		std::vector<uint8_t> pixels(stride * height);
 		CGColorSpaceRef space = CGColorSpaceCreateWithName(kCGColorSpaceSRGB);
-		const uint32_t info = bgra ? (kCGImageAlphaPremultipliedFirst | kCGBitmapByteOrder32Little)
-		                           : (kCGImageAlphaPremultipliedLast | kCGBitmapByteOrder32Big);
+		const uint32_t info =
+		    bgra ? (uint32_t(kCGImageAlphaPremultipliedFirst) | uint32_t(kCGBitmapByteOrder32Little))
+		         : (uint32_t(kCGImageAlphaPremultipliedLast) | uint32_t(kCGBitmapByteOrder32Big));
 		CGContextRef context = CGBitmapContextCreate(pixels.data(), width, height, 8, stride, space, info);
 		CGColorSpaceRelease(space);
 		if (!context)

@@ -6,6 +6,7 @@
  * @ingroup comp_util
  */
 
+#include "vk/vk_pretty_print.h"
 #include "util/comp_swapchain_gpu_reuse.h"
 #include "util/comp_swapchain_gpu_reuse_internal.h"
 #include "util/comp_swapchain.h"
@@ -539,7 +540,7 @@ create_context_locked(struct vk_bundle *vk)
 	VkSemaphore timeline = VK_NULL_HANDLE;
 	VkResult ret = vk->vkCreateSemaphore(vk->device, &create_info, NULL, &timeline);
 	if (ret != VK_SUCCESS) {
-		VK_ERROR(vk, "Could not create swapchain GPU reuse timeline: %s", vk_result_string(ret));
+		VK_ERROR(vk, "Could not create swapchain GPU reuse timeline: %s", vk_str_result(ret));
 		return NULL;
 	}
 
@@ -704,7 +705,7 @@ tracked_wait_image(struct xrt_swapchain *xsc, int64_t timeout_ns, uint32_t image
 		}
 		if (ret != VK_SUCCESS) {
 			VK_ERROR(vk, "Swapchain GPU reuse vkWaitSemaphores image %u value %llu: %s", image_index,
-			         (unsigned long long)value, vk_result_string(ret));
+			         (unsigned long long)value, vk_str_result(ret));
 			return XRT_ERROR_VULKAN;
 		}
 

@@ -15,7 +15,7 @@
 
 #pragma once
 
-#include "os/os_hid.h"
+#include "hid/h_hid.h"
 #include "xrt/xrt_prober.h"
 
 #include "rift_s_firmware.h"
@@ -27,7 +27,7 @@ struct rift_s_camera *
 rift_s_camera_create(struct xrt_prober *xp,
                      struct xrt_frame_context *xfctx,
                      const char *hmd_serial_no,
-                     struct os_hid_device *hid,
+                     struct h_hid_device *hid,
                      struct rift_s_tracker *tracker,
                      struct rift_s_camera_calibration_block *camera_calibration);
 
@@ -35,4 +35,4 @@ void
 rift_s_camera_destroy(struct rift_s_camera *cam);
 
 void
-rift_s_camera_update(struct rift_s_camera *cam, struct os_hid_device *hid);
+rift_s_camera_update(struct rift_s_camera *cam, struct h_hid_device *hid);

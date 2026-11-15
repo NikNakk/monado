@@ -24,6 +24,8 @@
 #include "client/ipc_client.h"
 #include "ipc_client_generated.h"
 
+#include "target_ipc_defaults.h"
+
 #include <limits.h>
 #include <stdint.h>
 #include <assert.h>
@@ -234,7 +236,12 @@ mnd_root_create(mnd_root_t **out_root)
 	info.app_info.immediate_disconnect = true;
 	snprintf(info.app_info.application_name, sizeof(info.app_info.application_name), "%s", "libmonado");
 
-	xrt_result_t xret = ipc_client_connection_init(&r->ipc_c, U_LOGGING_INFO, &info);
+	//! @todo Allow connecting to services other than the default one.
+	struct ipc_client_connection_info icci = {
+	    .socket_filename = XRT_IPC_MSG_SOCK_FILENAME,
+	};
+
+	xrt_result_t xret = ipc_client_connection_init(&r->ipc_c, U_LOGGING_INFO, &icci, &info);
 	if (xret != XRT_SUCCESS) {
 		PE("Connection init error '%i'!\n", xret);
 		free(r);

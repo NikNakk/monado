@@ -13,18 +13,11 @@ add_library(
 	aux_os STATIC
 	os_documentation.h
 	os_fd.h
-	os_hid.h
-	os_hid_hidraw.c
 	os_serial.h
 	os_threading.h
 	os_time.cpp
 	)
 target_link_libraries(aux_os PUBLIC aux-includes xrt-pthreads)
-
-if(APPLE)
-	target_sources(aux_os PRIVATE os_hid_iokit.c)
-	target_link_libraries(aux_os PRIVATE "-framework IOKit" "-framework CoreFoundation")
-endif()
 
 # Only uses normal Windows libraries, doesn't add anything extra.
 if(WIN32)

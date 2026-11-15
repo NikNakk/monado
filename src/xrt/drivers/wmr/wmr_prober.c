@@ -13,7 +13,7 @@
 #include "xrt/xrt_config_drivers.h"
 #include "xrt/xrt_prober.h"
 
-#include "os/os_hid.h"
+#include "hid/h_hid.h"
 
 #include "util/u_misc.h"
 #include "util/u_debug.h"
@@ -355,14 +355,14 @@ wmr_create_headset(struct xrt_prober *xp,
 	const int interface_companion = 0;
 	int ret;
 
-	struct os_hid_device *hid_holo = NULL;
+	struct h_hid_device *hid_holo = NULL;
 	ret = xrt_prober_open_hid_interface(xp, xpdev_holo, interface_holo, &hid_holo);
 	if (ret != 0) {
 		U_LOG_IFL_E(log_level, "Failed to open HoloLens Sensors HID interface");
 		return XRT_ERROR_DEVICE_CREATION_FAILED;
 	}
 
-	struct os_hid_device *hid_companion = NULL;
+	struct h_hid_device *hid_companion = NULL;
 	ret = xrt_prober_open_hid_interface(xp, xpdev_companion, interface_companion, &hid_companion);
 	if (ret != 0) {
 		U_LOG_IFL_E(log_level, "Failed to open HoloLens Sensors' companion HID interface.");
@@ -399,7 +399,7 @@ wmr_create_headset(struct xrt_prober *xp,
 	return XRT_SUCCESS;
 
 error_holo:
-	os_hid_destroy(hid_holo);
+	h_hid_destroy(hid_holo);
 
 	return XRT_ERROR_DEVICE_CREATION_FAILED;
 }
@@ -414,7 +414,7 @@ wmr_create_bt_controller(struct xrt_prober *xp,
 
 	U_LOG_IFL_D(log_level, "Creating Bluetooth controller.");
 
-	struct os_hid_device *hid_controller = NULL;
+	struct h_hid_device *hid_controller = NULL;
 
 	// Only handle Bluetooth connected controllers here.
 	if (xpdev->bus != XRT_BUS_TYPE_BLUETOOTH) {

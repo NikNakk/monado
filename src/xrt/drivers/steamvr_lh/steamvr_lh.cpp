@@ -79,6 +79,9 @@ namespace {
 #define OVR_PLAT_SUBDIR "linuxarm64"
 #elif defined(XRT_ARCH_X86_64)
 #define OVR_PLAT_SUBDIR "linux64"
+// risc-v 64-bit support is not official - added so it can build
+#elif defined(XRT_ARCH_RISCV64)
+#define OVR_PLAT_SUBDIR "linuxrv64"
 #else
 #error "steamvr_lh: Unknown Linux Architecture"
 #endif
