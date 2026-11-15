@@ -401,7 +401,8 @@ dispatch_project_pipeline(struct render_compute *render,
                           VkImageView target_image_view,
                           VkImageLayout target_final_layout,
                           const struct render_viewport_data views[XRT_MAX_VIEWS],
-                          VkPipeline pipeline)
+                          VkPipeline pipeline,
+                          bool inset)
 {
 	struct vk_bundle *vk = vk_from_render(render);
 	struct render_resources *r = render->r;
@@ -416,6 +417,8 @@ dispatch_project_pipeline(struct render_compute *render,
 	for (uint32_t i = 0; i < render->r->view_count; ++i) {
 		data->views[i] = views[i];
 		data->post_transforms[i] = src_norm_rects[i];
+		// With an inset, the depth slots hold the inset images instead.
+		data->has_depth[i].has_inset = inset ? 1 : 0;
 	}
 	fill_distortion_foveation_data(data, src_foveation, render->r->view_count);
 
@@ -909,7 +912,7 @@ render_compute_projection_timewarp(struct render_compute *render,
 
 	dispatch_project_pipeline(render, src_samplers, src_image_views, src_norm_rects, src_foveation, NULL, NULL,
 	                          target_image, target_image_view, target_final_layout, views,
-	                          r->compute.distortion.timewarp_pipeline);
+	                          r->compute.distortion.timewarp_pipeline, false);
 }
 
 
@@ -1000,7 +1003,7 @@ render_compute_projection_timewarp_depth(struct render_compute *render,
 
 	dispatch_project_pipeline(render, src_samplers, src_image_views, src_rects, NULL, depth_samplers,
 	                          depth_image_views, target_image, target_image_view, target_final_layout, views,
-	                          r->compute.distortion.timewarp_pipeline);
+	                          r->compute.distortion.timewarp_pipeline, false);
 }
 
 
@@ -1072,7 +1075,7 @@ render_compute_projection_scanout_compensation(struct render_compute *render,
 
 	dispatch_project_pipeline(render, src_samplers, src_image_views, src_rects, src_foveation, NULL, NULL,
 	                          target_image, target_image_view, target_final_layout, views,
-	                          r->compute.distortion.timewarp_pipeline);
+	                          r->compute.distortion.timewarp_pipeline, false);
 }
 
 void
@@ -1091,7 +1094,52 @@ render_compute_projection_no_timewarp(struct render_compute *render,
 
 	dispatch_project_pipeline(render, src_samplers, src_image_views, src_rects, src_foveation, NULL, NULL,
 	                          target_image, target_image_view, target_final_layout, views,
-	                          r->compute.distortion.pipeline);
+	                          r->compute.distortion.pipeline, false);
+}
+
+void
+render_compute_projection_inset(struct render_compute *render,
+                                VkSampler src_samplers[XRT_MAX_VIEWS],
+                                VkImageView src_image_views[XRT_MAX_VIEWS],
+                                const struct xrt_normalized_rect src_rects[XRT_MAX_VIEWS],
+                                VkSampler inset_samplers[XRT_MAX_VIEWS],
+                                VkImageView inset_image_views[XRT_MAX_VIEWS],
+                                const struct xrt_normalized_rect inset_rects[XRT_MAX_VIEWS],
+                                const struct xrt_pose src_poses[XRT_MAX_VIEWS],
+                                const struct xrt_fov src_fovs[XRT_MAX_VIEWS],
+                                const struct xrt_fov inset_fovs[XRT_MAX_VIEWS],
+                                const struct xrt_pose new_poses_scanout_begin[XRT_MAX_VIEWS],
+                                const struct xrt_pose new_poses_scanout_end[XRT_MAX_VIEWS],
+                                bool do_timewarp,
+                                VkImage target_image,
+                                VkImageView target_image_view,
+                                VkImageLayout target_final_layout,
+                                const struct render_viewport_data views[XRT_MAX_VIEWS])
+{
+	assert(render->r != NULL);
+	struct render_resources *r = render->r;
+
+	struct render_compute_distortion_ubo_data *data =
+	    (struct render_compute_distortion_ubo_data *)r->compute.distortion.ubo.mapped;
+
+	for (uint32_t i = 0; i < r->view_count; ++i) {
+		if (do_timewarp) {
+			render_calc_time_warp_matrix(&src_poses[i], &src_fovs[i], &new_poses_scanout_begin[i],
+			                             &data->transform_timewarp_scanout_begin[i]);
+			render_calc_time_warp_matrix(&src_poses[i], &src_fovs[i], &new_poses_scanout_end[i],
+			                             &data->transform_timewarp_scanout_end[i]);
+			data->pre_transforms[i] = r->distortion.uv_to_tanangle[i];
+		}
+		data->has_depth[i].value = 0;
+
+		render_calc_inset_from_context_uv(&src_fovs[i], &inset_fovs[i], &data->inset_from_context[i]);
+		data->inset_post_transforms[i] = inset_rects[i];
+	}
+
+	dispatch_project_pipeline(
+	    render, src_samplers, src_image_views, src_rects, NULL, inset_samplers, inset_image_views, target_image,
+	    target_image_view, target_final_layout, views,
+	    do_timewarp ? r->compute.distortion.timewarp_pipeline : r->compute.distortion.pipeline, true);
 }
 
 void

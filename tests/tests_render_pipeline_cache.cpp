@@ -37,6 +37,7 @@ make_test_distortion_spec(VkBool32 do_timewarp, int32_t view_count = 2)
 	    .view_count = view_count,
 	    .use_identity_distortion = VK_FALSE,
 	    .preserve_source_alpha = VK_FALSE,
+	    .source_filter = 0,
 	};
 }
 
@@ -467,10 +468,10 @@ struct BlitMsPipelineCacheFixture
 TEST_CASE("render_distortion_spec is a padding-free specialization key", "[aux_render][pipeline_cache]")
 {
 	STATIC_REQUIRE(std::is_trivially_copyable_v<render_distortion_spec>);
-	// distortion.comp has five specialization constants (k_distortion_texel_count,
-	// k_do_timewarp, k_view_count, k_use_identity_distortion, k_preserve_source_alpha); the generated POD
-	// stores each as a 4-byte field.
-	STATIC_REQUIRE(sizeof(render_distortion_spec) == 5u * sizeof(int32_t));
+	// distortion.comp has six specialization constants (k_distortion_texel_count,
+	// k_do_timewarp, k_view_count, k_use_identity_distortion, k_preserve_source_alpha,
+	// k_source_filter); the generated POD stores each as a 4-byte field.
+	STATIC_REQUIRE(sizeof(render_distortion_spec) == 6u * sizeof(int32_t));
 
 	const render_distortion_spec key = make_test_distortion_spec(VK_FALSE);
 	CHECK(key.distortion_texel_count == 2);

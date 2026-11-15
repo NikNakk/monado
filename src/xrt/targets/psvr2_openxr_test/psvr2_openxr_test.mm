@@ -14,6 +14,8 @@
 
 #import <Foundation/Foundation.h>
 #import <Metal/Metal.h>
+#import <CoreGraphics/CoreGraphics.h>
+#import <ImageIO/ImageIO.h>
 
 #include <openxr/openxr.h>
 #include <openxr/openxr_platform.h>
@@ -977,6 +979,9 @@ struct application
 	bool passthrough_only = false;
 	bool test_gaze = false;
 	bool test_generic_controller = false;
+	//! --lens-images: one still image per eye, filling its field of view, instead of the scene.
+	std::array<std::string, 2> lens_image_paths;
+	std::vector<id<MTLTexture>> lens_textures;
 	//! Size of the head-relative input panels (1 = full, 0 = hidden); 'p' in the terminal cycles it.
 	float controller_panel_scale = 1.0f;
 	controller_survey_capture controller_survey;
@@ -3209,6 +3214,89 @@ poll_events(application &app)
 	return true;
 }
 
+/*
+ * --lens-images: each eye's image is drawn once, scaled to its swapchain, and
+ * copied into every frame. The projection views carry each eye's located pose
+ * and field of view as usual, so the image covers that eye's render field of
+ * view exactly as a game's frame would (tools/psvr2_lens_rings.py in
+ * macos-wine-xr draws PS VR2 lens rings this way).
+ */
+static void
+load_lens_textures(application &app)
+{
+	const bool bgra =
+	    app.color_format == MTLPixelFormatBGRA8Unorm || app.color_format == MTLPixelFormatBGRA8Unorm_sRGB;
+	for (size_t i = 0; i < app.swapchains.size() && i < app.lens_image_paths.size(); ++i) {
+		const view_swapchain &swapchain = app.swapchains[i];
+		NSURL *url = [NSURL fileURLWithPath:[NSString stringWithUTF8String:app.lens_image_paths[i].c_str()]];
+		CGImageSourceRef source = CGImageSourceCreateWithURL((__bridge CFURLRef)url, nullptr);
+		CGImageRef image = source ? CGImageSourceCreateImageAtIndex(source, 0, nullptr) : nullptr;
+		if (source)
+			CFRelease(source);
+		if (!image)
+			fatal(("could not read lens image " + app.lens_image_paths[i]).c_str());
+
+		const size_t width = swapchain.width, height = swapchain.height, stride = width * 4;
+		std::vector<uint8_t> pixels(stride * height);
+		CGColorSpaceRef space = CGColorSpaceCreateWithName(kCGColorSpaceSRGB);
+		const uint32_t info = bgra ? (kCGImageAlphaPremultipliedFirst | kCGBitmapByteOrder32Little)
+		                           : (kCGImageAlphaPremultipliedLast | kCGBitmapByteOrder32Big);
+		CGContextRef context = CGBitmapContextCreate(pixels.data(), width, height, 8, stride, space, info);
+		CGColorSpaceRelease(space);
+		if (!context)
+			fatal("could not create a bitmap context for the lens image");
+		CGContextSetInterpolationQuality(context, kCGInterpolationHigh);
+		CGContextDrawImage(context, CGRectMake(0, 0, (CGFloat)width, (CGFloat)height), image);
+		CGContextRelease(context);
+		CGImageRelease(image);
+
+		MTLTextureDescriptor *descriptor =
+		    [MTLTextureDescriptor texture2DDescriptorWithPixelFormat:app.color_format
+		                                                       width:width
+		                                                      height:height
+		                                                   mipmapped:NO];
+		descriptor.usage = MTLTextureUsageShaderRead;
+		descriptor.storageMode = MTLStorageModeShared;
+		id<MTLTexture> texture = [[app.command_queue device] newTextureWithDescriptor:descriptor];
+		[texture replaceRegion:MTLRegionMake2D(0, 0, width, height)
+		           mipmapLevel:0
+		             withBytes:pixels.data()
+		           bytesPerRow:stride];
+		app.lens_textures.push_back(texture);
+		fprintf(stderr, "psvr2-openxr-test: view %zu shows %s at %zux%zu\n", i, app.lens_image_paths[i].c_str(),
+		        width, height);
+	}
+}
+
+static void
+render_lens_images(application &app)
+{
+	std::vector<uint32_t> image_indices(app.swapchains.size(), 0);
+	id<MTLCommandBuffer> command_buffer = [app.command_queue commandBuffer];
+	id<MTLBlitCommandEncoder> blit = nil;
+	for (size_t i = 0; i < app.swapchains.size(); ++i) {
+		XrSwapchainImageAcquireInfo acquire_info =
+		    xr_struct<XrSwapchainImageAcquireInfo>(XR_TYPE_SWAPCHAIN_IMAGE_ACQUIRE_INFO);
+		check_xr(app.xr.acquire_swapchain_image(app.swapchains[i].handle, &acquire_info, &image_indices[i]),
+		         "xrAcquireSwapchainImage");
+		XrSwapchainImageWaitInfo wait_info =
+		    xr_struct<XrSwapchainImageWaitInfo>(XR_TYPE_SWAPCHAIN_IMAGE_WAIT_INFO);
+		wait_info.timeout = XR_INFINITE_DURATION;
+		check_xr(app.xr.wait_swapchain_image(app.swapchains[i].handle, &wait_info), "xrWaitSwapchainImage");
+		if (blit == nil)
+			blit = [command_buffer blitCommandEncoder];
+		id<MTLTexture> target = (__bridge id<MTLTexture>)app.swapchains[i].images[image_indices[i]].texture;
+		[blit copyFromTexture:app.lens_textures[i] toTexture:target];
+	}
+	[blit endEncoding];
+	[command_buffer commit];
+	for (view_swapchain &swapchain : app.swapchains) {
+		XrSwapchainImageReleaseInfo release_info =
+		    xr_struct<XrSwapchainImageReleaseInfo>(XR_TYPE_SWAPCHAIN_IMAGE_RELEASE_INFO);
+		check_xr(app.xr.release_swapchain_image(swapchain.handle, &release_info), "xrReleaseSwapchainImage");
+	}
+}
+
 static void
 render_frame(application &app)
 {
@@ -3244,7 +3332,11 @@ render_frame(application &app)
 					update_standard_foveation(app, app.fb_sparse_frame < 12);
 				}
 				@autoreleasepool {
-					render_views(app, frame_state.predictedDisplayTime);
+					if (!app.lens_textures.empty()) {
+						render_lens_images(app);
+					} else {
+						render_views(app, frame_state.predictedDisplayTime);
+					}
 				}
 				app.fb_sparse_have_image = true;
 			}
@@ -3567,6 +3659,7 @@ run(int argc, char **argv)
 	bool standard_eye_foveation = false;
 	bool fb_sparse_check = false;
 	int foveation_profile_index = 0;
+	std::array<std::string, 2> lens_image_paths;
 	for (int i = 1; i < argc; ++i) {
 		if (strcmp(argv[i], "--loader") == 0 && i + 1 < argc) {
 			loader_path = argv[++i];
@@ -3608,6 +3701,11 @@ run(int argc, char **argv)
 			if (i + 1 >= argc || (panel_scale = strtof(argv[++i], &end), *end != '\0') ||
 			    !(panel_scale >= 0) || panel_scale > 1)
 				fatal("--panel-scale requires a size from 0 (hidden) to 1 (full)");
+		} else if (strcmp(argv[i], "--lens-images") == 0) {
+			if (i + 2 >= argc)
+				fatal("--lens-images requires LEFT.png RIGHT.png");
+			lens_image_paths = {argv[i + 1], argv[i + 2]};
+			i += 2;
 		} else if (strcmp(argv[i], "--animate") == 0) {
 			animate = true;
 		} else if (strcmp(argv[i], "--gaze") == 0) {
@@ -3716,6 +3814,10 @@ run(int argc, char **argv)
 	if (gaze_foveation && submit_depth_layer) {
 		fatal("--gaze-foveation cannot currently be combined with --depth-layer");
 	}
+	if (!lens_image_paths[0].empty() &&
+	    (submit_depth_layer || survey_output || standard_foveation || gaze_foveation || passthrough_only))
+		fatal("--lens-images cannot be combined with depth, survey, foveation or passthrough-only modes");
+	app.lens_image_paths = lens_image_paths;
 	app.test_gaze = test_gaze;
 	app.test_generic_controller = test_generic_controller;
 	app.controller_panel_scale = panel_scale;
@@ -3747,6 +3849,8 @@ run(int argc, char **argv)
 	attach_action_sets(app);
 	create_passthrough_resources(app);
 	create_swapchains(app);
+	if (!app.lens_image_paths[0].empty())
+		load_lens_textures(app);
 	create_standard_foveation_resources(app);
 	initialize_terminal_controls(app);
 

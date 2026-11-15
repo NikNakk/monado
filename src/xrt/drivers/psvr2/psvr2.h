@@ -488,6 +488,23 @@ void
 psvr2_compute_distortion_asymmetric(
     float *calibration, struct xrt_uv_triplet *distCoords, int eEye, float fU, float fV);
 
+/*!
+ * Outline of the part of an eye's image that the panel reads, in the image's
+ * coordinates (0 to 1, v down), as @p count points around @p out_centre in
+ * order of increasing angle. @p max_r2 limits the panel to that squared lens
+ * radius (the distortion table covers up to 1; 0 or less means the whole
+ * panel). @p margin grows the outline by that fraction of its radius. Returns
+ * false if the calibration cannot give an outline.
+ */
+bool
+psvr2_visibility_outline(const float *calibration,
+                         int eEye,
+                         float max_r2,
+                         float margin,
+                         uint32_t count,
+                         struct xrt_vec2 *out_centre,
+                         struct xrt_vec2 *out_outline);
+
 bool
 psvr2_usb_xfer_continue(struct libusb_transfer *xfer, const char *type);
 
