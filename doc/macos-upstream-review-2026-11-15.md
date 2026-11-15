@@ -133,6 +133,15 @@ are retained in `build/review/upstream-20261115` in the main checkout; see
 commit so the two clients and service share a revision tag. Physical headset,
 Windows and Android validation were not run locally.
 
+The main checkout was fast-forwarded to the validated result and its Unity work
+restored. The restoration combines the new lens-image paths with the pending
+frame-limit option and keeps both status notes while discarding only the
+superseded initial-review summary. The restored test app compiles and links
+against the integrated helper libraries. The gaze document and two untracked
+Unity artifacts are verified byte-identical to their backups. The safety stash
+`261ae903a9d8624e9e37f4d8ed86a98684869c46` is retained; restored investigation
+changes remain uncommitted.
+
 Nothing has been pushed. The initial investigation follows for provenance.
 
 ## Finding
