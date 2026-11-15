@@ -14,6 +14,7 @@
 #include "xrt/xrt_tracking.h"
 
 #include "util/u_misc.h"
+#include "util/u_debug.h"
 #include "util/u_config_json.h"
 #include "b_space_overseer.h"
 
@@ -88,6 +89,10 @@ get_settings(cJSON *json, struct u_config_remote_settings *out_settings)
 	return bret;
 }
 
+DEBUG_GET_ONCE_NUM_OPTION(remote_port, "REMOTE_PORT", 0)
+DEBUG_GET_ONCE_NUM_OPTION(remote_w_pixels, "REMOTE_W_PIXELS", 0)
+DEBUG_GET_ONCE_NUM_OPTION(remote_h_pixels, "REMOTE_H_PIXELS", 0)
+
 static const char *driver_list[] = {
     "remote",
 };
@@ -136,6 +141,18 @@ remote_open_system(struct xrt_builder *xb,
 	    .h_meters = 0.07f,
 	};
 	get_settings(config, &settings); // Leaves the defaults on failure.
+
+	// Environment overrides, for scripted replays without editing the config file.
+	int64_t port = debug_get_num_option_remote_port();
+	int64_t w_pixels = debug_get_num_option_remote_w_pixels();
+	int64_t h_pixels = debug_get_num_option_remote_h_pixels();
+	if (port > 0 && port < 65536) {
+		settings.port = (uint16_t)port;
+	}
+	if (w_pixels > 0 && h_pixels > 0) {
+		settings.w_pixels = (uint32_t)w_pixels;
+		settings.h_pixels = (uint32_t)h_pixels;
+	}
 
 	struct b_space_overseer *uso = b_space_overseer_create(broadcast);
 	struct xrt_space_overseer *xso = (struct xrt_space_overseer *)uso;

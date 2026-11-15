@@ -427,3 +427,54 @@ TEST_CASE("Floor calibration holds the input lock only around head input updates
 	g_probe_lock = nullptr;
 	xrt_space_overseer_destroy(&xso);
 }
+
+TEST_CASE("LOCAL recenter moves shared and per-application local spaces")
+{
+	FakeHead head = {};
+	init_fake_head(head);
+	struct xrt_device *devices[] = {&head.base};
+	struct xrt_session_event_sink sink = {null_push};
+	struct b_space_overseer *uso = b_space_overseer_create(&sink);
+	struct xrt_pose identity = XRT_POSE_IDENTITY;
+	b_space_overseer_legacy_setup(uso, devices, 1, &head.base, &identity, false, true);
+	auto *xso = reinterpret_cast<struct xrt_space_overseer *>(uso);
+	struct xrt_pose stage = identity;
+	stage.position.y = -1.35f;
+	REQUIRE(xrt_space_overseer_set_reference_space_offset(xso, XRT_SPACE_REFERENCE_TYPE_STAGE, &stage) ==
+	        XRT_SUCCESS);
+
+	// Register an application's spaces where the IPC server keeps them.
+	REQUIRE(xrt_space_overseer_create_local_space(xso, &xso->localspace[0], &xso->localfloorspace[0]) ==
+	        XRT_SUCCESS);
+	struct xrt_space_relation before;
+	REQUIRE(xrt_space_overseer_locate_space(xso, xso->semantic.root, &identity, 1, xso->localspace[0], &identity,
+	                                        &before) == XRT_SUCCESS);
+
+	// The user turns and walks away, then recenters.
+	struct xrt_vec3 up = {0, 1, 0};
+	math_quat_from_angle_vector(1.2f, &up, &head.pose.orientation);
+	head.pose.position = {2.0f, 0.4f, -3.0f};
+	REQUIRE(u_stage_recenter(xso, &head.base, 1, 0.0f) == XRT_SUCCESS);
+	REQUIRE(xrt_space_overseer_recenter_local_spaces(xso) == XRT_SUCCESS);
+
+	for (struct xrt_space *local : {xso->semantic.local, xso->localspace[0]}) {
+		struct xrt_space_relation view;
+		REQUIRE(xrt_space_overseer_locate_space(xso, local, &identity, 2, xso->semantic.view, &identity,
+		                                        &view) == XRT_SUCCESS);
+		CHECK(view.pose.position.x == Catch::Approx(0.0f).margin(1e-5));
+		CHECK(view.pose.position.z == Catch::Approx(0.0f).margin(1e-5));
+		CHECK(std::fabs(view.pose.orientation.w) == Catch::Approx(1.0f).margin(1e-5));
+	}
+	// LOCAL keeps its height; the app's floor stays on the stage floor.
+	struct xrt_space_relation after, floor_in_root;
+	REQUIRE(xrt_space_overseer_locate_space(xso, xso->semantic.root, &identity, 2, xso->localspace[0], &identity,
+	                                        &after) == XRT_SUCCESS);
+	CHECK(after.pose.position.y == Catch::Approx(before.pose.position.y).margin(1e-5));
+	REQUIRE(xrt_space_overseer_locate_space(xso, xso->semantic.root, &identity, 2, xso->localfloorspace[0],
+	                                        &identity, &floor_in_root) == XRT_SUCCESS);
+	CHECK(floor_in_root.pose.position.x == Catch::Approx(2.0f).margin(1e-5));
+	CHECK(floor_in_root.pose.position.y == Catch::Approx(-1.35f).margin(1e-5));
+	CHECK(floor_in_root.pose.position.z == Catch::Approx(-3.0f).margin(1e-5));
+
+	xrt_space_overseer_destroy(&xso);
+}

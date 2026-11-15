@@ -13,6 +13,7 @@
 #include "util/u_debug.h"
 #include "util/u_system_devices.h"
 
+#include "b_io_cache.h"
 #include "b_body_tracker.h"
 #include "b_hand_tracker.h"
 #include "b_io_cache.h"
@@ -191,7 +192,8 @@ setup_accept_fd(struct r_hub *r)
 	}
 
 	server_address.sin_family = AF_INET;
-	server_address.sin_addr.s_addr = htonl(INADDR_ANY);
+	// Only this machine may drive the devices.
+	server_address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
 	server_address.sin_port = htons(r->port);
 
 	ret = bind(r->accept_fd, (struct sockaddr *)&server_address, sizeof(server_address));

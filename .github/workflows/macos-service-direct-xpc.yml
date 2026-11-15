@@ -31,7 +31,7 @@ jobs:
   build-service-xpc:
     runs-on: macos-15
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Check Wine/DXMT helper syntax
         run: |
@@ -87,7 +87,7 @@ jobs:
   build-full-release:
     runs-on: macos-15
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Install dependencies
         run: brew install cmake eigen glslang jpeg-turbo libusb mingw-w64 molten-vk ninja pkgconf sdl2-compat vulkan-headers vulkan-loader

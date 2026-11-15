@@ -18,6 +18,7 @@
 #include "os/os_time.h"
 #include "os/os_threading.h"
 
+#include "util/u_session_mark.h"
 #include "util/u_var.h"
 #include "util/u_misc.h"
 #include "util/u_time.h"
@@ -798,6 +799,7 @@ multi_main_loop(struct multi_system_compositor *msc)
 
 		// Do this as soon as we have the new display time.
 		broadcast_timings_to_clients(msc, predicted_display_time_ns);
+		u_session_mark_frame_tick();
 
 		// Now we can wait.
 		wait_frame(&sleeper, xc, frame_id, wake_up_time_ns);

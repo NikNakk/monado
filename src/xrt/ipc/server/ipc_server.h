@@ -538,6 +538,9 @@ struct ipc_server
 	//! Automatic floor calibration and optional Sense STAGE recenter polling.
 	struct ipc_server_floor_calibration *floor_calibration;
 
+	//! Session recorder (XRT_SESSION_RECORD_DIR), NULL when not recording.
+	struct ipc_server_session_record *session_record;
+
 	//! Serialize service input polling with IPC input snapshots.
 	struct os_mutex input_lock;
 
@@ -689,6 +692,26 @@ ipc_server_floor_calibration_start(struct ipc_server *s);
 //! Stop the floor calibration thread, if any. Called before the system is destroyed.
 void
 ipc_server_floor_calibration_stop(struct ipc_server *s);
+
+//! Starts the session recorder if XRT_SESSION_RECORD_DIR is set.
+void
+ipc_server_session_record_start(struct ipc_server *s);
+
+//! Stops and frees the session recorder, if running.
+void
+ipc_server_session_record_stop(struct ipc_server *s);
+
+/*!
+ * Starts recording into @p dir for a client. Succeeds if that directory is
+ * already being recorded; fails if another one is, or before the system exists.
+ * The recording stops when the client disconnects.
+ */
+xrt_result_t
+ipc_server_session_record_start_for_client(volatile struct ipc_client_state *ics, const char *dir);
+
+//! Stops the recording a disconnecting client asked for, if any.
+void
+ipc_server_session_record_client_gone(volatile struct ipc_client_state *ics);
 
 #ifdef __APPLE__
 /*!

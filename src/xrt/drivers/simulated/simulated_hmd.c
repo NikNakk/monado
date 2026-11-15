@@ -69,6 +69,9 @@ simulated_hmd(struct xrt_device *xdev)
 
 DEBUG_GET_ONCE_LOG_OPTION(simulated_log, "SIMULATED_LOG", U_LOGGING_WARN)
 DEBUG_GET_ONCE_NUM_OPTION(view_count, "SIMULATED_VIEW_COUNT", 2)
+// Whole (side-by-side) display size, for GPU-load tests at a real headset's pixel count.
+DEBUG_GET_ONCE_NUM_OPTION(display_width, "SIMULATED_DISPLAY_WIDTH", 1280)
+DEBUG_GET_ONCE_NUM_OPTION(display_height, "SIMULATED_DISPLAY_HEIGHT", 720)
 
 #define HMD_TRACE(hmd, ...) U_LOG_XDEV_IFL_T(&hmd->base, hmd->log_level, __VA_ARGS__)
 #define HMD_DEBUG(hmd, ...) U_LOG_XDEV_IFL_D(&hmd->base, hmd->log_level, __VA_ARGS__)
@@ -243,8 +246,8 @@ simulated_hmd_create(enum simulated_movement movement, const struct xrt_pose *ce
 	// Setup info.
 	bool ret = true;
 	struct u_device_simple_info info;
-	info.display.w_pixels = 1280;
-	info.display.h_pixels = 720;
+	info.display.w_pixels = (uint32_t)debug_get_num_option_display_width();
+	info.display.h_pixels = (uint32_t)debug_get_num_option_display_height();
 	info.display.w_meters = 0.13f;
 	info.display.h_meters = 0.07f;
 	info.lens_horizontal_separation_meters = 0.13f / 2.0f;

@@ -6,8 +6,13 @@
 #include <stdint.h>
 
 struct comp_macos_display_link;
-//! Callback timestamps are mach host time in nanoseconds; zero means invalid.
-typedef void (*comp_macos_display_tick)(void *ctx, uint64_t now_host_ns, uint64_t output_host_ns);
+/*!
+ * Callback timestamps are mach host time in nanoseconds; zero means invalid.
+ * @p output_host_ns is the upcoming output. With CADisplayLink (the default,
+ * XRT_MACOS_DISPLAY_LINK=ca) @p now_host_ns is the previous refresh itself and
+ * @p now_is_vblank is true; CVDisplayLink (=cv) gives its current host time.
+ */
+typedef void (*comp_macos_display_tick)(void *ctx, uint64_t now_host_ns, uint64_t output_host_ns, bool now_is_vblank);
 struct comp_macos_display_link *
 comp_macos_display_link_create(CGDirectDisplayID display, comp_macos_display_tick tick, void *ctx);
 void

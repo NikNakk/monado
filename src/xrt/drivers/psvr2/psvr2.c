@@ -987,6 +987,16 @@ psvr2_hmd_get_tracked_pose(struct xrt_device *xdev,
 	default: PSVR2_ERROR(hmd, "unknown input name"); return XRT_ERROR_INPUT_UNSUPPORTED;
 	}
 
+	if (hmd->replay_head != NULL) {
+		// Replay mode: recorded head pose, no gaze (an unworn headset's eye tracker would add noise).
+		if (name == XRT_INPUT_GENERIC_EYE_GAZE_POSE) {
+			*out_relation = (struct xrt_space_relation)XRT_SPACE_RELATION_ZERO;
+			return XRT_SUCCESS;
+		}
+		return xrt_device_get_tracked_pose(hmd->replay_head, XRT_INPUT_GENERIC_HEAD_POSE, at_timestamp_ns,
+		                                   out_relation);
+	}
+
 	os_mutex_lock(&hmd->data_lock);
 
 	if (hmd->timestamp_samples < TIMESTAMP_SAMPLES) {
