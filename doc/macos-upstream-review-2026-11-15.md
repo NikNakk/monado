@@ -114,9 +114,9 @@ integration of upstream's new Rift fusion path.
 - A temporary-prefix install under `/private/tmp/monado-integration-prefix`
   produces runtime and libmonado `.dylib` manifest paths resolving to installed
   files. The runtime exports only `xrNegotiateLoaderRuntimeInterface`.
-- The initial optimized Ubuntu 24.04 x86-64 build passes **62/62 tests**. It
-  emitted GCC/Eigen warnings, so a separate default-options CI-equivalent build
-  is being completed; do not treat the optimized run as a warning-free CI gate.
+- Ubuntu 24.04 x86-64 passes **62/62 tests** with CI default build settings
+  in 580.27 s, with no compiler warnings. The separate optimized run also passes
+  62/62; its inherited GCC/Eigen warnings are not treated as a clean CI gate.
 - With Ceres disabled, the replay tool and five focused tracking test targets
   build successfully; **5/5 focused CTests pass** (3.90 s).
 - Pinned formatting/spelling/whitespace checks pass. Source-scope REUSE passes,
@@ -126,6 +126,13 @@ No existing installed runtime or registered service is replaced. These are
 headset-free checks; user-operated native/hosted PS VR2 regression remains a
 separate deployment gate. Rebuild matching service/native client, x86-64 client
 and external bridge/proxy consumers before deploying the changed IPC protocol.
+The tested upstream merge is `b3b5a6af3`, following the two consolidation
+merges listed above. Validation logs, binary hashes and the worktree backups
+are retained in `build/review/upstream-20261115` in the main checkout; see
+`validation.json`. The native and x86-64 builds were refreshed after that merge
+commit so the two clients and service share a revision tag. Physical headset,
+Windows and Android validation were not run locally.
+
 Nothing has been pushed. The initial investigation follows for provenance.
 
 ## Finding
