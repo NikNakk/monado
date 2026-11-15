@@ -162,6 +162,14 @@ does not find it and renders unfoveated unless the standard path is available.
 
 Here “unity” means every rate is 1.0; it does not refer to the Unity engine.
 
+The [EXD/DXMT comparison audit](macos-unity-rate-map-cost-comparison.md) explains
+the workload differences and the subsequent DXMT warning fix/retest. Repeated
+no-map shader-variant controls account for most of EXD's measured increase.
+A subsequent component ablation identifies the texture-read shader variant as
+the dominant reproducible cost; an irreducible map cost is not established.
+An opt-in per-pass prototype removes 1.90 ms from the no-map control but does
+not establish a gain in mapped EXD frames; the audit records that limit.
+
 `psvr2-openxr-test --unity-rate-map` binds a cached application-owned 16×16
 Metal rasterization-rate map with every horizontal and vertical rate set to
 1.0. Startup checks the rates and all 129 coordinate samples for identity.

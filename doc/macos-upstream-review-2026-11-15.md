@@ -32,7 +32,8 @@ heads are backed up under
 - The quad worktree's two uncommitted edits are first-use diagnostic logging,
   not a rendering fix. They are preserved in place and in the backup, and are
   deliberately excluded from production consolidation. The Unity rate-map
-  investigation is restored as uncommitted work after the integration fast-forward.
+  investigation was restored as uncommitted work after the integration fast-forward
+  and subsequently committed separately, as recorded below.
 - Gaze-following insets, quad-view fast composition, Catmull-Rom filtering and
   depth reprojection retain their opt-in controls. The newly merged lens-derived
   visibility mask is now **off by default on macOS** (`PSVR2_VISIBILITY_MASK=1`
@@ -140,7 +141,14 @@ superseded initial-review summary. The restored test app compiles and links
 against the integrated helper libraries. The gaze document and two untracked
 Unity artifacts are verified byte-identical to their backups. The safety stash
 `261ae903a9d8624e9e37f4d8ed86a98684869c46` is retained; restored investigation
-changes remain uncommitted.
+changes remained uncommitted at that checkpoint.
+
+The user subsequently authorised committing the identity-rate-map work.
+`478e78d7e` records the native diagnostic, repeatable runner and historical native
+measurements. A separate documentation commit records the DXMT shader-cost
+comparison and PS VR2 fixed-map alignment/candidate findings, with a cross-link
+from the native diagnostic. No sibling source, installed runtime or settings
+were changed, and no new GPU benchmark or wearer run was performed.
 
 Nothing has been pushed. The initial investigation follows for provenance.
 
