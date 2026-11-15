@@ -645,6 +645,12 @@ What is still missing before this should be considered calibrated MR support:
 
 ## Eye tracking and foveation
 
+A [2026-11-11 all-1.0 rate-map control](macos-psvr2-gaze-foveation.md#all-10-rate-map-control-2026-11-11)
+adds a cached identity-map mode to the diagnostic and a simulated-HMD off/on/on/off
+GPU comparison, isolating map binding from reconstruction. One/four-pass tests
+on Apple M5 find no consistent GPU penalty above run-to-run variation. It changes
+no runtime defaults or installed service settings.
+
 The [2026-10-25 application-owned gaze investigation](macos-app-owned-foveation-investigation.md)
 finds standard gaze-to-game input already available through EXT eye gaze.
 Engine-owned Metal foveation is feasible with application reconstruction;

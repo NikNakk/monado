@@ -12,6 +12,12 @@ tested render-entry rather than post-submit acquisition for graphics WSI.
 Headset pilots did not support it (more source reuse, one unexplained
 game-side Metal abort), and its code was removed on 7 November.
 
+A [2026-11-11 all-1.0 rate-map control](macos-psvr2-gaze-foveation.md#all-10-rate-map-control-2026-11-11)
+adds a cached identity-map mode to the diagnostic and a simulated-HMD off/on/on/off
+GPU comparison, isolating map binding from reconstruction. One/four-pass tests
+on Apple M5 find no consistent GPU penalty above run-to-run variation. It changes
+no runtime defaults or installed service settings.
+
 The [native ARM64 Alyx dual-Vulkan investigation](macos-alyx-kosmickrisp.md)
 (19-20 October, from `codex/alyx-dual-vulkan`) records isolated KosmicKrisp and
 MoltenVK selection, the [ARM64 static audit](macos-alyx-arm64-static-audit.md),

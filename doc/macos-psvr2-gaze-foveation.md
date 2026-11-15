@@ -158,6 +158,107 @@ everything it did: `XR_FB_foveation_configuration` for levels and
 asks for `XR_MNDX_foveation` (the Chromium fork's fallback path) now simply
 does not find it and renders unfoveated unless the standard path is available.
 
+## All-1.0 rate-map control (2026-11-11)
+
+Here “unity” means every rate is 1.0; it does not refer to the Unity engine.
+
+`psvr2-openxr-test --unity-rate-map` binds a cached application-owned 16×16
+Metal rasterization-rate map with every horizontal and vertical rate set to
+1.0. Startup checks the rates and all 129 coordinate samples for identity.
+The ordinary full-size swapchain, viewport, scene, depth attachment and
+compositor path are preserved. There is no gaze acquisition, intermediate
+texture, application reconstruction or runtime foveation remap. This measures
+steady-state scene GPU cost of binding an identity map, separately from the
+older reconstruction experiment. Map construction is outside the measurement.
+
+`--frames N` bounds the diagnostic's frame-loop iterations for repeatable runs.
+The comparison runner uses the existing isolated launchd service harness with
+a simulated HMD and offscreen debug-image target; it leaves the installed
+LaunchAgent and PS VR2 alone:
+
+```sh
+python3 scripts/macos/run-unity-rate-map-comparison.py \
+  --output doc/results/unity-rate-map-YYYYMMDD
+```
+
+The sequence is off/on/on/off, 2,400 loop iterations per run, with the first
+240-sample timing batch discarded. Only complete later batches are counted.
+The runner saves logs, per-batch GPU summaries, thermal telemetry, source diff,
+HEAD and binary hashes. `--passes N` repeats cleared scene render passes per eye
+in both cases through the existing stress setting. Timings cover the stereo
+scene command buffer; they do not measure CPU encoding, compositor work or
+physical presentation. The simulated HMD has its normal wobble motion.
+
+### Simulated-HMD measurements
+
+Tested on Apple M5, RelWithDebInfo, HEAD `42c99bb1d` plus this diagnostic
+change, 2026-11-11. Both service and native runtime were rebuilt from that HEAD.
+The normal simulated HMD used 896×1007 colour/depth images per eye at the
+runner's default 140% render scale. The unity maps reported exactly the same
+physical dimensions as logical dimensions, with identity verification passing
+for both eyes in every map-enabled run. No GPU command errors were reported.
+No PS VR2 run or installed-runtime change was made.
+
+The one-pass off/on/on/off results were:
+
+| Run | Rate map | Scene GPU mean (ms) | Median of batch p50s (ms) | Measured samples |
+| --- | --- | ---: | ---: | ---: |
+| A1 | None | 0.272 | 0.259 | 1,920 |
+| B1 | All 1.0 | 0.317 | 0.303 | 1,920 |
+| B2 | All 1.0 | 0.320 | 0.303 | 1,920 |
+| A2 | None | 0.316 | 0.296 | 1,920 |
+
+Pooled case means: **0.294 ms without a map, 0.319 ms with a map**, a measured
+**+0.025 ms (+8.4%)**. However, A1→A2 baseline drift was **+0.044 ms** and
+A2 nearly equalled both map-enabled runs. This does **not** establish a causal
+25 µs map penalty. Timing summaries are rounded to 1 µs; the p50 column is a
+median of batch medians, not a pooled frame percentile. All thermal samples
+were nominal (state 0), with Low Power Mode false. GPU frequencies were not
+captured. A brief CPU-only test build overlapped the first baseline; the later
+four-pass comparison has no build activity.
+
+Local raw evidence: `doc/results/unity-rate-map-20261111-default-run2/`.
+The first sandboxed launch failed before service startup because process
+telemetry was unavailable; it is excluded from these results. The successful
+comparison used the same isolated runner outside the sandbox.
+
+The four-pass off/on/on/off check (1,440 loop iterations per run, 960
+measured samples per run after warmup) produced:
+
+| Run | Rate map | Stereo scene GPU mean (ms) | Median of batch p50s (ms) |
+| --- | --- | ---: | ---: |
+| A1 | None | 0.770 | 0.738 |
+| B1 | All 1.0 | 0.799 | 0.754 |
+| B2 | All 1.0 | 0.774 | 0.720 |
+| A2 | None | 0.786 | 0.746 |
+
+Pooled case means: **0.778 ms without a map, 0.786 ms with a map**, a measured
+**+0.0085 ms (+1.1%)** per stereo command buffer containing four cleared passes
+per eye. The two map-enabled means differ by 24.5 µs, more than the pooled
+8.5 µs difference; they overlap the baseline range. All thermal samples again
+reported nominal. Logs confirm four passes in every case and no GPU errors.
+Local raw evidence: `doc/results/unity-rate-map-20261111-four-passes/`.
+
+**Conclusion:** neither simulated workload resolves a consistent map-enablement
+penalty above run-to-run variation. This is not proof of zero cost, nor an
+upper bound for PS VR2 resolution, a different workload, non-unity maps or a
+runtime reconstruction path. It does show that the historical ~1.54 ms
+application reconstruction cost must not be attributed to merely binding a
+Metal rate map. CPU encoding and map-update costs were not measured.
+
+Validation: native service/runtime and diagnostic builds succeed; the existing
+`tests_psvr2_controller_visuals` suite passes. The diagnostic rejects conflicting
+foveation modes and invalid frame limits. These are headset-free checks only;
+physical headset runs remain user-operated.
+
+The diagnostic was restored over the November 15 upstream integration and
+compiled/linked against its runtime helpers. Help, missing/malformed/out-of-range
+frame counts and conflicting foveation modes pass CLI checks. The new lens-image
+mode is explicitly rejected with the identity-map control so it cannot silently
+replace the ordinary scene. Runner syntax/help, source formatting and source
+license checks pass. The measurements above remain from the November 11 source;
+this integration does not establish new timings.
+
 ## Historical performance result
 
 The original application-resolve proof at roughly 2800x2856 per eye showed:
