@@ -7,6 +7,11 @@ SPDX-License-Identifier: BSL-1.0
 
 # macOS Port Tracker
 
+The [31 October acquisition-phase candidate](macos-wsi-acquire-phase.md)
+tested render-entry rather than post-submit acquisition for graphics WSI.
+Headset pilots did not support it (more source reuse, one unexplained
+game-side Metal abort), and its code was removed on 7 November.
+
 The [native ARM64 Alyx dual-Vulkan investigation](macos-alyx-kosmickrisp.md)
 (19-20 October, from `codex/alyx-dual-vulkan`) records isolated KosmicKrisp and
 MoltenVK selection, the [ARM64 static audit](macos-alyx-arm64-static-audit.md),
@@ -26,6 +31,15 @@ no runtime or installed configuration changes were made.
 For native Alyx specifically, the follow-up instead recommends its existing
 application-directed FDM plan: implement OpenVR centres in xrizer and pass-end
 Vulkan density-map offsets in KK, replacing the private gaze handoff.
+
+The [WSI KK follow-up](macos-wsi-kk-followup.md) tests explicit WSI graphics and
+compute paths and removes a service-only dependency on GOOGLE display timing.
+Hosted/adaptive feedback gates and native runtime defaults remain unchanged.
+
+The isolated [KK compositor follow-up](macos-kk-compositor-followup.md) adds an
+opt-in private-scratch path and records timestamp and host-event compatibility
+gates. Desktop Alyx reaches the single-projection fast path; headset acceptance
+and an installed compositor driver change remain outstanding (24 October 2026).
 
 Presenter selection now uses `XRT_MACOS_PRESENTER=wsi|wsi-adaptive|native`
 (default `native`). `wsi` selects calibrated CV WSI; the old WSI selection

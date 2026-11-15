@@ -4,6 +4,9 @@
 #include "catch_amalgamated.hpp"
 #include "t_imu_optical_filter.h"
 
+// M_PI on MSVC.
+#include "math/m_mathinclude.h"
+
 #include <Eigen/Core>
 #include <Eigen/Geometry>
 

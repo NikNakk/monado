@@ -107,6 +107,9 @@ handle_exit_on_disconnect(struct ipc_server *s)
 static void
 common_shutdown(volatile struct ipc_client_state *ics)
 {
+	// Stop a recording this client asked for while its state is still valid.
+	ipc_server_session_record_client_gone(ics);
+
 #ifdef __APPLE__
 	// Take a hosted layer off the headset before the client state is cleared.
 	ipc_server_macos_display_host_client_gone(ics);

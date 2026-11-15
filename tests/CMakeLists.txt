@@ -6,6 +6,8 @@
 set(tests
     tests_comp_refresh_request
     tests_present_feedback_correction
+    tests_latency_drain
+    tests_present_wait_delay
     tests_cxx_wrappers
     tests_macos_display_timing
     tests_macos_presenter
@@ -239,7 +241,7 @@ if(XRT_HAVE_VULKAN)
 	add_test(NAME tests_render_compute COMMAND tests_render_compute)
 	set_tests_properties(tests_render_compute PROPERTIES TIMEOUT 60 LABELS "gpu")
 	if(APPLE)
-		target_sources(tests_render_compute PRIVATE tests_macos_metal_device.mm)
+		target_sources(tests_render_compute PRIVATE tests_macos_metal_device.mm tests_comp_scratch.cpp)
 		target_link_libraries(tests_render_compute PRIVATE "-framework Metal")
 	endif()
 
@@ -619,7 +621,10 @@ if(TARGET constellation)
 			PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../src/xrt/tracking/constellation
 				${CMAKE_CURRENT_SOURCE_DIR}/../src/xrt/tracking
 			)
-		target_link_libraries(${testname} PRIVATE Eigen3::Eigen xrt-external-bigceres)
+		target_link_libraries(${testname} PRIVATE Eigen3::Eigen)
+		if(XRT_HAVE_BIGCERES)
+			target_link_libraries(${testname} PRIVATE xrt-external-bigceres)
+		endif()
 	endforeach()
 endif()
 if(TARGET constellation_fusion)
