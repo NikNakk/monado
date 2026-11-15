@@ -997,6 +997,7 @@ struct application
 	bool animate = false;
 	bool gaze_calibrate = false;
 	bool gaze_foveation = false;
+	bool unity_rate_map = false;
 	bool standard_foveation = false;
 	bool standard_eye_foveation = false;
 	int foveation_profile_index = 0;
@@ -1294,7 +1295,8 @@ create_system_and_session(application &app)
 	if (device == nil) {
 		fatal("runtime returned a nil Metal device");
 	}
-	if ((app.gaze_foveation || app.standard_foveation) && ![device supportsRasterizationRateMapWithLayerCount:1]) {
+	if ((app.gaze_foveation || app.standard_foveation || app.unity_rate_map) &&
+	    ![device supportsRasterizationRateMapWithLayerCount:1]) {
 		fatal("Metal device does not support variable rasterization rate maps");
 	}
 	app.command_queue = [device newCommandQueue];
@@ -1751,6 +1753,35 @@ create_swapchains(application &app)
 		view_swapchain &swapchain = app.swapchains[i];
 		swapchain.width = app.view_configuration[i].recommendedImageRectWidth;
 		swapchain.height = app.view_configuration[i].recommendedImageRectHeight;
+
+		if (app.unity_rate_map) {
+			const struct u_foveation_profile unity = {"unity", 1.0f, 1.0f, 1.0f, 0.1f, 0.2f};
+			struct m_metal_foveation_map map = {};
+			if (!m_metal_foveation_map_build((void *)device, swapchain.width, swapchain.height, 8, 8,
+			                                 &unity, &map)) {
+				fatal("could not create all-1.0 Metal rate map");
+			}
+			for (uint32_t sample = 0; sample < map.sample_count; ++sample) {
+				if (map.horizontal_rates[sample] != 1.0f || map.vertical_rates[sample] != 1.0f) {
+					fatal("unity rate map contains a non-1.0 rate");
+				}
+			}
+			// Identity coordinates allow ordinary submission without reconstruction.
+			for (uint32_t boundary = 0; boundary < M_METAL_FOVEATION_BOUNDARY_COUNT; ++boundary) {
+				const float expected = (float)boundary / (M_METAL_FOVEATION_BOUNDARY_COUNT - 1);
+				if (fabsf(map.x[boundary] - expected) > 0.00001f ||
+				    fabsf(map.y[boundary] - expected) > 0.00001f) {
+					fatal("all-1.0 Metal rate map is not an identity mapping");
+				}
+			}
+			fprintf(stderr,
+			        "psvr2-openxr-test: unity rate map eye=%u grid=%ux%u rates=1.0 "
+			        "logical=%ux%u physical=%zux%zu identity verified; no resolve\n",
+			        i, map.sample_count, map.sample_count, swapchain.width, swapchain.height,
+			        map.physical_width, map.physical_height);
+			// Own the map until cleanup, using the existing app-owned map lifetime.
+			swapchain.foveation_rate_map = (id<MTLRasterizationRateMap>)map.rate_map;
+		}
 
 		XrSwapchainCreateInfoFoveationFB foveation_create_info =
 		    xr_struct<XrSwapchainCreateInfoFoveationFB>(XR_TYPE_SWAPCHAIN_CREATE_INFO_FOVEATION_FB);
@@ -3063,7 +3094,7 @@ render_views(application &app, XrTime predicted_display_time)
 				fatal("standard foveation render requested without a runtime Metal rate map");
 			}
 			render_pass.rasterizationRateMap = swapchain.standard_foveation_rate_map;
-		} else if (app.gaze_foveation) {
+		} else if (app.gaze_foveation || app.unity_rate_map) {
 			render_pass.rasterizationRateMap = swapchain.foveation_rate_map;
 		}
 		render_pass.depthAttachment.texture = depth_texture;
@@ -3129,8 +3160,9 @@ render_views(application &app, XrTime predicted_display_time)
 		[command_buffer commit];
 		[resolve_command_buffer commit];
 	} else {
+		const char *timing_label = app.unity_rate_map ? "unity-rate-map" : "normal";
 		[command_buffer addCompletedHandler:^(id<MTLCommandBuffer> completed) {
-		  record_gpu_timing(g_gpu_timing_normal, "normal", completed);
+		  record_gpu_timing(g_gpu_timing_normal, timing_label, completed);
 		}];
 		[command_buffer commit];
 	}
@@ -3656,11 +3688,13 @@ run(int argc, char **argv)
 	bool animate = false;
 	bool gaze_calibrate = false;
 	bool gaze_foveation = false;
+	bool unity_rate_map = false;
 	bool standard_foveation = false;
 	bool standard_eye_foveation = false;
 	bool fb_sparse_check = false;
 	int foveation_profile_index = 0;
 	std::array<std::string, 2> lens_image_paths;
+	uint32_t frame_limit = 0;
 	for (int i = 1; i < argc; ++i) {
 		if (strcmp(argv[i], "--loader") == 0 && i + 1 < argc) {
 			loader_path = argv[++i];
@@ -3717,6 +3751,16 @@ run(int argc, char **argv)
 		} else if (strcmp(argv[i], "--gaze-foveation") == 0) {
 			test_gaze = true;
 			gaze_foveation = true;
+		} else if (strcmp(argv[i], "--unity-rate-map") == 0) {
+			unity_rate_map = true;
+		} else if (strcmp(argv[i], "--frames") == 0) {
+			char *end = nullptr;
+			if (i + 1 >= argc)
+				fatal("--frames requires a count from 1 to 1000000");
+			const long count = strtol(argv[++i], &end, 10);
+			if (*end != '\0' || count < 1 || count > 1000000)
+				fatal("--frames requires a count from 1 to 1000000");
+			frame_limit = (uint32_t)count;
 		} else if (strcmp(argv[i], "--fb-foveation") == 0) {
 			standard_foveation = true;
 		} else if (strcmp(argv[i], "--fb-eye-foveation") == 0) {
@@ -3737,7 +3781,7 @@ run(int argc, char **argv)
 			fprintf(
 			    stderr,
 			    "Usage: %s [--loader /path/to/libopenxr_loader.1.dylib] [--blendmode Opaque|AlphaBlend] "
-			    "[--depth-layer] "
+			    "[--depth-layer] [--unity-rate-map] [--frames N] "
 			    "[--passthrough|--passthrough-only] [--generic-controller [--panel-scale S]] "
 			    "[--controller-survey "
 			    "NEW-DIRECTORY] [--animate] "
@@ -3768,6 +3812,8 @@ run(int argc, char **argv)
 			    "  --gaze-calibrate runs a 9-point head-relative calibration and saves it for the driver.\n"
 			    "  --gaze-foveation renders through gaze-driven Metal VRR plus an application resolve "
 			    "pass.\n"
+			    "  --unity-rate-map binds a cached all-1.0 Metal rate map; no gaze or resolve pass.\n"
+			    "  --frames N exits after N frame-loop iterations (default unlimited).\n"
 			    "  --fb-foveation uses XR_FB_foveation with the Metal transport and compositor remap.\n"
 			    "  --fb-eye-foveation adds XR_META_foveation_eye_tracked; gaze stays runtime-owned and "
 			    "XR_EXT_eye_gaze_interaction is not enabled.\n"
@@ -3803,6 +3849,9 @@ run(int argc, char **argv)
 	app.submit_depth_layer = submit_depth_layer;
 	app.submit_passthrough = submit_passthrough;
 	app.passthrough_only = passthrough_only;
+	if (unity_rate_map && (gaze_foveation || standard_foveation || passthrough_only || survey_output)) {
+		fatal("--unity-rate-map requires the ordinary scene without other foveation modes");
+	}
 	if (gaze_foveation && standard_foveation) {
 		fatal("legacy gaze-foveation modes cannot be combined with --fb-foveation/--fb-eye-foveation");
 	}
@@ -3815,9 +3864,11 @@ run(int argc, char **argv)
 	if (gaze_foveation && submit_depth_layer) {
 		fatal("--gaze-foveation cannot currently be combined with --depth-layer");
 	}
-	if (!lens_image_paths[0].empty() &&
-	    (submit_depth_layer || survey_output || standard_foveation || gaze_foveation || passthrough_only))
-		fatal("--lens-images cannot be combined with depth, survey, foveation or passthrough-only modes");
+	if (!lens_image_paths[0].empty() && (submit_depth_layer || survey_output || standard_foveation ||
+	                                     gaze_foveation || unity_rate_map || passthrough_only))
+		fatal(
+		    "--lens-images cannot be combined with depth, survey, foveation, rate-map or passthrough-only "
+		    "modes");
 	app.lens_image_paths = lens_image_paths;
 	app.test_gaze = test_gaze;
 	app.test_generic_controller = test_generic_controller;
@@ -3828,6 +3879,7 @@ run(int argc, char **argv)
 	}
 	app.gaze_calibrate = gaze_calibrate;
 	app.gaze_foveation = gaze_foveation;
+	app.unity_rate_map = unity_rate_map;
 	app.standard_foveation = standard_foveation;
 	app.standard_eye_foveation = standard_eye_foveation;
 	app.fb_sparse_check = fb_sparse_check;
@@ -3855,6 +3907,7 @@ run(int argc, char **argv)
 	create_standard_foveation_resources(app);
 	initialize_terminal_controls(app);
 
+	uint32_t frame_count = 0;
 	while (!g_stop_requested && !app.exit_requested) {
 		if (!poll_events(app)) {
 			break;
@@ -3866,6 +3919,9 @@ run(int argc, char **argv)
 		}
 		poll_generic_controller(app);
 		render_frame(app);
+		if (frame_limit != 0 && ++frame_count >= frame_limit) {
+			break;
+		}
 	}
 
 	if (survey_output) {
