@@ -24,6 +24,7 @@
 #include "os/os_time.h"
 
 #include "qwerty_device.h"
+#include <stdlib.h>
 
 #include <stdio.h>
 #include <assert.h>
@@ -335,8 +336,10 @@ qwerty_hmd_create(void)
 
 	// Fill in xd->hmd
 	struct u_device_simple_info info;
-	info.display.w_pixels = 1280;
-	info.display.h_pixels = 720;
+	// Private test build: the simulated HMD's display-size variables, for GPU-load tests.
+	const char *w_env = getenv("SIMULATED_DISPLAY_WIDTH"), *h_env = getenv("SIMULATED_DISPLAY_HEIGHT");
+	info.display.w_pixels = w_env != NULL && atoi(w_env) > 0 ? (uint32_t)atoi(w_env) : 1280;
+	info.display.h_pixels = h_env != NULL && atoi(h_env) > 0 ? (uint32_t)atoi(h_env) : 720;
 	info.display.w_meters = 0.13f;
 	info.display.h_meters = 0.07f;
 	info.lens_horizontal_separation_meters = 0.13f / 2.0f;
