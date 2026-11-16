@@ -34,6 +34,10 @@ extern "C" {
  */
 extern const struct comp_target_factory comp_target_factory_debug_image;
 
+#ifdef XRT_OS_OSX
+extern const struct comp_target_factory comp_target_factory_macos_wsi;
+#endif
+
 #ifdef VK_USE_PLATFORM_XCB_KHR
 
 /*!

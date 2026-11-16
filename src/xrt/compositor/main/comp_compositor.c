@@ -818,6 +818,9 @@ compositor_init_vulkan(struct comp_compositor *c)
  */
 
 const struct comp_target_factory *ctfs[] = {
+#ifdef XRT_OS_OSX
+    &comp_target_factory_macos_wsi,
+#endif
 #if defined VK_USE_PLATFORM_WAYLAND_KHR && defined XRT_HAVE_WAYLAND_DIRECT
     &comp_target_factory_direct_wayland,
 #endif

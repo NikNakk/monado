@@ -120,3 +120,12 @@ if(ANDROID)
 endif()
 
 target_link_libraries(comp_main PRIVATE comp_multi)
+
+if(APPLE)
+	target_sources(comp_main PRIVATE comp_window_macos_wsi.m)
+	target_compile_options(
+		comp_main
+		PRIVATE $<$<COMPILE_LANGUAGE:OBJC>:-fblocks;-Wall;-Wextra;-Wno-unused-parameter>
+		)
+	target_link_libraries(comp_main PRIVATE "-framework AppKit" "-framework QuartzCore")
+endif()
