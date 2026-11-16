@@ -1,0 +1,1 @@
+macOS: Add an initial in-process Vulkan runtime. It presents through public AppKit/CAMetalLayer WSI with stock MoltenVK and shares swapchain images between application and compositor Vulkan devices as Metal textures. IPC and the service are not supported on macOS yet.
