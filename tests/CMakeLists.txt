@@ -164,3 +164,27 @@ if(TARGET ipc_server)
 	target_link_libraries(tests_ipc_thread_shutdown PRIVATE ipc_shared aux_os base)
 	set_tests_properties(tests_ipc_thread_shutdown PROPERTIES TIMEOUT 10)
 endif()
+
+if(APPLE AND XRT_HAVE_VULKAN)
+	enable_language(OBJCXX)
+	add_executable(tests_macos_vulkan tests_macos_vulkan.mm)
+	set_target_properties(
+		tests_macos_vulkan PROPERTIES OBJCXX_STANDARD 20 OBJCXX_STANDARD_REQUIRED YES
+		)
+	target_compile_options(tests_macos_vulkan PRIVATE -Wall -Wextra -Wno-unused-parameter)
+	target_link_libraries(
+		tests_macos_vulkan PRIVATE xrt-external-catch2 comp_util aux_vk "-framework Metal"
+		)
+	# Needs a Metal GPU and MoltenVK; Catch2 returns 4 when every selected test is skipped.
+	add_test(NAME tests_macos_vulkan_gpu COMMAND tests_macos_vulkan "[gpu]")
+	set_tests_properties(
+		tests_macos_vulkan_gpu
+		PROPERTIES
+			TIMEOUT
+			45
+			LABELS
+			gpu
+			SKIP_RETURN_CODE
+			4
+		)
+endif()
