@@ -1,7 +1,8 @@
 ---
 # SPDX-License-Identifier: CC0-1.0
 # SPDX-FileCopyrightText: 2020, Collabora, Ltd.
-Language:             Cpp
+# No Language key: this default style applies to C, C++, Objective-C and
+# Objective-C++, including headers clang-format detects as Objective-C.
 BasedOnStyle:         LLVM
 Standard:             Auto
 
