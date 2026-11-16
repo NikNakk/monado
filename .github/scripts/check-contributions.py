@@ -44,13 +44,15 @@ if args.mode == 'format':
 
 elif args.mode == 'spelling':
     failed |= subprocess.run(['git', 'diff', '--check', base, head]).returncode != 0
-    spell_paths = [p for p in paths if Path(p).suffix in {'.c', '.h', '.cpp', '.hpp', '.m', '.mm', '.md', '.py', '.sh', '.comp'}]
+    # Like the project checker, exclude its own spelling-exception configuration.
+    spell_paths = [p for p in paths if p != 'scripts/codespell-project.sh'
+                   and Path(p).suffix in {'.c', '.h', '.cpp', '.hpp', '.m', '.mm', '.md', '.py', '.sh', '.comp'}]
     if spell_paths:
         # Check added text so pre-existing spelling in upstream files is not blamed on this series.
         diff = git('diff', '--no-ext-diff', '--no-color', '-U0', base, head, '--', *spell_paths)
         text = '\n'.join(line[1:] for line in diff.splitlines() if line.startswith('+') and not line.startswith('+++'))
         command = ['codespell', '--exclude-file=scripts/monado-codespell.exclude',
-                   '--ignore-regex=\\b(pEvent|inout|Kimera|InstallIn|numer)\\b',
+                   '--ignore-regex=\\b(pEvent|inout|Kimera|InstallIn)\\b|\\btimebase\\.numer\\b',
                    '--ignore-words-list=ang,sinc,sie,stoll,wil,daa,localy,od,ser,unknwn,parm,inflight,marge,devault,errorprone,childs', '-']
         failed |= subprocess.run(command, input=text, text=True).returncode != 0
 
