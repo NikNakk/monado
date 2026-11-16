@@ -9,6 +9,7 @@
 #include <stdlib.h>
 
 DEBUG_GET_ONCE_BOOL_OPTION(vk_metal_textures, "XRT_MACOS_VK_CLIENT_METAL_TEXTURES", true)
+DEBUG_GET_ONCE_BOOL_OPTION(vk_unified_handle, "XRT_MACOS_VK_CLIENT_UNIFIED_HANDLE", true)
 static atomic_uint context_count;
 enum
 {
@@ -31,6 +32,15 @@ client_vk_metal_texture_required(const struct xrt_swapchain_create_info *info)
 {
 	return info->array_size != 1 || info->face_count != 1 || info->sample_count != 1 || info->mip_count != 1 ||
 	       (vk_csci_get_barrier_aspect_mask(info->format) & VK_IMAGE_ASPECT_DEPTH_BIT) != 0;
+}
+bool
+client_vk_unified_handle_usable(const struct xrt_compositor_native *xcn, const struct xrt_swapchain_create_info *info)
+{
+	// Spike: an in-process compositor hands back Metal texture handles for
+	// arrays and depth, so the ordinary native swapchain path can import them.
+	// A remote compositor cannot send that form over the Unix socket yet.
+	return debug_get_bool_option_vk_unified_handle() && !xcn->is_remote && info->face_count == 1 &&
+	       info->sample_count == 1 && info->mip_count == 1;
 }
 static MTLPixelFormat
 format_to_metal(VkFormat format)

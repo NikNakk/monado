@@ -893,7 +893,16 @@ client_vk_swapchain_create(struct xrt_compositor *xc,
 	struct xrt_swapchain_native *xscn = NULL;
 #ifdef XRT_HAVE_VK_CLIENT_METAL_TEXTURES
 	struct xrt_swapchain_metal *xscm = NULL;
-	if (client_vk_metal_texture_required(&xinfo)) {
+	const bool unified_handle =
+	    client_vk_metal_texture_required(&xinfo) && client_vk_unified_handle_usable(c->xcn, &xinfo);
+	if (unified_handle) {
+		xret = xrt_comp_native_create_swapchain(c->xcn, &xinfo, &xscn);
+		if (xret == XRT_SUCCESS) {
+			U_LOG_I("Vulkan unified-handle swapchain: format=%lld layers=%u images=%u iosurface=%u remote=0",
+			        (long long)xinfo.format, xinfo.array_size, xscn->base.image_count,
+			        xrt_graphics_buffer_is_iosurface(xscn->images[0].handle));
+		}
+	} else if (client_vk_metal_texture_required(&xinfo)) {
 		if (!client_vk_metal_texture_enabled())
 			return XRT_ERROR_SWAPCHAIN_FLAG_VALID_BUT_UNSUPPORTED;
 		xret = client_vk_metal_texture_swapchain_create(c->metal, &xinfo, &xscm, &xscn);
