@@ -1,0 +1,139 @@
+# SPDX-License-Identifier: BSL-1.0
+# Copyright 2026, Nick Kennedy
+name: macOS MVP
+
+on:
+  pull_request:
+    branches: [github-ci]
+    types: [opened, synchronize, reopened, edited]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: mvp-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  linux:
+    name: Linux build and tests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Check out the exact submission commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential cmake ninja-build pkg-config python3 \
+            libeigen3-dev libudev-dev libvulkan-dev glslang-tools \
+            libcjson-dev libusb-1.0-0-dev libhidapi-dev libjpeg-dev \
+            mesa-vulkan-drivers
+      - name: Configure
+        run: |
+          cmake -S . -B build -G Ninja \
+            -DCMAKE_BUILD_TYPE=Debug -DBUILD_TESTING=ON \
+            -DXRT_FEATURE_SERVICE=OFF -DXRT_MODULE_IPC=OFF \
+            -DXRT_FEATURE_STEAMVR_PLUGIN=OFF \
+            -DXRT_HAVE_OPENGL=OFF -DXRT_HAVE_OPENGLES=OFF -DXRT_HAVE_EGL=OFF \
+            -DXRT_HAVE_OPENCV=OFF -DXRT_MODULE_CONSTELLATION_TRACKING=OFF
+      - name: Build
+        run: cmake --build build --parallel 2
+      - name: Test
+        run: ctest --test-dir build --output-on-failure --output-junit linux-tests.xml
+      - name: Retain test results and configuration
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: linux-test-results
+          retention-days: 7
+          if-no-files-found: ignore
+          path: |
+            build/linux-tests.xml
+            build/Testing/Temporary/
+            build/CMakeCache.txt
+            build/CMakeFiles/CMakeConfigureLog.yaml
+
+  macos:
+    name: macOS arm64 build and tests
+    runs-on: macos-15
+    timeout-minutes: 40
+    env:
+      HOMEBREW_NO_AUTO_UPDATE: '1'
+      HOMEBREW_NO_INSTALL_CLEANUP: '1'
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Check out the exact submission commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+      - name: Install dependencies and select stock MoltenVK
+        run: |
+          test "$(uname -m)" = arm64
+          brew install cmake ninja pkgconf eigen glslang vulkan-loader molten-vk \
+            hidapi libusb jpeg-turbo cjson
+          brew list --versions
+          icd="$(brew --prefix)/etc/vulkan/icd.d/MoltenVK_icd.json"
+          test -f "$icd"
+          echo "VK_DRIVER_FILES=$icd" >> "$GITHUB_ENV"
+      - name: Configure the optimized in-process runtime
+        run: |
+          cmake --preset macos-inproc-release -B build \
+            -DCMAKE_OSX_ARCHITECTURES=arm64 -DBUILD_TESTING=ON \
+            -DCMAKE_PREFIX_PATH="$(brew --prefix)"
+      - name: Build
+        id: build
+        run: cmake --build build --parallel 3
+      - name: Core tests
+        run: ctest --test-dir build --output-on-failure -LE gpu --output-junit macos-core-tests.xml
+      - name: Metal texture interop tests
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        env:
+          MTL_DEBUG_LAYER: '1'
+        run: ctest --test-dir build --output-on-failure -L gpu --output-junit macos-metal-tests.xml
+      - name: Summarize Metal test availability
+        if: always()
+        run: |
+          python3 - <<'PY'
+          import os
+          import xml.etree.ElementTree as ET
+          from pathlib import Path
+          report = Path('build/macos-metal-tests.xml')
+          with open(os.environ['GITHUB_STEP_SUMMARY'], 'a') as summary:
+              summary.write('### Metal texture interop\n\n')
+              if not report.exists():
+                  summary.write('No Metal test result was produced; inspect the build/test steps.\n')
+              else:
+                  for case in ET.parse(report).getroot().iter('testcase'):
+                      status = case.get('status', '').lower()
+                      if case.find('skipped') is not None or status in {'notrun', 'disabled'}:
+                          outcome = 'SKIPPED: no compatible Metal/Vulkan device on this runner'
+                      elif case.find('failure') is not None or case.find('error') is not None:
+                          outcome = 'FAILED: inspect the test log'
+                      else:
+                          outcome = 'PASSED'
+                      summary.write(f"- `{case.get('name', 'Metal test')}`: {outcome}\n")
+          PY
+      - name: Retain test results and configuration
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: macos-test-results
+          retention-days: 7
+          if-no-files-found: ignore
+          path: |
+            build/macos-core-tests.xml
+            build/macos-metal-tests.xml
+            build/Testing/Temporary/
+            build/CMakeCache.txt
+            build/CMakeFiles/CMakeConfigureLog.yaml
