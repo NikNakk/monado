@@ -137,3 +137,128 @@ jobs:
             build/Testing/Temporary/
             build/CMakeCache.txt
             build/CMakeFiles/CMakeConfigureLog.yaml
+
+  contribution:
+    name: Formatting and contribution checks
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Check out the exact submission commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          path: source
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Check out CI helpers from the harness branch
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          path: ci
+          sparse-checkout: .github
+          persist-credentials: false
+      - name: Install check tools
+        id: tools
+        run: |
+          python3 -m venv "$RUNNER_TEMP/check-tools"
+          "$RUNNER_TEMP/check-tools/bin/pip" install \
+            clang-format==23.1.1 cmakelang==0.6.13 codespell==2.4.1 reuse==6.2.0
+          echo "$RUNNER_TEMP/check-tools/bin" >> "$GITHUB_PATH"
+      - name: Check changed-line clang-format and CMake formatting
+        if: ${{ !cancelled() && steps.tools.outcome == 'success' }}
+        working-directory: source
+        env:
+          CI_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: python3 ../ci/.github/scripts/check-contributions.py --base-ref "$CI_BASE_SHA" --mode format --report-dir "$RUNNER_TEMP/contribution-results"
+      - name: Check spelling and whitespace
+        if: ${{ !cancelled() && steps.tools.outcome == 'success' }}
+        working-directory: source
+        env:
+          CI_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: python3 ../ci/.github/scripts/check-contributions.py --base-ref "$CI_BASE_SHA" --mode spelling --report-dir "$RUNNER_TEMP/contribution-results"
+      - name: Check REUSE licensing
+        if: ${{ !cancelled() && steps.tools.outcome == 'success' }}
+        working-directory: source
+        run: reuse lint
+      - name: Check changelog fragment names
+        if: ${{ !cancelled() && steps.tools.outcome == 'success' }}
+        working-directory: source
+        env:
+          CI_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: python3 ../ci/.github/scripts/check-contributions.py --base-ref "$CI_BASE_SHA" --mode changelog --report-dir "$RUNNER_TEMP/contribution-results"
+      - name: Check author DCO sign-offs
+        if: ${{ !cancelled() && steps.tools.outcome == 'success' }}
+        working-directory: source
+        env:
+          CI_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: python3 ../ci/.github/scripts/check-contributions.py --base-ref "$CI_BASE_SHA" --mode signoff --report-dir "$RUNNER_TEMP/contribution-results"
+      - name: Retain formatting patch
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: contribution-results
+          path: ${{ runner.temp }}/contribution-results
+          retention-days: 7
+          if-no-files-found: ignore
+
+  windows:
+    name: Windows x64 build and tests
+    runs-on: windows-2022
+    timeout-minutes: 60
+    env:
+      VCPKG_ROOT: C:\vcpkg
+      VCPKG_DEFAULT_BINARY_CACHE: ${{ github.workspace }}\vcpkg-binary-cache
+      VCPKG_BINARY_SOURCES: clear;files,${{ github.workspace }}\vcpkg-binary-cache,readwrite
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - name: Check out the exact submission commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+      - name: Prepare vcpkg
+        run: |
+          if ((git -C "$env:VCPKG_ROOT" rev-parse --is-shallow-repository) -eq 'true') {
+            git -C "$env:VCPKG_ROOT" fetch --unshallow
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          }
+          & "$env:VCPKG_ROOT\bootstrap-vcpkg.bat" -disableMetrics
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          New-Item -ItemType Directory -Force "$env:VCPKG_DEFAULT_BINARY_CACHE" | Out-Null
+      - name: Restore dependency cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
+        with:
+          path: ${{ env.VCPKG_DEFAULT_BINARY_CACHE }}
+          key: vcpkg-windows-${{ hashFiles('vcpkg.json') }}
+          restore-keys: vcpkg-windows-
+      - name: Install glslangValidator for configuration
+        working-directory: ${{ runner.temp }}
+        run: |
+          & "$env:VCPKG_ROOT\vcpkg.exe" install --classic 'glslang[tools]:x64-windows'
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          "$env:VCPKG_ROOT\installed\x64-windows\tools\glslang" >> $env:GITHUB_PATH
+      - name: Configure
+        run: |
+          cmake -S . -B build -G 'Visual Studio 17 2022' -A x64 `
+            "-DCMAKE_TOOLCHAIN_FILE=$env:VCPKG_ROOT\scripts\buildsystems\vcpkg.cmake" `
+            -DVCPKG_TARGET_TRIPLET=x64-windows -DX_VCPKG_APPLOCAL_DEPS_INSTALL=ON `
+            -DCMAKE_COMPILE_WARNING_AS_ERROR=ON -DBUILD_TESTING=ON
+      - name: Build
+        run: cmake --build build --config RelWithDebInfo --parallel 4
+      - name: Test
+        run: ctest --test-dir build -C RelWithDebInfo --output-on-failure --output-junit windows-tests.xml
+      - name: Retain test results and configuration
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: windows-test-results
+          retention-days: 7
+          if-no-files-found: ignore
+          path: |
+            build/windows-tests.xml
+            build/Testing/Temporary/
+            build/CMakeCache.txt
+            build/CMakeFiles/CMakeConfigureLog.yaml
+            build/vcpkg-manifest-install.log
