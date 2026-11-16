@@ -162,7 +162,7 @@ jobs:
         run: |
           python3 -m venv "$RUNNER_TEMP/check-tools"
           "$RUNNER_TEMP/check-tools/bin/pip" install \
-            clang-format==23.1.1 cmakelang==0.6.13 codespell==2.4.1 reuse==6.2.0
+            clang-format==14.0.6 cmakelang==0.6.13 codespell==2.4.1 reuse==6.2.0
           echo "$RUNNER_TEMP/check-tools/bin" >> "$GITHUB_PATH"
       - name: Check changed-line clang-format and CMake formatting
         if: ${{ !cancelled() && steps.tools.outcome == 'success' }}
