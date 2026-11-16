@@ -94,12 +94,29 @@ vk_build_instance_extensions(struct vk_bundle *vk,
                              struct u_extension_list *optional_instance_ext_list,
                              struct u_extension_list **out_instance_ext_list)
 {
+#if defined(XRT_OS_OSX) && defined(VK_KHR_portability_enumeration)
+	// MoltenVK is a portability driver, hidden by the loader unless explicitly enumerated.
+	struct u_extension_list_builder *builder = u_extension_list_builder_create();
+	u_extension_list_builder_append_array(builder, u_extension_list_get_data(optional_instance_ext_list),
+	                                      u_extension_list_get_size(optional_instance_ext_list));
+	u_extension_list_builder_append_unique(builder, VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME);
+	struct u_extension_list *optional = u_extension_list_builder_build_sorted_for_extensions(&builder);
+	VkResult ret = vk_build_instance_extensions_with_skip( //
+	    vk,                                                //
+	    required_instance_ext_list,                        //
+	    optional,                                          //
+	    should_skip_optional_instance_ext,                 //
+	    out_instance_ext_list);                            //
+	u_extension_list_destroy(&optional);
+	return ret;
+#else
 	return vk_build_instance_extensions_with_skip( //
 	    vk,                                        //
 	    required_instance_ext_list,                //
 	    optional_instance_ext_list,                //
 	    should_skip_optional_instance_ext,         //
 	    out_instance_ext_list);                    //
+#endif
 }
 
 VkResult
@@ -940,13 +957,22 @@ vk_create_device(struct vk_bundle *vk,
 	ret = select_physical_device(vk, forced_index);
 	VK_CHK_WITH_GOTO(ret, "select_physical_device", err_destroy);
 
+	// Vulkan requires portability_subset to be enabled whenever it is advertised.
+	struct u_extension_list_builder *ext_builder = u_extension_list_builder_create();
+	u_extension_list_builder_append_array(ext_builder, u_extension_list_get_data(optional_device_ext_list),
+	                                      u_extension_list_get_size(optional_device_ext_list));
+#ifdef VK_KHR_portability_subset
+	u_extension_list_builder_append_unique(ext_builder, VK_KHR_PORTABILITY_SUBSET_EXTENSION_NAME);
+#endif
+	struct u_extension_list *optional = u_extension_list_builder_build_sorted_for_extensions(&ext_builder);
 	ret = vk_build_device_extensions_with_skip( //
 	    vk,                                     //
 	    vk->physical_device,                    //
 	    required_device_ext_list,               //
-	    optional_device_ext_list,               //
+	    optional,                               //
 	    should_skip_optional_device_ext,        //
 	    &device_ext_list);                      //
+	u_extension_list_destroy(&optional);
 	VK_CHK_WITH_GOTO(ret, "vk_build_device_extensions_with_skip", err_destroy);
 
 	// Fill in has_* fields based on the extension list.
