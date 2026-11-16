@@ -39,6 +39,7 @@ if(XRT_HAVE_VULKAN)
 		APPEND
 		tests
 		tests_comp_client_vulkan
+		tests_vk_bundle
 		tests_uv_to_tangent
 		tests_render_pipeline_cache
 		)
@@ -111,6 +112,7 @@ if(XRT_HAVE_D3D12)
 endif()
 
 if(XRT_HAVE_VULKAN)
+	target_link_libraries(tests_vk_bundle PRIVATE aux_vk)
 	target_link_libraries(
 		tests_comp_client_vulkan PRIVATE comp_client comp_mock comp_util aux_vk
 		)
