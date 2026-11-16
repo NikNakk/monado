@@ -30,3 +30,6 @@ spelling, whitespace, REUSE licensing, numbered changelog fragments and author D
 sign-offs. Helpers are read from the harness branch; source and commit checks use
 the submission branch and its merge base. Missing sign-offs fail until the author
 certifies and pushes the commits. Tool versions are pinned in the workflow.
+
+clang-format is pinned to 14.0.6 to match the GitLab Bookworm style job. Use
+that version locally too; newer releases can produce different formatting.
