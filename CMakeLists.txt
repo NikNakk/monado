@@ -269,7 +269,15 @@ option_with_deps(XRT_HAVE_SYSTEM_CJSON "Enable cJSON from system, instead of bun
 # Hand tracking deps
 option_with_deps(XRT_HAVE_ONNXRUNTIME "Enable ONNX runtime support" DEPENDS ONNXRUNTIME_FOUND)
 
-option(XRT_MODULE_IPC "Enable the build of the IPC layer" ON)
+# macOS currently supports in-process graphics handles only.
+set(_ipc_default ON)
+if(APPLE)
+	set(_ipc_default OFF)
+endif()
+option(XRT_MODULE_IPC "Enable the build of the IPC layer" ${_ipc_default})
+if(APPLE AND XRT_MODULE_IPC)
+	message(FATAL_ERROR "macOS supports the in-process runtime only; configure XRT_MODULE_IPC=OFF")
+endif()
 option(XRT_MODULE_COMPOSITOR "Enable the compositor at all" ON)
 option_with_deps(XRT_MODULE_COMPOSITOR_CLIENT "Build compositor client library" DEPENDS XRT_MODULE_COMPOSITOR)
 option_with_deps(XRT_MODULE_COMPOSITOR_MAIN "Build main compositor host functionality" DEPENDS
@@ -573,6 +581,9 @@ if(XRT_HAVE_WAYLAND)
 endif()
 if(ANDROID)
 	set(VK_USE_PLATFORM_ANDROID_KHR TRUE)
+endif()
+if(APPLE)
+	set(VK_USE_PLATFORM_METAL_EXT TRUE)
 endif()
 if(WIN32)
 	set(VK_USE_PLATFORM_WIN32_KHR TRUE)
