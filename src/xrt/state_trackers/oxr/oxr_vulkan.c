@@ -112,6 +112,10 @@ static const char *required_vk_instance_extensions[] = {
 };
 
 static const char *optional_vk_instance_extensions[] = {
+#if defined(XRT_OS_OSX) && defined(VK_KHR_portability_enumeration)
+    // MoltenVK is a portability driver, hidden unless explicitly enumerated.
+    VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME,
+#endif
 #if defined(VK_EXT_debug_utils)
     VK_EXT_DEBUG_UTILS_EXTENSION_NAME,
 #endif
@@ -128,7 +132,9 @@ static const char *required_vk_device_extensions[] = {
     VK_KHR_GET_MEMORY_REQUIREMENTS_2_EXTENSION_NAME, //
 
 // Platform version of "external_memory"
-#if defined(XRT_GRAPHICS_BUFFER_HANDLE_IS_FD)
+#if defined(XRT_GRAPHICS_BUFFER_HANDLE_IS_METAL_TEXTURE)
+    VK_EXT_METAL_OBJECTS_EXTENSION_NAME,
+#elif defined(XRT_GRAPHICS_BUFFER_HANDLE_IS_FD)
     VK_KHR_EXTERNAL_MEMORY_FD_EXTENSION_NAME,
 
 #elif defined(XRT_GRAPHICS_BUFFER_HANDLE_IS_AHARDWAREBUFFER)
@@ -157,7 +163,12 @@ static const char *required_vk_device_extensions[] = {
 };
 
 static const char *optional_device_extensions[] = {
-#if defined(XRT_GRAPHICS_SYNC_HANDLE_IS_FD)
+#ifdef VK_KHR_portability_subset
+    VK_KHR_PORTABILITY_SUBSET_EXTENSION_NAME,
+#endif
+#if defined(XRT_OS_OSX)
+// No FD fence/semaphore export: use the queue-idle fallback.
+#elif defined(XRT_GRAPHICS_SYNC_HANDLE_IS_FD)
     VK_KHR_EXTERNAL_SEMAPHORE_FD_EXTENSION_NAME, VK_KHR_EXTERNAL_FENCE_FD_EXTENSION_NAME,
 
 #elif defined(XRT_GRAPHICS_SYNC_HANDLE_IS_WIN32_HANDLE) // Not optional
@@ -285,6 +296,12 @@ oxr_vk_create_vulkan_instance(struct oxr_logger *log,
 	VkInstanceCreateInfo modified_info = *createInfo->vulkanCreateInfo;
 	modified_info.ppEnabledExtensionNames = u_extension_list_get_data(instance_ext_list);
 	modified_info.enabledExtensionCount = u_extension_list_get_size(instance_ext_list);
+
+#ifdef VK_KHR_portability_enumeration
+	if (u_extension_list_contains(instance_ext_list, VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME)) {
+		modified_info.flags |= VK_INSTANCE_CREATE_ENUMERATE_PORTABILITY_BIT_KHR;
+	}
+#endif
 
 	*vulkanResult = loaded_CreateInstance(&modified_info, createInfo->vulkanAllocator, vulkanInstance);
 
