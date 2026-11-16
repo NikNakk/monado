@@ -21,6 +21,7 @@
 #endif // !XRT_OS_WINDOWS
 
 #ifdef XRT_OS_OSX
+#include <CoreFoundation/CoreFoundation.h>
 #include <IOSurface/IOSurfaceRef.h>
 #endif
 
@@ -246,11 +247,16 @@ xrt_graphics_buffer_is_valid(xrt_graphics_buffer_handle_t handle)
  * The type underlying buffers shared between compositor clients and the main
  * compositor.
  *
- * On macOS, this is an IOSurfaceRef. The Vulkan import/export plumbing is
- * still incomplete, but the public handle model should match the platform
- * instead of pretending these are Unix file descriptors.
+ * On macOS, this is one retained Apple object, of one of two types:
+ *
+ * - an IOSurfaceRef, for plain single-layer colour images, or
+ * - an id<MTLTexture>, for images an IOSurface cannot back (arrays, depth).
+ *
+ * Both are reference-counted with CFRetain/CFRelease. Use
+ * xrt_graphics_buffer_is_iosurface() to tell them apart. Only the IOSurface
+ * form can be sent over Unix IPC; Metal textures need the XPC side channel.
  */
-typedef IOSurfaceRef xrt_graphics_buffer_handle_t;
+typedef void *xrt_graphics_buffer_handle_t;
 
 /*!
  * Defined to allow detection of the underlying type.
@@ -277,6 +283,18 @@ static inline bool
 xrt_graphics_buffer_is_valid(xrt_graphics_buffer_handle_t handle)
 {
 	return handle != NULL;
+}
+
+/*!
+ * Is this valid handle an IOSurfaceRef? If not, it is an id<MTLTexture>,
+ * including a texture that happens to be backed by an IOSurface.
+ *
+ * @public @memberof xrt_graphics_buffer_handle_t
+ */
+static inline bool
+xrt_graphics_buffer_is_iosurface(xrt_graphics_buffer_handle_t handle)
+{
+	return handle != NULL && CFGetTypeID((CFTypeRef)handle) == IOSurfaceGetTypeID();
 }
 
 /*!

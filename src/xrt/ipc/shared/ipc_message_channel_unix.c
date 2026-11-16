@@ -530,7 +530,8 @@ ipc_send_handles_graphics_buffer(struct ipc_message_channel *imc,
 
 	IOSurfaceID *ids = (IOSurfaceID *)(buf + size);
 	for (uint32_t i = 0; i < handle_count; ++i) {
-		ids[i] = xrt_graphics_buffer_is_valid(handles[i]) ? IOSurfaceGetID(handles[i]) : 0;
+		// Metal texture handles cannot cross as IDs; they use the XPC side channel.
+		ids[i] = xrt_graphics_buffer_is_iosurface(handles[i]) ? IOSurfaceGetID((IOSurfaceRef)handles[i]) : 0;
 	}
 
 	xrt_result_t result = ipc_send(imc, buf, total_size);

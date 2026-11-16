@@ -607,6 +607,35 @@ get_image_native_handle(struct vk_bundle *vk, VkImage image, xrt_graphics_buffer
 	*out_handle = u_graphics_buffer_ref(io_surface_info.ioSurface);
 	return xrt_graphics_buffer_is_valid(*out_handle) ? VK_SUCCESS : VK_ERROR_OUT_OF_HOST_MEMORY;
 }
+
+static VkResult
+get_image_native_texture_handle(struct vk_bundle *vk, VkImage image, xrt_graphics_buffer_handle_t *out_handle)
+{
+	*out_handle = XRT_GRAPHICS_BUFFER_HANDLE_INVALID;
+	if (!vk->has_EXT_metal_objects || vk->vkExportMetalObjectsEXT == NULL) {
+		return VK_ERROR_EXTENSION_NOT_PRESENT;
+	}
+
+	VkExportMetalTextureInfoEXT texture_info = {
+	    .sType = VK_STRUCTURE_TYPE_EXPORT_METAL_TEXTURE_INFO_EXT,
+	    .image = image,
+	    .plane = VK_IMAGE_ASPECT_PLANE_0_BIT,
+	};
+	VkExportMetalObjectsInfoEXT export_info = {
+	    .sType = VK_STRUCTURE_TYPE_EXPORT_METAL_OBJECTS_INFO_EXT,
+	    .pNext = &texture_info,
+	};
+
+	vk->vkExportMetalObjectsEXT(vk->device, &export_info);
+
+	if (texture_info.mtlTexture == NULL) {
+		return VK_ERROR_INITIALIZATION_FAILED;
+	}
+
+	// The exported object is unretained; the handle owns one reference.
+	*out_handle = u_graphics_buffer_ref((xrt_graphics_buffer_handle_t)texture_info.mtlTexture);
+	return VK_SUCCESS;
+}
 #endif // XRT_GRAPHICS_BUFFER_HANDLE_IS_IOSURFACE
 
 
@@ -707,7 +736,9 @@ vk_ic_from_natives(struct vk_bundle *vk,
 		}
 
 		VK_NAME_IMAGE(vk, out_vkic->images[i].handle, "vk_image_collection image");
-		VK_NAME_DEVICE_MEMORY(vk, out_vkic->images[i].memory, "vk_image_collection device_memory");
+		if (out_vkic->images[i].memory != VK_NULL_HANDLE) {
+			VK_NAME_DEVICE_MEMORY(vk, out_vkic->images[i].memory, "vk_image_collection device_memory");
+		}
 
 		native_images[i].handle = buf;
 	}
@@ -756,16 +787,10 @@ vk_ic_get_handles(struct vk_bundle *vk,
                   xrt_graphics_buffer_handle_t *out_handles)
 {
 #if defined(XRT_GRAPHICS_BUFFER_HANDLE_IS_IOSURFACE)
-	if (vkic->info.array_size > 1 || (vkic->info.bits & XRT_SWAPCHAIN_USAGE_DEPTH_STENCIL) != 0) {
-		// IOSurface-backed Metal textures must be ordinary color 2D textures.
-		// Layered and depth/stencil macOS swapchains are consumed directly
-		// through VK_EXT_metal_objects, so there is deliberately no IOSurface
-		// native handle for these images.
-		for (size_t i = 0; i < vkic->image_count && i < max_handles; i++) {
-			out_handles[i] = XRT_GRAPHICS_BUFFER_HANDLE_INVALID;
-		}
-		return VK_SUCCESS;
-	}
+	// IOSurface-backed Metal textures must be ordinary color 2D textures.
+	// Layered and depth/stencil images use the Metal texture form of the handle.
+	const bool texture_handles =
+	    vkic->info.array_size > 1 || (vkic->info.bits & XRT_SWAPCHAIN_USAGE_DEPTH_STENCIL) != 0;
 #endif
 
 	VkResult ret = VK_SUCCESS;
@@ -773,7 +798,11 @@ vk_ic_get_handles(struct vk_bundle *vk,
 	size_t i = 0;
 	for (; i < vkic->image_count && i < max_handles; i++) {
 #if defined(XRT_GRAPHICS_BUFFER_HANDLE_IS_IOSURFACE)
-		ret = get_image_native_handle(vk, vkic->images[i].handle, &out_handles[i]);
+		if (texture_handles) {
+			ret = get_image_native_texture_handle(vk, vkic->images[i].handle, &out_handles[i]);
+		} else {
+			ret = get_image_native_handle(vk, vkic->images[i].handle, &out_handles[i]);
+		}
 		VK_CHK_ONLY_PRINT(ret, "get_image_native_handle");
 #else
 		ret = vk_get_native_handle_from_device_memory(vk, vkic->images[i].memory, &out_handles[i]);

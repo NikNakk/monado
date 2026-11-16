@@ -481,11 +481,21 @@ vk_create_image_from_native(struct vk_bundle *vk,
 		return VK_ERROR_EXTENSION_NOT_PRESENT;
 	}
 
+	const bool import_metal_texture = !xrt_graphics_buffer_is_iosurface(image_native->handle);
 	VkImportMetalIOSurfaceInfoEXT import_io_surface_info = {
 	    .sType = VK_STRUCTURE_TYPE_IMPORT_METAL_IO_SURFACE_INFO_EXT,
-	    .ioSurface = image_native->handle,
+	    .ioSurface = (IOSurfaceRef)image_native->handle,
 	};
-	image_create_next = &import_io_surface_info;
+	VkImportMetalTextureInfoEXT import_metal_texture_info = {
+	    .sType = VK_STRUCTURE_TYPE_IMPORT_METAL_TEXTURE_INFO_EXT,
+	    .plane = VK_IMAGE_ASPECT_PLANE_0_BIT,
+	    .mtlTexture = image_native->handle,
+	};
+	if (import_metal_texture) {
+		image_create_next = &import_metal_texture_info;
+	} else {
+		image_create_next = &import_io_surface_info;
+	}
 #else
 #error "need port"
 #endif
@@ -534,6 +544,16 @@ vk_create_image_from_native(struct vk_bundle *vk,
 		// Nothing to cleanup
 		return ret;
 	}
+
+#if defined(XRT_GRAPHICS_BUFFER_HANDLE_IS_IOSURFACE)
+	if (import_metal_texture) {
+		// VkImportMetalTextureInfoEXT creates an image that is already memory-bound.
+		u_graphics_buffer_unref(&image_native->handle);
+		*out_image = image;
+		*out_mem = VK_NULL_HANDLE;
+		return VK_SUCCESS;
+	}
+#endif
 
 	VkMemoryRequirements requirements = {0};
 	vk->vkGetImageMemoryRequirements(vk->device, image, &requirements);
