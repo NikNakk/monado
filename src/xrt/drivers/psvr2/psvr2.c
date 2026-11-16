@@ -62,6 +62,13 @@
 #define SLAM_POSE_CORRECTION {.orientation = {.x = 0, .y = 0, .z = sqrt(2) / 2, .w = sqrt(2) / 2}}
 // clang-format on
 
+#ifdef XRT_OS_OSX
+#define PSVR2_AUX_DEFAULT false
+#else
+#define PSVR2_AUX_DEFAULT true
+#endif
+DEBUG_GET_ONCE_BOOL_OPTION(psvr2_auxiliary_streams, "PSVR2_AUXILIARY_STREAMS", PSVR2_AUX_DEFAULT)
+
 DEBUG_GET_ONCE_FLOAT_OPTION(psvr2_default_brightness, "PSVR2_DEFAULT_BRIGHTNESS", 1.0f)
 
 DEBUG_GET_ONCE_LOG_OPTION(psvr2_log, "PSVR2_LOG", U_LOGGING_WARN)
@@ -629,6 +636,10 @@ psvr2_usb_open(struct psvr2_hmd *hmd, struct xrt_prober_device *xpdev)
 		int altmode = interface_list[i].altmode;
 		const char *name = interface_list[i].name;
 
+		if (!debug_get_bool_option_psvr2_auxiliary_streams() && intf_no != PSVR2_STATUS_INTERFACE &&
+		    intf_no != PSVR2_SLAM_INTERFACE) {
+			continue;
+		}
 		res = libusb_claim_interface(hmd->dev, intf_no);
 		if (res < 0) {
 			PSVR2_ERROR(hmd, "Failed to claim USB %s interface", name);
@@ -859,30 +870,33 @@ psvr2_usb_start(struct psvr2_hmd *hmd)
 	}
 	hmd->usb_active_xfers++;
 
-	/* Camera data */
-	hmd->camera_enable = true;
-	hmd->camera_mode = PSVR2_CAMERA_MODE_10;
-	set_camera_mode(hmd, hmd->camera_mode);
+	if (debug_get_bool_option_psvr2_auxiliary_streams()) {
+		/* Camera data */
+		hmd->camera_enable = true;
+		hmd->camera_mode = PSVR2_CAMERA_MODE_10;
+		set_camera_mode(hmd, hmd->camera_mode);
 
-	for (int i = 0; i < NUM_CAM_XFERS; i++) {
-		hmd->camera_xfers[i] = libusb_alloc_transfer(0);
-		if (hmd->camera_xfers[i] == NULL) {
-			PSVR2_ERROR(hmd, "Could not alloc USB transfer %d for camera data", i);
-			goto out;
+		for (int i = 0; i < NUM_CAM_XFERS; i++) {
+			hmd->camera_xfers[i] = libusb_alloc_transfer(0);
+			if (hmd->camera_xfers[i] == NULL) {
+				PSVR2_ERROR(hmd, "Could not alloc USB transfer %d for camera data", i);
+				goto out;
+			}
+
+			uint8_t *recv_buf = malloc(USB_CAM_MODE10_XFER_SIZE);
+
+			libusb_fill_bulk_transfer(hmd->camera_xfers[i], hmd->dev,
+			                          LIBUSB_ENDPOINT_IN | PSVR2_CAMERA_ENDPOINT, recv_buf,
+			                          USB_CAM_MODE10_XFER_SIZE, img_xfer_cb, hmd, 0);
+			hmd->camera_xfers[i]->flags |= LIBUSB_TRANSFER_FREE_BUFFER;
+
+			res = libusb_submit_transfer(hmd->camera_xfers[i]);
+			if (res < 0) {
+				PSVR2_ERROR(hmd, "Could not submit USB transfer %d for camera data", i);
+				goto out;
+			}
+			hmd->usb_active_xfers++;
 		}
-
-		uint8_t *recv_buf = malloc(USB_CAM_MODE10_XFER_SIZE);
-
-		libusb_fill_bulk_transfer(hmd->camera_xfers[i], hmd->dev, LIBUSB_ENDPOINT_IN | PSVR2_CAMERA_ENDPOINT,
-		                          recv_buf, USB_CAM_MODE10_XFER_SIZE, img_xfer_cb, hmd, 0);
-		hmd->camera_xfers[i]->flags |= LIBUSB_TRANSFER_FREE_BUFFER;
-
-		res = libusb_submit_transfer(hmd->camera_xfers[i]);
-		if (res < 0) {
-			PSVR2_ERROR(hmd, "Could not submit USB transfer %d for camera data", i);
-			goto out;
-		}
-		hmd->usb_active_xfers++;
 	}
 
 	/* SLAM endpoint */
@@ -903,64 +917,66 @@ psvr2_usb_start(struct psvr2_hmd *hmd)
 	}
 	hmd->usb_active_xfers++;
 
-	/* LD endpoint */
-	hmd->led_detector_xfer = libusb_alloc_transfer(0);
-	if (hmd->led_detector_xfer == NULL) {
-		PSVR2_ERROR(hmd, "Could not alloc USB transfer for LED Detector data");
-		goto out;
-	}
-	uint8_t *led_detector_buf = malloc(USB_LD_XFER_SIZE);
-	libusb_fill_bulk_transfer(hmd->led_detector_xfer, hmd->dev, LIBUSB_ENDPOINT_IN | PSVR2_LD_ENDPOINT,
-	                          led_detector_buf, USB_LD_XFER_SIZE, dump_xfer_cb, hmd, 0);
-	hmd->led_detector_xfer->flags |= LIBUSB_TRANSFER_FREE_BUFFER;
+	if (debug_get_bool_option_psvr2_auxiliary_streams()) {
+		/* LD endpoint */
+		hmd->led_detector_xfer = libusb_alloc_transfer(0);
+		if (hmd->led_detector_xfer == NULL) {
+			PSVR2_ERROR(hmd, "Could not alloc USB transfer for LED Detector data");
+			goto out;
+		}
+		uint8_t *led_detector_buf = malloc(USB_LD_XFER_SIZE);
+		libusb_fill_bulk_transfer(hmd->led_detector_xfer, hmd->dev, LIBUSB_ENDPOINT_IN | PSVR2_LD_ENDPOINT,
+		                          led_detector_buf, USB_LD_XFER_SIZE, dump_xfer_cb, hmd, 0);
+		hmd->led_detector_xfer->flags |= LIBUSB_TRANSFER_FREE_BUFFER;
 
-	res = libusb_submit_transfer(hmd->led_detector_xfer);
-	if (res < 0) {
-		PSVR2_ERROR(hmd, "Could not submit USB transfer for LED Detector data");
-		goto out;
-	}
-	hmd->usb_active_xfers++;
+		res = libusb_submit_transfer(hmd->led_detector_xfer);
+		if (res < 0) {
+			PSVR2_ERROR(hmd, "Could not submit USB transfer for LED Detector data");
+			goto out;
+		}
+		hmd->usb_active_xfers++;
 
-	/* RP endpoint */
-	hmd->relocalizer_xfer = libusb_alloc_transfer(0);
-	if (hmd->relocalizer_xfer == NULL) {
-		PSVR2_ERROR(hmd, "Could not alloc USB transfer for RP data");
-		goto out;
-	}
-	uint8_t *relocalizer_buf = malloc(USB_RP_XFER_SIZE);
-	libusb_fill_bulk_transfer(hmd->relocalizer_xfer, hmd->dev, LIBUSB_ENDPOINT_IN | PSVR2_RP_ENDPOINT,
-	                          relocalizer_buf, USB_RP_XFER_SIZE, dump_xfer_cb, hmd, 0);
-	hmd->relocalizer_xfer->flags |= LIBUSB_TRANSFER_FREE_BUFFER;
+		/* RP endpoint */
+		hmd->relocalizer_xfer = libusb_alloc_transfer(0);
+		if (hmd->relocalizer_xfer == NULL) {
+			PSVR2_ERROR(hmd, "Could not alloc USB transfer for RP data");
+			goto out;
+		}
+		uint8_t *relocalizer_buf = malloc(USB_RP_XFER_SIZE);
+		libusb_fill_bulk_transfer(hmd->relocalizer_xfer, hmd->dev, LIBUSB_ENDPOINT_IN | PSVR2_RP_ENDPOINT,
+		                          relocalizer_buf, USB_RP_XFER_SIZE, dump_xfer_cb, hmd, 0);
+		hmd->relocalizer_xfer->flags |= LIBUSB_TRANSFER_FREE_BUFFER;
 
-	res = libusb_submit_transfer(hmd->relocalizer_xfer);
-	if (res < 0) {
-		PSVR2_ERROR(hmd, "Could not submit USB transfer for RP data");
-		goto out;
-	}
-	hmd->usb_active_xfers++;
+		res = libusb_submit_transfer(hmd->relocalizer_xfer);
+		if (res < 0) {
+			PSVR2_ERROR(hmd, "Could not submit USB transfer for RP data");
+			goto out;
+		}
+		hmd->usb_active_xfers++;
 
-	/* VD endpoint */
-	hmd->vd_xfer = libusb_alloc_transfer(0);
-	if (hmd->vd_xfer == NULL) {
-		PSVR2_ERROR(hmd, "Could not alloc USB transfer for VD data");
-		goto out;
-	}
-	uint8_t *vd_buf = malloc(USB_VD_XFER_SIZE);
-	libusb_fill_bulk_transfer(hmd->vd_xfer, hmd->dev, LIBUSB_ENDPOINT_IN | PSVR2_VD_ENDPOINT, vd_buf,
-	                          USB_VD_XFER_SIZE, dump_xfer_cb, hmd, 0);
-	hmd->vd_xfer->flags |= LIBUSB_TRANSFER_FREE_BUFFER;
+		/* VD endpoint */
+		hmd->vd_xfer = libusb_alloc_transfer(0);
+		if (hmd->vd_xfer == NULL) {
+			PSVR2_ERROR(hmd, "Could not alloc USB transfer for VD data");
+			goto out;
+		}
+		uint8_t *vd_buf = malloc(USB_VD_XFER_SIZE);
+		libusb_fill_bulk_transfer(hmd->vd_xfer, hmd->dev, LIBUSB_ENDPOINT_IN | PSVR2_VD_ENDPOINT, vd_buf,
+		                          USB_VD_XFER_SIZE, dump_xfer_cb, hmd, 0);
+		hmd->vd_xfer->flags |= LIBUSB_TRANSFER_FREE_BUFFER;
 
-	res = libusb_submit_transfer(hmd->vd_xfer);
-	if (res < 0) {
-		PSVR2_ERROR(hmd, "Could not submit USB transfer for VD data");
-		goto out;
-	}
-	hmd->usb_active_xfers++;
+		res = libusb_submit_transfer(hmd->vd_xfer);
+		if (res < 0) {
+			PSVR2_ERROR(hmd, "Could not submit USB transfer for VD data");
+			goto out;
+		}
+		hmd->usb_active_xfers++;
 
-	res = psvr2_start_gaze_tracking(hmd);
-	if (res < 0) {
-		PSVR2_ERROR(hmd, "Could not start gaze tracking");
-		goto out;
+		res = psvr2_start_gaze_tracking(hmd);
+		if (res < 0) {
+			PSVR2_ERROR(hmd, "Could not start gaze tracking");
+			goto out;
+		}
 	}
 
 	result = true;
@@ -1214,8 +1230,8 @@ psvr2_hmd_create(struct xrt_prober_device *xpdev)
 	hmd->base.supported.presence = true;
 	hmd->base.supported.brightness_control = true;
 	hmd->base.supported.compositor_info = true;
-	hmd->base.supported.eye_gaze = true;
-	hmd->base.supported.face_tracking = true;
+	hmd->base.supported.eye_gaze = debug_get_bool_option_psvr2_auxiliary_streams();
+	hmd->base.supported.face_tracking = debug_get_bool_option_psvr2_auxiliary_streams();
 
 	// Set up display details
 	// refresh rate
@@ -1294,22 +1310,25 @@ psvr2_hmd_create(struct xrt_prober_device *xpdev)
 	hmd->brightness_btn.ptr = hmd;
 	u_var_add_button(hmd, &hmd->brightness_btn, "Set Brightness");
 
-	u_var_add_gui_header(hmd, NULL, "Camera data");
-	{
-		hmd->camera_enable_btn.cb = (void (*)(void *))toggle_camera_enable;
-		hmd->camera_enable_btn.ptr = hmd;
-		u_var_add_button(hmd, &hmd->camera_enable_btn, "Disable camera streams");
+	// Camera controls need the camera interface, which is claimed with the auxiliary streams.
+	if (debug_get_bool_option_psvr2_auxiliary_streams()) {
+		u_var_add_gui_header(hmd, NULL, "Camera data");
+		{
+			hmd->camera_enable_btn.cb = (void (*)(void *))toggle_camera_enable;
+			hmd->camera_enable_btn.ptr = hmd;
+			u_var_add_button(hmd, &hmd->camera_enable_btn, "Disable camera streams");
 
-		hmd->camera_mode_btn.cb = (void (*)(void *))cycle_camera_mode;
-		hmd->camera_mode_btn.ptr = hmd;
-		u_var_add_button(hmd, &hmd->camera_mode_btn, "Camera Mode 0x10");
+			hmd->camera_mode_btn.cb = (void (*)(void *))cycle_camera_mode;
+			hmd->camera_mode_btn.ptr = hmd;
+			u_var_add_button(hmd, &hmd->camera_mode_btn, "Camera Mode 0x10");
+		}
+		for (int i = 0; i < 3; i++) {
+			char name[32];
+			sprintf(name, "Substream %d", i);
+			u_var_add_sink_debug(hmd, &hmd->debug_sinks[i], name);
+		}
+		u_var_add_sink_debug(hmd, &hmd->debug_sinks[3], "Mode 1 stream");
 	}
-	for (int i = 0; i < 3; i++) {
-		char name[32];
-		sprintf(name, "Substream %d", i);
-		u_var_add_sink_debug(hmd, &hmd->debug_sinks[i], name);
-	}
-	u_var_add_sink_debug(hmd, &hmd->debug_sinks[3], "Mode 1 stream");
 
 	u_var_add_gui_header(hmd, NULL, "Logging");
 	u_var_add_log_level(hmd, &hmd->log_level, "log_level");
