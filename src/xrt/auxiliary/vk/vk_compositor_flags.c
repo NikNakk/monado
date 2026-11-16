@@ -77,7 +77,9 @@ check_feature(VkFormat format,
 VkExternalMemoryHandleTypeFlags
 vk_cb_get_buffer_external_handle_type(struct vk_bundle *vk)
 {
-#if defined(XRT_GRAPHICS_BUFFER_HANDLE_IS_FD)
+#if defined(XRT_GRAPHICS_BUFFER_HANDLE_IS_METAL_TEXTURE)
+	return 0;
+#elif defined(XRT_GRAPHICS_BUFFER_HANDLE_IS_FD)
 	return VK_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_FD_BIT_KHR;
 #elif defined(XRT_GRAPHICS_BUFFER_HANDLE_IS_AHARDWAREBUFFER)
 	return VK_EXTERNAL_MEMORY_HANDLE_TYPE_ANDROID_HARDWARE_BUFFER_BIT_ANDROID;
@@ -226,7 +228,9 @@ vk_csci_get_image_usage_flags(struct vk_bundle *vk, VkFormat format, enum xrt_sw
 VkExternalMemoryHandleTypeFlags
 vk_csci_get_image_external_handle_type(struct vk_bundle *vk, struct xrt_image_native *xin)
 {
-#if defined(XRT_GRAPHICS_BUFFER_HANDLE_IS_FD)
+#if defined(XRT_GRAPHICS_BUFFER_HANDLE_IS_METAL_TEXTURE)
+	return 0;
+#elif defined(XRT_GRAPHICS_BUFFER_HANDLE_IS_FD)
 	return VK_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_FD_BIT_KHR;
 #elif defined(XRT_GRAPHICS_BUFFER_HANDLE_IS_AHARDWAREBUFFER)
 	return VK_EXTERNAL_MEMORY_HANDLE_TYPE_ANDROID_HARDWARE_BUFFER_BIT_ANDROID;
@@ -246,6 +250,26 @@ vk_csci_get_image_external_support(struct vk_bundle *vk,
                                    bool *out_importable,
                                    bool *out_exportable)
 {
+#ifdef XRT_GRAPHICS_BUFFER_HANDLE_IS_METAL_TEXTURE
+	{
+		VkPhysicalDeviceImageFormatInfo2 info = {
+		    .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_IMAGE_FORMAT_INFO_2,
+		    .format = image_format,
+		    .type = VK_IMAGE_TYPE_2D,
+		    .tiling = VK_IMAGE_TILING_OPTIMAL,
+		    .usage = vk_csci_get_image_usage_flags(vk, image_format, bits),
+		};
+		VkImageFormatProperties2 props = {.sType = VK_STRUCTURE_TYPE_IMAGE_FORMAT_PROPERTIES_2};
+		VkResult ret = vk->vkGetPhysicalDeviceImageFormatProperties2(vk->physical_device, &info, &props);
+		bool supported = vk->has_EXT_metal_objects && ret == VK_SUCCESS;
+		if (out_importable)
+			*out_importable = supported;
+		if (out_exportable)
+			*out_exportable = supported;
+		return;
+	}
+#endif
+
 	VkImageUsageFlags image_usage = vk_csci_get_image_usage_flags(vk, image_format, bits);
 
 	// In->pNext
@@ -402,6 +426,11 @@ vk_csci_is_format_supported(struct vk_bundle *vk,
 	 * Check exportability.
 	 */
 
+#ifdef XRT_GRAPHICS_BUFFER_HANDLE_IS_METAL_TEXTURE
+	bool importable = false, exportable = false;
+	vk_csci_get_image_external_support(vk, format, xbits, 0, &importable, &exportable);
+	return importable && exportable;
+#else
 	VkExternalMemoryHandleTypeFlags handle_type = vk_csci_get_image_external_handle_type(vk, NULL);
 	VkResult ret;
 
@@ -459,4 +488,5 @@ vk_csci_is_format_supported(struct vk_bundle *vk,
 	}
 
 	return true;
+#endif
 }

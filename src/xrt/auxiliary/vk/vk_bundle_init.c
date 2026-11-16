@@ -206,7 +206,7 @@ fill_in_device_features(struct vk_bundle *vk, const uint32_t queue_family_index)
 	free(props);
 }
 
-static void
+static XRT_MAYBE_UNUSED void
 get_external_image_support(struct vk_bundle *vk,
                            bool depth,
                            VkExternalMemoryHandleTypeFlagBits handle_type,
@@ -224,7 +224,7 @@ get_external_image_support(struct vk_bundle *vk,
 	vk_csci_get_image_external_support(vk, image_format, bits, handle_type, out_importable, out_exportable);
 }
 
-static bool
+static XRT_MAYBE_UNUSED bool
 is_fence_bit_supported(struct vk_bundle *vk, VkExternalFenceHandleTypeFlagBits handle_type)
 {
 	VkPhysicalDeviceExternalFenceInfo external_fence_info = {
@@ -279,7 +279,7 @@ get_binary_semaphore_bit_support(struct vk_bundle *vk,
 	*out_exportable = (bits & VK_EXTERNAL_SEMAPHORE_FEATURE_EXPORTABLE_BIT) != 0;
 }
 
-static bool
+static XRT_MAYBE_UNUSED bool
 is_binary_semaphore_bit_supported(struct vk_bundle *vk, VkExternalSemaphoreHandleTypeFlagBits handle_type)
 {
 	bool importable = false, exportable = false;
@@ -332,7 +332,7 @@ get_timeline_semaphore_bit_support(struct vk_bundle *vk,
 #endif
 }
 
-static bool
+static XRT_MAYBE_UNUSED bool
 is_timeline_semaphore_bit_supported(struct vk_bundle *vk, VkExternalSemaphoreHandleTypeFlagBits handle_type)
 {
 	bool importable = false, exportable = false;
@@ -399,7 +399,7 @@ fill_in_external_object_properties(struct vk_bundle *vk)
 	                           &vk->external.depth_image_import_ahardwarebuffer,
 	                           &vk->external.depth_image_export_ahardwarebuffer);
 #endif
-#if defined(XRT_GRAPHICS_SYNC_HANDLE_IS_FD)
+#if defined(XRT_GRAPHICS_SYNC_HANDLE_IS_FD) && !defined(XRT_OS_OSX)
 
 	vk->external.fence_sync_fd = is_fence_bit_supported( //
 	    vk, VK_EXTERNAL_FENCE_HANDLE_TYPE_SYNC_FD_BIT);
@@ -433,6 +433,8 @@ fill_in_external_object_properties(struct vk_bundle *vk)
 	vk->external.timeline_semaphore_win32_handle = is_timeline_semaphore_bit_supported( //
 	    vk, VK_EXTERNAL_SEMAPHORE_HANDLE_TYPE_OPAQUE_WIN32_BIT);
 
+#elif defined(XRT_OS_OSX)
+	// No native Vulkan fence/semaphore export. Queue-idle fallback is used.
 #else
 #error "Need port for fence sync handles checkers"
 #endif
@@ -1382,6 +1384,16 @@ vk_init_from_given(struct vk_bundle *vk,
 	// Fill out the device memory props here, as we are
 	// passed a vulkan context and do not call selectPhysicalDevice()
 	vk->vkGetPhysicalDeviceMemoryProperties(vk->physical_device, &vk->device_memory_props);
+
+#ifdef XRT_OS_OSX
+	/*
+	 * Vulkan cannot report which extensions the application enabled, so
+	 * assume it honoured xrt_gfx_vk_device_extensions, which requires this
+	 * on macOS. XR_KHR_vulkan_enable2 does this for the application, while
+	 * XR_KHR_vulkan_enable applications must enable it themselves.
+	 */
+	vk->has_EXT_metal_objects = true;
+#endif
 
 	// Vulkan does not let us read what extensions was enabled.
 	if (external_fence_fd_enabled) {

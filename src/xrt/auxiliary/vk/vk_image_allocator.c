@@ -53,6 +53,7 @@ struct format_list_helper
  *
  */
 
+#ifndef XRT_GRAPHICS_BUFFER_HANDLE_IS_METAL_TEXTURE
 static VkExternalMemoryHandleTypeFlags
 get_image_memory_handle_type(void)
 {
@@ -66,6 +67,8 @@ get_image_memory_handle_type(void)
 #error "need port"
 #endif
 }
+
+#endif
 
 static void
 add_format_non_dup(struct format_list_helper *flh, VkFormat format)
@@ -160,13 +163,24 @@ create_image(struct vk_bundle *vk, const struct xrt_swapchain_create_info *info,
 	 * Create the image.
 	 */
 
+#ifndef XRT_GRAPHICS_BUFFER_HANDLE_IS_METAL_TEXTURE
 	VkExternalMemoryHandleTypeFlags memory_handle_type = get_image_memory_handle_type();
+#endif
 
+#ifdef XRT_GRAPHICS_BUFFER_HANDLE_IS_METAL_TEXTURE
+	VkExportMetalObjectCreateInfoEXT external_memory_image_create_info = {
+	    .sType = VK_STRUCTURE_TYPE_EXPORT_METAL_OBJECT_CREATE_INFO_EXT,
+	    .exportObjectType = VK_EXPORT_METAL_OBJECT_TYPE_METAL_TEXTURE_BIT_EXT,
+	    .pNext = next_chain,
+	};
+#else
 	VkExternalMemoryImageCreateInfoKHR external_memory_image_create_info = {
 	    .sType = VK_STRUCTURE_TYPE_EXTERNAL_MEMORY_IMAGE_CREATE_INFO_KHR,
 	    .handleTypes = memory_handle_type,
 	    .pNext = next_chain,
 	};
+
+#endif
 	CHAIN(external_memory_image_create_info);
 
 	// Format list helper needed for the below.
@@ -354,11 +368,13 @@ create_image(struct vk_bundle *vk, const struct xrt_swapchain_create_info *info,
 	}
 
 	// In->pNext
+#ifndef XRT_GRAPHICS_BUFFER_HANDLE_IS_METAL_TEXTURE
 	VkExportMemoryAllocateInfo export_alloc_info = {
 	    .sType = VK_STRUCTURE_TYPE_EXPORT_MEMORY_ALLOCATE_INFO_KHR,
 	    .handleTypes = memory_handle_type,
 	};
 	CHAIN(export_alloc_info);
+#endif
 
 	ret = vk_alloc_and_bind_image_memory(   //
 	    vk,                                 // vk_bundle
@@ -424,7 +440,9 @@ vk_ic_allocate(struct vk_bundle *vk,
 		}
 
 		VK_NAME_IMAGE(vk, out_vkic->images[i].handle, "vk_image_collection image");
-		VK_NAME_DEVICE_MEMORY(vk, out_vkic->images[i].memory, "vk_image_collection device_memory");
+		if (out_vkic->images[i].memory != VK_NULL_HANDLE) {
+			VK_NAME_DEVICE_MEMORY(vk, out_vkic->images[i].memory, "vk_image_collection device_memory");
+		}
 	}
 
 	// Set the fields.
@@ -492,7 +510,9 @@ vk_ic_from_natives(struct vk_bundle *vk,
 		}
 
 		VK_NAME_IMAGE(vk, out_vkic->images[i].handle, "vk_image_collection image");
-		VK_NAME_DEVICE_MEMORY(vk, out_vkic->images[i].memory, "vk_image_collection device_memory");
+		if (out_vkic->images[i].memory != VK_NULL_HANDLE) {
+			VK_NAME_DEVICE_MEMORY(vk, out_vkic->images[i].memory, "vk_image_collection device_memory");
+		}
 
 		native_images[i].handle = buf;
 	}
@@ -544,7 +564,26 @@ vk_ic_get_handles(struct vk_bundle *vk,
 
 	size_t i = 0;
 	for (; i < vkic->image_count && i < max_handles; i++) {
+#ifdef XRT_GRAPHICS_BUFFER_HANDLE_IS_METAL_TEXTURE
+		VkExportMetalTextureInfoEXT texture = {
+		    .sType = VK_STRUCTURE_TYPE_EXPORT_METAL_TEXTURE_INFO_EXT,
+		    .image = vkic->images[i].handle,
+		    .plane = VK_IMAGE_ASPECT_PLANE_0_BIT,
+		};
+		VkExportMetalObjectsInfoEXT objects = {
+		    .sType = VK_STRUCTURE_TYPE_EXPORT_METAL_OBJECTS_INFO_EXT,
+		    .pNext = &texture,
+		};
+		if (!vk->has_EXT_metal_objects || !vk->vkExportMetalObjectsEXT) {
+			ret = VK_ERROR_EXTENSION_NOT_PRESENT;
+		} else {
+			vk->vkExportMetalObjectsEXT(vk->device, &objects);
+			out_handles[i] = u_graphics_buffer_ref(texture.mtlTexture);
+			ret = texture.mtlTexture ? VK_SUCCESS : VK_ERROR_INITIALIZATION_FAILED;
+		}
+#else
 		ret = vk_get_native_handle_from_device_memory(vk, vkic->images[i].memory, &out_handles[i]);
+#endif
 		VK_CHK_ONLY_PRINT(ret, "vk_get_native_handle_from_device_memory");
 		if (ret != VK_SUCCESS) {
 			break;
