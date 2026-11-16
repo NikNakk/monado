@@ -17,8 +17,10 @@ Hosted runner results do not establish headset presentation or cadence.
 
 No default branch change is needed for PR checks. There is no manual-dispatch
 trigger because this workflow is not on the repository's default branch.
-When changing this branch's workflow, edit the harness PR description to trigger
-a fresh run using the new workflow. Keep source changes on the submission branch.
+When changing this branch's workflow, refresh the harness PR base by retargeting
+it to `main` and back to `github-ci`, then edit its title or description to trigger
+a fresh run. GitHub can otherwise retain the old base SHA. Keep source changes
+on the submission branch.
 
 Each run retains JUnit results, CTest logs and the CMake configuration for seven
 days. Actions are pinned to commit SHAs; update the pins explicitly as needed.
