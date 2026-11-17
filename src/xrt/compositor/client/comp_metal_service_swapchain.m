@@ -98,18 +98,20 @@ metal_format_to_vk(MTLPixelFormat format)
 	}
 }
 
-static bool
-metal_service_can_use_iosurface(const struct xrt_swapchain_create_info *info)
+static OSType
+metal_service_iosurface_format(const struct xrt_swapchain_create_info *info)
 {
 	if (info == NULL || info->array_size != 1 || info->face_count != 1 || info->mip_count != 1 ||
 	    info->sample_count != 1 || (info->bits & XRT_SWAPCHAIN_USAGE_DEPTH_STENCIL) != 0) {
-		return false;
+		return 0;
 	}
 
 	switch ((MTLPixelFormat)info->format) {
 	case MTLPixelFormatBGRA8Unorm:
-	case MTLPixelFormatBGRA8Unorm_sRGB: return true;
-	default: return false;
+	case MTLPixelFormatBGRA8Unorm_sRGB: return kCVPixelFormatType_32BGRA;
+	case MTLPixelFormatRGBA8Unorm:
+	case MTLPixelFormatRGBA8Unorm_sRGB: return kCVPixelFormatType_32RGBA;
+	default: return 0;
 	}
 }
 
@@ -277,7 +279,7 @@ metal_service_swapchain_release_image(struct xrt_swapchain *xsc, uint32_t index)
 }
 
 static IOSurfaceRef
-metal_service_create_bgra_iosurface(uint32_t width, uint32_t height)
+metal_service_create_iosurface(uint32_t width, uint32_t height, OSType pixel_format)
 {
 	const size_t bytes_per_element = 4;
 	const size_t min_bytes_per_row = (size_t)width * bytes_per_element;
@@ -294,7 +296,7 @@ metal_service_create_bgra_iosurface(uint32_t width, uint32_t height)
 		(__bridge NSString *)kIOSurfaceBytesPerElement : @(bytes_per_element),
 		(__bridge NSString *)kIOSurfaceBytesPerRow : @(bytes_per_row),
 		(__bridge NSString *)kIOSurfaceAllocSize : @(alloc_size),
-		(__bridge NSString *)kIOSurfacePixelFormat : @(kCVPixelFormatType_32BGRA),
+		(__bridge NSString *)kIOSurfacePixelFormat : @(pixel_format),
 	};
 
 	return IOSurfaceCreate((__bridge CFDictionaryRef)properties);
@@ -319,6 +321,7 @@ static xrt_result_t
 metal_service_create_iosurface_swapchain(struct metal_service_compositor_link *link,
                                          const struct xrt_swapchain_create_info *info,
                                          const struct xrt_swapchain_create_info *native_info,
+                                         OSType pixel_format,
                                          uint32_t image_count,
                                          struct xrt_swapchain **out_xsc)
 {
@@ -345,7 +348,7 @@ metal_service_create_iosurface_swapchain(struct metal_service_compositor_link *l
 	}
 
 	for (uint32_t i = 0; i < image_count; i++) {
-		IOSurfaceRef surface = metal_service_create_bgra_iosurface(info->width, info->height);
+		IOSurfaceRef surface = metal_service_create_iosurface(info->width, info->height, pixel_format);
 		if (surface == NULL) {
 			U_LOG_E("Metal service IOSurfaceCreate failed: image=%u size=%ux%u", i, info->width,
 			        info->height);
@@ -358,9 +361,9 @@ metal_service_create_iosurface_swapchain(struct metal_service_compositor_link *l
 		const uint32_t surface_id = IOSurfaceGetID(surface);
 		if (surface_id == 0 || IOSurfaceGetWidth(surface) != info->width ||
 		    IOSurfaceGetHeight(surface) != info->height ||
-		    IOSurfaceGetPixelFormat(surface) != kCVPixelFormatType_32BGRA) {
+		    IOSurfaceGetPixelFormat(surface) != pixel_format) {
 			U_LOG_E(
-			    "Metal service IOSurface validation failed: image=%u id=%u expected=%ux%u BGRA "
+			    "Metal service IOSurface validation failed: image=%u id=%u expected=%ux%u "
 			    "actual=%zux%zu cv_format=0x%08x",
 			    i, surface_id, info->width, info->height, IOSurfaceGetWidth(surface),
 			    IOSurfaceGetHeight(surface), (unsigned)IOSurfaceGetPixelFormat(surface));
@@ -470,7 +473,7 @@ metal_service_create_iosurface_swapchain(struct metal_service_compositor_link *l
 	U_LOG_D(
 	    "Metal service swapchain backing=iosurface-id images=%u size=%ux%u metal_format=%lld cv_format=0x%08x "
 	    "first_surface=%u",
-	    image_count, info->width, info->height, (long long)info->format, (unsigned)kCVPixelFormatType_32BGRA,
+	    image_count, info->width, info->height, (long long)info->format, (unsigned)pixel_format,
 	    iosurface_ids[0]);
 
 	*out_xsc = &sc->base.base;
@@ -517,12 +520,13 @@ metal_service_create_swapchain(struct xrt_compositor *xc,
 	}
 
 	/*
-	 * Prefer a client-owned IOSurface for simple 2D BGRA images. The dedicated
-	 * IOSurface-ID IPC command lets monado-service import the exact same storage
-	 * into Vulkan without an XPC shared-handle round trip.
+	 * Prefer a client-owned IOSurface for simple 2D RGBA and BGRA images.
+	 * The service imports the same storage using an XPC-transferred Mach port.
 	 */
-	if (metal_service_can_use_iosurface(info)) {
-		xret = metal_service_create_iosurface_swapchain(link, info, &native_info, xsccp.image_count, out_xsc);
+	const OSType iosurface_format = metal_service_iosurface_format(info);
+	if (iosurface_format != 0) {
+		xret = metal_service_create_iosurface_swapchain(link, info, &native_info, iosurface_format,
+		                                               xsccp.image_count, out_xsc);
 		if (xret == XRT_SUCCESS) {
 			return XRT_SUCCESS;
 		}

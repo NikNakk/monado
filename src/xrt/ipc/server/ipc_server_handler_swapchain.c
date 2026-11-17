@@ -100,6 +100,11 @@ ipc_handle_swapchain_create(volatile struct ipc_client_state *ics,
 {
 	IPC_TRACE_MARKER();
 
+#if defined(XRT_GRAPHICS_BUFFER_HANDLE_IS_IOSURFACE)
+	// The client reads a fixed-size IOSurface ID array with the reply, even on failure.
+	*out_handle_count = max_handle_capacity;
+#endif
+
 	xrt_result_t xret = XRT_SUCCESS;
 	uint32_t index = 0;
 
@@ -147,9 +152,7 @@ ipc_handle_swapchain_create(volatile struct ipc_client_state *ics,
 	*out_image_count = xsc->image_count;
 
 	// Setup the fds.
-#if defined(XRT_GRAPHICS_BUFFER_HANDLE_IS_IOSURFACE)
-	*out_handle_count = max_handle_capacity;
-#else
+#if !defined(XRT_GRAPHICS_BUFFER_HANDLE_IS_IOSURFACE)
 	*out_handle_count = xsc->image_count;
 #endif
 	for (size_t i = 0; i < xsc->image_count; i++) {

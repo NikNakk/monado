@@ -858,6 +858,10 @@ client_vk_compositor_get_swapchain_create_properties(struct xrt_compositor *xc,
 	return xrt_comp_get_swapchain_create_properties(to_native_compositor(xc), info, xsccp);
 }
 
+#ifdef XRT_HAVE_VK_CLIENT_METAL_TEXTURES
+DEBUG_GET_ONCE_BOOL_OPTION(vk_metal_color, "XRT_MACOS_VK_CLIENT_METAL_COLOR", false)
+#endif
+
 static xrt_result_t
 client_vk_swapchain_create(struct xrt_compositor *xc,
                            const struct xrt_swapchain_create_info *info,
@@ -893,7 +897,11 @@ client_vk_swapchain_create(struct xrt_compositor *xc,
 	struct xrt_swapchain_native *xscn = NULL;
 #ifdef XRT_HAVE_VK_CLIENT_METAL_TEXTURES
 	struct xrt_swapchain_metal *xscm = NULL;
-	if (client_vk_metal_texture_required(&xinfo)) {
+	const bool use_surface_provider =
+	    c->metal && c->xcn->is_remote && debug_get_bool_option_vk_metal_color() &&
+	    (xinfo.format == VK_FORMAT_R8G8B8A8_UNORM || xinfo.format == VK_FORMAT_R8G8B8A8_SRGB ||
+	     xinfo.format == VK_FORMAT_B8G8R8A8_UNORM || xinfo.format == VK_FORMAT_B8G8R8A8_SRGB);
+	if (client_vk_metal_texture_required(&xinfo) || use_surface_provider) {
 		if (!client_vk_metal_texture_enabled())
 			return XRT_ERROR_SWAPCHAIN_FLAG_VALID_BUT_UNSUPPORTED;
 		xret = client_vk_metal_texture_swapchain_create(c->metal, &xinfo, &xscm, &xscn);
