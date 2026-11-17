@@ -167,8 +167,9 @@ TEST_CASE("Unified macOS handles survive export, import and original-image destr
 		                           VK_FORMAT_D32_SFLOAT);
 		const bool is_depth = format == VK_FORMAT_D32_SFLOAT;
 		const bool is_rgba = format == VK_FORMAT_R8G8B8A8_UNORM;
-		// The selection rule under test: IOSurface for plain single-layer colour, texture otherwise.
-		const bool expect_iosurface = layers == 1 && !is_depth;
+		// The selection rule under test: IOSurface only for single-layer BGRA, which the
+		// allocator backs with its own IOSurface; a Metal texture for everything else.
+		const bool expect_iosurface = layers == 1 && !is_depth && !is_rgba;
 		CAPTURE(layers, format, expect_iosurface);
 		xrt_swapchain_create_info info{};
 		info.format = format;

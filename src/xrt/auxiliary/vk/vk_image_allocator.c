@@ -649,7 +649,9 @@ get_image_native_texture_handle(struct vk_bundle *vk, VkImage image, xrt_graphic
 static void
 make_image_shareable(struct vk_bundle *vk, const struct xrt_swapchain_create_info *info, struct vk_image *image)
 {
-	const bool texture_handle = info->array_size > 1 || (info->bits & XRT_SWAPCHAIN_USAGE_DEPTH_STENCIL) != 0;
+	// Only images the allocator backs with its own IOSurface use the IOSurface
+	// form; exporting an IOSurface from a driver-allocated image is MoltenVK-only.
+	const bool texture_handle = !iosurface_swapchain_is_supported(info);
 	if (!texture_handle || info->face_count != 1 || !debug_get_bool_option_vk_shareable_textures()) {
 		return;
 	}
@@ -841,8 +843,8 @@ vk_ic_get_handles(struct vk_bundle *vk,
 #if defined(XRT_GRAPHICS_BUFFER_HANDLE_IS_IOSURFACE)
 	// IOSurface-backed Metal textures must be ordinary color 2D textures.
 	// Layered and depth/stencil images use the Metal texture form of the handle.
-	const bool texture_handles =
-	    vkic->info.array_size > 1 || (vkic->info.bits & XRT_SWAPCHAIN_USAGE_DEPTH_STENCIL) != 0;
+	// Same rule as make_image_shareable(): IOSurface only where the allocator made one.
+	const bool texture_handles = !iosurface_swapchain_is_supported(&vkic->info);
 #endif
 
 	VkResult ret = VK_SUCCESS;
