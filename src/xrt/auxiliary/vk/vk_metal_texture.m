@@ -38,11 +38,12 @@ vk_metal_texture_create_shareable_like(void *metal_texture)
 
 		id<MTLTexture> shareable = [source.device newSharedTextureWithDescriptor:descriptor];
 		if (shareable == nil) {
-			U_LOG_W("Could not create a shareable Metal texture: format=%lu type=%lu %lux%lu layers=%lu "
-			        "usage=0x%lx",
-			        (unsigned long)source.pixelFormat, (unsigned long)source.textureType,
-			        (unsigned long)source.width, (unsigned long)source.height,
-			        (unsigned long)source.arrayLength, (unsigned long)source.usage);
+			U_LOG_W(
+			    "Could not create a shareable Metal texture: format=%lu type=%lu %lux%lu layers=%lu "
+			    "usage=0x%lx",
+			    (unsigned long)source.pixelFormat, (unsigned long)source.textureType,
+			    (unsigned long)source.width, (unsigned long)source.height,
+			    (unsigned long)source.arrayLength, (unsigned long)source.usage);
 			return NULL;
 		}
 		return (void *)shareable; // +1 from new...

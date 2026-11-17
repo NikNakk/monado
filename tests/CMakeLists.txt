@@ -463,7 +463,14 @@ if(APPLE)
 			)
 		add_test(NAME tests_macos_unified_handle COMMAND tests_macos_unified_handle "[gpu]")
 		set_tests_properties(
-			tests_macos_unified_handle PROPERTIES TIMEOUT 45 LABELS "macos;gpu" SKIP_RETURN_CODE 4
+			tests_macos_unified_handle
+			PROPERTIES
+				TIMEOUT
+				45
+				LABELS
+				"macos;gpu"
+				SKIP_RETURN_CODE
+				4
 			)
 		set_target_properties(tests_macos_unified_handle PROPERTIES FOLDER monado_tests)
 	endif()

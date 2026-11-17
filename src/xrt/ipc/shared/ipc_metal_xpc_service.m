@@ -735,10 +735,10 @@ ipc_metal_xpc_service_publish_iosurfaces_for_pid(void *const *iosurfaces,
 		for (uint32_t i = 0; i < image_count; i++) {
 			IOSurface *surface = (__bridge IOSurface *)iosurfaces[i];
 			if (surface == nil || ![service storeImageObject:surface
-			                                          token:token
-			                                          index:i
-			                                     imageCount:image_count
-			                                       ownerPID:owner_pid]) {
+			                                           token:token
+			                                           index:i
+			                                      imageCount:image_count
+			                                        ownerPID:owner_pid]) {
 				xret = XRT_ERROR_IPC_FAILURE;
 				break;
 			}

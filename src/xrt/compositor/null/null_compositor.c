@@ -114,7 +114,7 @@ static const char *optional_device_extensions[] = {
 #if defined(XRT_OS_OSX)
     "VK_KHR_portability_subset", // Spike: required when the device advertises it.
 #endif
-    VK_EXT_GLOBAL_PRIORITY_EXTENSION_NAME,   //
+    VK_EXT_GLOBAL_PRIORITY_EXTENSION_NAME, //
 
 // Platform version of "external_fence" and "external_semaphore"
 #if defined(XRT_GRAPHICS_SYNC_HANDLE_IS_FD)      // Optional

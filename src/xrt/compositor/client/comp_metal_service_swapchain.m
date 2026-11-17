@@ -598,8 +598,8 @@ metal_service_create_swapchain(struct xrt_compositor *xc,
 	}
 	free(raw_textures);
 
-	U_LOG_I("Metal service swapchain backing=texture-handles images=%u size=%ux%u array_size=%u",
-	        xsccp.image_count, info->width, info->height, info->array_size);
+	U_LOG_I("Metal service swapchain backing=texture-handles images=%u size=%ux%u array_size=%u", xsccp.image_count,
+	        info->width, info->height, info->array_size);
 
 	struct xrt_swapchain *native_xsc = NULL;
 	xret =

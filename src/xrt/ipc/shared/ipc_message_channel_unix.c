@@ -514,10 +514,7 @@ apple_publish_textures(struct ipc_message_channel *imc, void *const *textures, u
 }
 
 static xrt_result_t
-apple_publish_iosurfaces(struct ipc_message_channel *imc,
-                         void *const *surfaces,
-                         uint32_t count,
-                         uint64_t *out_token)
+apple_publish_iosurfaces(struct ipc_message_channel *imc, void *const *surfaces, uint32_t count, uint64_t *out_token)
 {
 #ifdef XRT_FEATURE_SERVICE
 	if (imc->peer_pid > 0) {
@@ -533,8 +530,7 @@ apple_take_iosurfaces(struct ipc_message_channel *imc, uint64_t token, uint32_t 
 {
 #ifdef XRT_FEATURE_SERVICE
 	if (imc->peer_pid > 0) {
-		return ipc_metal_xpc_service_take_iosurfaces_for_pid(token, count, out_surfaces,
-		                                                     (pid_t)imc->peer_pid);
+		return ipc_metal_xpc_service_take_iosurfaces_for_pid(token, count, out_surfaces, (pid_t)imc->peer_pid);
 	}
 #endif
 	return ipc_metal_xpc_take_iosurfaces(token, count, out_surfaces);
@@ -658,7 +654,7 @@ ipc_send_handles_graphics_buffer(struct ipc_message_channel *imc,
 			continue;
 		}
 		kinds[i] = xrt_graphics_buffer_is_iosurface(handles[i]) ? IPC_APPLE_HANDLE_IOSURFACE
-		                                                         : IPC_APPLE_HANDLE_TEXTURE;
+		                                                        : IPC_APPLE_HANDLE_TEXTURE;
 		mixed |= kind != IPC_APPLE_HANDLE_NONE && kinds[i] != kind;
 		kind = kinds[i];
 		ids[i] = object_count;

@@ -1,7 +1,8 @@
 // Copyright 2026, Nick Kennedy
 // SPDX-License-Identifier: BSL-1.0
 // Spike benchmark, not built by CMake:
-//   clang -O2 -fobjc-arc spike_shared_texture_cost.m -framework Foundation -framework Metal -o spike_shared_texture_cost
+//   clang -O2 -fobjc-arc spike_shared_texture_cost.m -framework Foundation -framework Metal -o
+//   spike_shared_texture_cost
 // Compare ordinary and shareable Metal textures: properties, creation time,
 // and GPU time to render into and sample from them.
 
@@ -10,28 +11,29 @@
 #include <mach/mach_time.h>
 #include <stdlib.h>
 
-static NSString *const kShader = @""
-                                  "#include <metal_stdlib>\n"
-                                  "using namespace metal;\n"
-                                  "struct V { float4 p [[position]]; float2 uv; uint layer [[render_target_array_index]]; };\n"
-                                  "vertex V vs(uint vid [[vertex_id]], uint iid [[instance_id]]) {\n"
-                                  "  float2 uv = float2((vid << 1) & 2, vid & 2);\n"
-                                  "  V o; o.p = float4(uv * 2.0 - 1.0, 0.5, 1.0); o.uv = uv; o.layer = iid & 1; return o; }\n"
-                                  "fragment float4 fs_fill(V i [[stage_in]]) { return float4(i.uv, 0.25, 0.5); }\n"
-                                  "fragment float4 fs_sample(V i [[stage_in]], texture2d_array<float> t [[texture(0)]]) {\n"
-                                  "  constexpr sampler s(filter::linear);\n"
-                                  "  return t.sample(s, i.uv, i.layer); }\n"
-                                  "fragment float4 fs_sample_depth(V i [[stage_in]], depth2d_array<float> t [[texture(0)]]) {\n"
-                                  "  constexpr sampler s(filter::linear);\n"
-                                  "  return float4(t.sample(s, i.uv, i.layer)); }\n";
+static NSString *const kShader =
+    @""
+     "#include <metal_stdlib>\n"
+     "using namespace metal;\n"
+     "struct V { float4 p [[position]]; float2 uv; uint layer [[render_target_array_index]]; };\n"
+     "vertex V vs(uint vid [[vertex_id]], uint iid [[instance_id]]) {\n"
+     "  float2 uv = float2((vid << 1) & 2, vid & 2);\n"
+     "  V o; o.p = float4(uv * 2.0 - 1.0, 0.5, 1.0); o.uv = uv; o.layer = iid & 1; return o; }\n"
+     "fragment float4 fs_fill(V i [[stage_in]]) { return float4(i.uv, 0.25, 0.5); }\n"
+     "fragment float4 fs_sample(V i [[stage_in]], texture2d_array<float> t [[texture(0)]]) {\n"
+     "  constexpr sampler s(filter::linear);\n"
+     "  return t.sample(s, i.uv, i.layer); }\n"
+     "fragment float4 fs_sample_depth(V i [[stage_in]], depth2d_array<float> t [[texture(0)]]) {\n"
+     "  constexpr sampler s(filter::linear);\n"
+     "  return float4(t.sample(s, i.uv, i.layer)); }\n";
 
 static double
 now_ms(void)
 {
-	static mach_timebase_info_data_t tb;
-	if (tb.denom == 0)
-		mach_timebase_info(&tb);
-	return (double)mach_absolute_time() * tb.numer / tb.denom / 1e6;
+	static mach_timebase_info_data_t timebase;
+	if (timebase.denom == 0)
+		mach_timebase_info(&timebase);
+	return (double)mach_absolute_time() * timebase.numer / timebase.denom / 1e6;
 }
 
 static int
@@ -69,7 +71,11 @@ main(void)
 			return 1;
 		}
 		const NSUInteger W = 2000, H = 2040, LAYERS = 2; // one PS VR2 eye per layer
-		enum { OVERDRAW = 8, ITER = 40 };
+		enum
+		{
+			OVERDRAW = 8,
+			ITER = 40
+		};
 
 		struct
 		{
@@ -136,10 +142,11 @@ main(void)
 					}
 				}
 			}
-			printf("  create+first clear, wall ms (median): ordinary=%.3f shareable=%.3f\n", median(first[0], ITER),
-			       median(first[1], ITER));
+			printf("  create+first clear, wall ms (median): ordinary=%.3f shareable=%.3f\n",
+			       median(first[0], ITER), median(first[1], ITER));
 
-			id<MTLTexture> tex[2] = {[dev newTextureWithDescriptor:d], [dev newSharedTextureWithDescriptor:d]};
+			id<MTLTexture> tex[2] = {[dev newTextureWithDescriptor:d],
+			                         [dev newSharedTextureWithDescriptor:d]};
 			// A reopened shared texture is what the receiving process renders with.
 			MTLSharedTextureHandle *handle = [tex[1] newSharedTextureHandle];
 			id<MTLTexture> reopened = [dev newSharedTextureWithHandle:handle];
@@ -148,11 +155,12 @@ main(void)
 
 			printf("   (above: %s)\n", formats[fi].name);
 			for (int k = 0; k < 3; k++) {
-				printf("  %-9s storage=%lu shareable=%d iosurface=%d gpuOptimized=%d compression=%ld "
-				       "allocatedMB=%.1f\n",
-				       kind[k], (unsigned long)all[k].storageMode, all[k].isShareable,
-				       all[k].iosurface != NULL, all[k].allowGPUOptimizedContents,
-				       (long)all[k].compressionType, all[k].allocatedSize / 1048576.0);
+				printf(
+				    "  %-9s storage=%lu shareable=%d iosurface=%d gpuOptimized=%d compression=%ld "
+				    "allocatedMB=%.1f\n",
+				    kind[k], (unsigned long)all[k].storageMode, all[k].isShareable,
+				    all[k].iosurface != NULL, all[k].allowGPUOptimizedContents,
+				    (long)all[k].compressionType, all[k].allocatedSize / 1048576.0);
 			}
 			printf("  create ms (median): ordinary=%.3f shareable=%.3f\n", median(create[0], ITER),
 			       median(create[1], ITER));
@@ -209,7 +217,8 @@ main(void)
 						}
 						rp.renderTargetArrayLength = LAYERS;
 						id<MTLCommandBuffer> cb = [q commandBuffer];
-						id<MTLRenderCommandEncoder> e = [cb renderCommandEncoderWithDescriptor:rp];
+						id<MTLRenderCommandEncoder> e =
+						    [cb renderCommandEncoderWithDescriptor:rp];
 						[e setRenderPipelineState:fill];
 						if (dss)
 							[e setDepthStencilState:dss];
@@ -248,10 +257,11 @@ main(void)
 				ms[k] = median(ts[k], ITER);
 			}
 			for (int k = 0; k < 3; k++) {
-				printf("  %-9s render-into GPU ms: median=%.3f p10=%.3f p90=%.3f (%+.1f%%)   sample-from "
-				       "GPU ms: median=%.3f p10=%.3f p90=%.3f (%+.1f%%)\n",
-				       kind[k], mf[k], tf[k][ITER / 10], tf[k][ITER * 9 / 10], (mf[k] / mf[0] - 1) * 100,
-				       ms[k], ts[k][ITER / 10], ts[k][ITER * 9 / 10], (ms[k] / ms[0] - 1) * 100);
+				printf(
+				    "  %-9s render-into GPU ms: median=%.3f p10=%.3f p90=%.3f (%+.1f%%)   sample-from "
+				    "GPU ms: median=%.3f p10=%.3f p90=%.3f (%+.1f%%)\n",
+				    kind[k], mf[k], tf[k][ITER / 10], tf[k][ITER * 9 / 10], (mf[k] / mf[0] - 1) * 100,
+				    ms[k], ts[k][ITER / 10], ts[k][ITER * 9 / 10], (ms[k] / ms[0] - 1) * 100);
 			}
 		}
 	}
