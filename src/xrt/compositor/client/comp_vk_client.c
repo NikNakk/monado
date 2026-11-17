@@ -56,11 +56,6 @@ to_native_swapchain(struct xrt_swapchain *xsc)
 static inline struct xrt_swapchain *
 to_backing_swapchain(struct xrt_swapchain *xsc)
 {
-#ifdef XRT_HAVE_VK_CLIENT_METAL_TEXTURES
-	struct client_vk_swapchain *sc = client_vk_swapchain(xsc);
-	if (sc->xscm)
-		return &sc->xscm->base;
-#endif
 	return to_native_swapchain(xsc);
 }
 
@@ -405,10 +400,6 @@ client_vk_swapchain_destroy(struct xrt_swapchain *xsc)
 	}
 	if (sc->destroy_fence)
 		vk->vkDestroyFence(vk->device, sc->destroy_fence, NULL);
-	if (sc->xscm) {
-		struct xrt_swapchain *metal = &sc->xscm->base;
-		xrt_swapchain_reference(&metal, NULL);
-	}
 #endif
 	// Drop our reference, does NULL checking.
 	xrt_swapchain_native_reference(&sc->xscn, NULL);
@@ -892,27 +883,20 @@ client_vk_swapchain_create(struct xrt_compositor *xc,
 
 	struct xrt_swapchain_native *xscn = NULL;
 #ifdef XRT_HAVE_VK_CLIENT_METAL_TEXTURES
-	struct xrt_swapchain_metal *xscm = NULL;
-	const bool unified_handle =
-	    client_vk_metal_texture_required(&xinfo) && client_vk_unified_handle_usable(c->xcn, &xinfo);
-	if (unified_handle) {
-		xret = xrt_comp_native_create_swapchain(c->xcn, &xinfo, &xscn);
-		if (xret == XRT_SUCCESS) {
-			U_LOG_I("Vulkan unified-handle swapchain: format=%lld layers=%u images=%u iosurface=%u remote=%u",
-			        (long long)xinfo.format, xinfo.array_size, xscn->base.image_count,
-			        xrt_graphics_buffer_is_iosurface(xscn->images[0].handle), c->xcn->is_remote);
-		}
-	} else if (client_vk_metal_texture_required(&xinfo)) {
-		if (!client_vk_metal_texture_enabled())
-			return XRT_ERROR_SWAPCHAIN_FLAG_VALID_BUT_UNSUPPORTED;
-		xret = client_vk_metal_texture_swapchain_create(c->metal, &xinfo, &xscm, &xscn);
-	} else
+	// Arrays and depth need Metal texture handles, which need VK_EXT_metal_objects.
+	if (client_vk_metal_texture_required(&xinfo) &&
+	    (!client_vk_metal_texture_enabled() || !client_vk_unified_handle_usable(c->xcn, &xinfo)))
+		return XRT_ERROR_SWAPCHAIN_FLAG_VALID_BUT_UNSUPPORTED;
 #endif
-	{
-		xret = xrt_comp_native_create_swapchain(c->xcn, &xinfo, &xscn);
-	}
+	xret = xrt_comp_native_create_swapchain(c->xcn, &xinfo, &xscn);
 	if (xret != XRT_SUCCESS)
 		return xret;
+#ifdef XRT_HAVE_VK_CLIENT_METAL_TEXTURES
+	if (client_vk_metal_texture_required(&xinfo)) {
+		U_LOG_I("Vulkan swapchain with Metal texture handles: format=%lld layers=%u images=%u remote=%u",
+		        (long long)xinfo.format, xinfo.array_size, xscn->base.image_count, c->xcn->is_remote);
+	}
+#endif
 	struct xrt_swapchain *xsc = &xscn->base;
 
 	VkAccessFlags barrier_access_mask = vk_csci_get_barrier_access_mask(xinfo.bits);
@@ -925,12 +909,6 @@ client_vk_swapchain_create(struct xrt_compositor *xc,
 
 	struct client_vk_swapchain *sc = U_TYPED_CALLOC(struct client_vk_swapchain);
 	if (!sc) {
-#ifdef XRT_HAVE_VK_CLIENT_METAL_TEXTURES
-		if (xscm) {
-			struct xrt_swapchain *metal = &xscm->base;
-			xrt_swapchain_reference(&metal, NULL);
-		}
-#endif
 		xrt_swapchain_native_reference(&xscn, NULL);
 		return XRT_ERROR_ALLOCATION;
 	}
@@ -943,20 +921,9 @@ client_vk_swapchain_create(struct xrt_compositor *xc,
 	sc->base.base.image_count = xsc->image_count; // Fetch the number of images from the native swapchain.
 	sc->c = c;
 	sc->xscn = xscn;
-#ifdef XRT_HAVE_VK_CLIENT_METAL_TEXTURES
-	sc->xscm = xscm;
-#endif
 
 	for (uint32_t i = 0; i < xsc->image_count; i++) {
-#ifdef XRT_HAVE_VK_CLIENT_METAL_TEXTURES
-		if (sc->xscm)
-			ret = client_vk_metal_texture_import(vk, &xinfo, sc->xscm->images[i], &sc->base.images[i]);
-		else
-#endif
-		{
-			ret = vk_create_image_from_native(vk, &xinfo, &xscn->images[i], &sc->base.images[i],
-			                                  &sc->mems[i]);
-		}
+		ret = vk_create_image_from_native(vk, &xinfo, &xscn->images[i], &sc->base.images[i], &sc->mems[i]);
 
 		if (ret != VK_SUCCESS) {
 			client_vk_swapchain_destroy(&sc->base.base);

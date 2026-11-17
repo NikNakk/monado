@@ -485,9 +485,9 @@ ipc_send_handles_graphics_buffer(struct ipc_message_channel *imc,
  *   uint32_t ids[handle_count];   IOSurfaceID, or index within the token
  *   uint8_t  kinds[handle_count]; enum ipc_apple_handle_kind
  *
- * Metal textures travel as MTLSharedTextureHandle through the XPC registry,
- * scoped to the client's verified PID in both directions. IOSurfaces still
- * travel by ID here; moving them to Mach ports is a later step.
+ * Both forms travel through the XPC registry, scoped to the client's verified
+ * PID in both directions: Metal textures as MTLSharedTextureHandle, IOSurfaces
+ * as Mach ports, so they need not be global. One message carries one kind.
  */
 enum ipc_apple_handle_kind
 {
@@ -511,6 +511,33 @@ apple_publish_textures(struct ipc_message_channel *imc, void *const *textures, u
 	}
 #endif
 	return ipc_metal_xpc_publish_textures(textures, count, out_token);
+}
+
+static xrt_result_t
+apple_publish_iosurfaces(struct ipc_message_channel *imc,
+                         void *const *surfaces,
+                         uint32_t count,
+                         uint64_t *out_token)
+{
+#ifdef XRT_FEATURE_SERVICE
+	if (imc->peer_pid > 0) {
+		return ipc_metal_xpc_service_publish_iosurfaces_for_pid(surfaces, count, out_token,
+		                                                        (pid_t)imc->peer_pid);
+	}
+#endif
+	return ipc_metal_xpc_publish_iosurfaces(surfaces, count, out_token);
+}
+
+static xrt_result_t
+apple_take_iosurfaces(struct ipc_message_channel *imc, uint64_t token, uint32_t count, void **out_surfaces)
+{
+#ifdef XRT_FEATURE_SERVICE
+	if (imc->peer_pid > 0) {
+		return ipc_metal_xpc_service_take_iosurfaces_for_pid(token, count, out_surfaces,
+		                                                     (pid_t)imc->peer_pid);
+	}
+#endif
+	return ipc_metal_xpc_take_iosurfaces(token, count, out_surfaces);
 }
 
 static xrt_result_t
@@ -557,33 +584,41 @@ ipc_receive_handles_graphics_buffer(struct ipc_message_channel *imc,
 	const uint8_t *kinds = buf + size + sizeof(token) + sizeof(uint32_t) * handle_count;
 
 	bool failed = false;
-	uint32_t texture_count = 0;
+	uint32_t object_count = 0;
+	uint8_t kind = IPC_APPLE_HANDLE_NONE;
 	for (uint32_t i = 0; i < handle_count; ++i) {
 		out_handles[i] = XRT_GRAPHICS_BUFFER_HANDLE_INVALID;
-		if (kinds[i] == IPC_APPLE_HANDLE_IOSURFACE) {
-			out_handles[i] = IOSurfaceLookup(ids[i]);
-			failed |= out_handles[i] == NULL;
-		} else if (kinds[i] == IPC_APPLE_HANDLE_TEXTURE) {
-			texture_count++;
+		if (kinds[i] == IPC_APPLE_HANDLE_NONE) {
+			continue;
 		}
+		failed |= kind != IPC_APPLE_HANDLE_NONE && kinds[i] != kind;
+		kind = kinds[i];
+		object_count++;
 	}
 
-	if (texture_count > 0) {
-		if (apple_take_textures(imc, token, texture_count, textures) != XRT_SUCCESS) {
-			IPC_ERROR(imc, "Could not take %u Metal texture handle(s) token=0x%016llx", texture_count,
+	if (object_count > 0 && !failed) {
+		const bool surfaces = kind == IPC_APPLE_HANDLE_IOSURFACE;
+		xrt_result_t xret = surfaces ? apple_take_iosurfaces(imc, token, object_count, textures)
+		                             : apple_take_textures(imc, token, object_count, textures);
+		if (xret != XRT_SUCCESS) {
+			IPC_ERROR(imc, "Could not take %u Apple graphics object(s) token=0x%016llx", object_count,
 			          (unsigned long long)token);
 			failed = true;
 		} else {
 			for (uint32_t i = 0; i < handle_count; ++i) {
-				if (kinds[i] == IPC_APPLE_HANDLE_TEXTURE && ids[i] < texture_count) {
+				if (kinds[i] != IPC_APPLE_HANDLE_NONE && ids[i] < object_count) {
 					out_handles[i] = textures[ids[i]];
 					textures[ids[i]] = NULL;
-				} else if (kinds[i] == IPC_APPLE_HANDLE_TEXTURE) {
+				} else if (kinds[i] != IPC_APPLE_HANDLE_NONE) {
 					failed = true;
 				}
 			}
 			// Anything not handed out (a malformed index) is released here.
-			ipc_metal_xpc_release_textures(textures, texture_count);
+			if (surfaces) {
+				ipc_metal_xpc_release_iosurfaces(textures, object_count);
+			} else {
+				ipc_metal_xpc_release_textures(textures, object_count);
+			}
 		}
 	}
 
@@ -614,25 +649,31 @@ ipc_send_handles_graphics_buffer(struct ipc_message_channel *imc,
 	memcpy(buf, data, size);
 	uint8_t *kinds = buf + size + sizeof(uint64_t) + sizeof(uint32_t) * handle_count;
 
-	uint32_t texture_count = 0;
+	uint32_t object_count = 0;
+	uint8_t kind = IPC_APPLE_HANDLE_NONE;
+	bool mixed = false;
 	for (uint32_t i = 0; i < handle_count; ++i) {
 		if (!xrt_graphics_buffer_is_valid(handles[i])) {
 			kinds[i] = IPC_APPLE_HANDLE_NONE;
-		} else if (xrt_graphics_buffer_is_iosurface(handles[i])) {
-			kinds[i] = IPC_APPLE_HANDLE_IOSURFACE;
-			ids[i] = IOSurfaceGetID((IOSurfaceRef)handles[i]);
-		} else {
-			kinds[i] = IPC_APPLE_HANDLE_TEXTURE;
-			ids[i] = texture_count;
-			textures[texture_count++] = handles[i];
+			continue;
 		}
+		kinds[i] = xrt_graphics_buffer_is_iosurface(handles[i]) ? IPC_APPLE_HANDLE_IOSURFACE
+		                                                         : IPC_APPLE_HANDLE_TEXTURE;
+		mixed |= kind != IPC_APPLE_HANDLE_NONE && kinds[i] != kind;
+		kind = kinds[i];
+		ids[i] = object_count;
+		textures[object_count++] = handles[i];
 	}
 
 	uint64_t token = 0;
-	if (texture_count > 0) {
-		xrt_result_t xret = apple_publish_textures(imc, textures, texture_count, &token);
+	if (object_count > 0) {
+		xrt_result_t xret = mixed ? XRT_ERROR_IPC_FAILURE
+		                    : kind == IPC_APPLE_HANDLE_IOSURFACE
+		                        ? apple_publish_iosurfaces(imc, textures, object_count, &token)
+		                        : apple_publish_textures(imc, textures, object_count, &token);
 		if (xret != XRT_SUCCESS) {
-			IPC_ERROR(imc, "Could not publish %u Metal texture handle(s)", texture_count);
+			IPC_ERROR(imc, "Could not publish %u Apple graphics object(s)%s", object_count,
+			          mixed ? ": IOSurfaces and textures mixed in one message" : "");
 			free(buf);
 			free(ids);
 			free(textures);

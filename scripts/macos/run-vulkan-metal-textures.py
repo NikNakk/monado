@@ -36,7 +36,6 @@ def main():
     parser.add_argument('--suite', action='store_true', help='Concurrent healthy client, failed overlay and replacement')
     parser.add_argument('--repeat', type=int, default=1, help='Sessions in one process, runtime pinned (1–16)')
     parser.add_argument('--service-no-shareable', action='store_true', help='Spike negative control: service allocates non-shareable textures')
-    parser.add_argument('--unified-remote', action='store_true', help='Spike: remote Vulkan client uses native swapchain handles')
     parser.add_argument('--child', action='store_true', help=argparse.SUPPRESS)
     args = parser.parse_args()
     if not 1 <= args.repeat <= 16:
@@ -128,8 +127,6 @@ def main():
                    MACOS_OPENXR_VULKAN_PROBE_SOURCE_SAMPLES='1',
                    MACOS_OPENXR_VULKAN_PROBE_ASYNC_SUBMIT='1',
                    MACOS_OPENXR_VULKAN_PROBE_REPEAT=str(args.repeat))
-        if args.unified_remote:
-            env['XRT_MACOS_VK_CLIENT_UNIFIED_HANDLE_REMOTE'] = '1'
         if args.runtime_defaults:
             env.pop('XRT_MACOS_VK_CLIENT_METAL_TEXTURES', None)
             env.pop('XRT_MACOS_VK_CLIENT_SHARED_EVENT', None)

@@ -711,6 +711,53 @@ ipc_metal_xpc_service_publish_textures_for_pid(void *const *metal_textures,
 }
 
 xrt_result_t
+ipc_metal_xpc_service_publish_iosurfaces_for_pid(void *const *iosurfaces,
+                                                 uint32_t image_count,
+                                                 uint64_t *out_token,
+                                                 pid_t owner_pid)
+{
+	if (iosurfaces == NULL || out_token == NULL || image_count == 0 || image_count > XRT_MAX_SWAPCHAIN_IMAGES ||
+	    owner_pid <= 0) {
+		return XRT_ERROR_INVALID_ARGUMENT;
+	}
+	*out_token = 0;
+
+	@autoreleasepool {
+		IPCMetalXPCServiceObject *service = copy_service_object();
+		if (service == nil) {
+			return XRT_ERROR_IPC_FAILURE;
+		}
+
+		// Stored as IOSurface objects, so they cross to the client as Mach
+		// ports and need not be global.
+		uint64_t token = make_token();
+		xrt_result_t xret = XRT_SUCCESS;
+		for (uint32_t i = 0; i < image_count; i++) {
+			IOSurface *surface = (__bridge IOSurface *)iosurfaces[i];
+			if (surface == nil || ![service storeImageObject:surface
+			                                          token:token
+			                                          index:i
+			                                     imageCount:image_count
+			                                       ownerPID:owner_pid]) {
+				xret = XRT_ERROR_IPC_FAILURE;
+				break;
+			}
+		}
+		if (xret != XRT_SUCCESS) {
+			[service discardToken:token ownerPID:owner_pid];
+		}
+		[service release];
+
+		if (xret == XRT_SUCCESS) {
+			*out_token = token;
+			U_LOG_I("Metal XPC published %u service IOSurface(s) token=0x%016llx for pid=%d", image_count,
+			        (unsigned long long)token, (int)owner_pid);
+		}
+		return xret;
+	}
+}
+
+xrt_result_t
 ipc_metal_xpc_service_take_textures_for_pid(uint64_t token,
                                             uint32_t expected_count,
                                             void **out_metal_textures,

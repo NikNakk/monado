@@ -66,6 +66,12 @@ ipc_metal_xpc_service_publish_textures_for_pid(void *const *metal_textures,
                                                pid_t owner_pid);
 
 xrt_result_t
+ipc_metal_xpc_service_publish_iosurfaces_for_pid(void *const *iosurfaces,
+                                                 uint32_t image_count,
+                                                 uint64_t *out_token,
+                                                 pid_t owner_pid);
+
+xrt_result_t
 ipc_metal_xpc_service_take_textures_for_pid(uint64_t token,
                                             uint32_t expected_count,
                                             void **out_metal_textures,

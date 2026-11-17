@@ -589,19 +589,17 @@ metal_service_create_swapchain(struct xrt_compositor *xc,
 	}
 	[descriptor release];
 
-	uint64_t token = 0;
-	xret = ipc_metal_xpc_publish_textures(raw_textures, xsccp.image_count, &token);
-	free(raw_textures);
-	if (xret != XRT_SUCCESS) {
-		free(transport_images);
-		release_texture_array(textures, xsccp.image_count);
-		return xret;
+	// Spike: pass the textures themselves as native handles. The IPC message
+	// channel publishes them through the XPC registry; no token in .size.
+	for (uint32_t i = 0; i < xsccp.image_count; i++) {
+		transport_images[i].handle = raw_textures[i];
+		transport_images[i].size = 0;
+		transport_images[i].use_dedicated_allocation = true;
 	}
+	free(raw_textures);
 
-	ipc_metal_xpc_make_token_images(token, xsccp.image_count, transport_images);
-
-	U_LOG_D("Metal service swapchain backing=shared-handle published=%u token=0x%016llx size=%ux%u array_size=%u",
-	        xsccp.image_count, (unsigned long long)token, info->width, info->height, info->array_size);
+	U_LOG_I("Metal service swapchain backing=texture-handles images=%u size=%ux%u array_size=%u",
+	        xsccp.image_count, info->width, info->height, info->array_size);
 
 	struct xrt_swapchain *native_xsc = NULL;
 	xret =
@@ -609,7 +607,6 @@ metal_service_create_swapchain(struct xrt_compositor *xc,
 	free(transport_images);
 
 	if (xret != XRT_SUCCESS) {
-		ipc_metal_xpc_discard_token(token);
 		release_texture_array(textures, xsccp.image_count);
 		return xret;
 	}

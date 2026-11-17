@@ -19,14 +19,6 @@ extern "C" {
 #endif
 
 xrt_result_t
-ipc_metal_call_swapchain_import_or_default(struct ipc_connection *ipc_c,
-                                           const struct xrt_swapchain_create_info *info,
-                                           const struct ipc_arg_swapchain_from_native *args,
-                                           const xrt_graphics_buffer_handle_t *handles,
-                                           uint32_t handle_count,
-                                           uint32_t *out_id);
-
-xrt_result_t
 ipc_metal_call_compositor_semaphore_create_or_default(struct ipc_connection *ipc_c,
                                                       uint32_t *out_id,
                                                       xrt_graphics_sync_handle_t *out_handles,
