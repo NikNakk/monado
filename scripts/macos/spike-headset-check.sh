@@ -17,11 +17,20 @@ BUILD=${BUILD:-build/arm64}
 HELLO=${1:-/Users/nickkennedy/Code/monado-upstreaming/build/review/macos-inproc-mvk/build/hello-xr/src/tests/hello_xr/hello_xr}
 OUT=${OUT:-build/spike-headset-$(date +%Y%m%d-%H%M%S)}
 RUNNER=scripts/macos/run-vulkan-metal-textures.py
+# SPIKE_VK=kk runs the service and client on the installed KosmicKrisp build.
+VK_ARGS=""
+if [ "${SPIKE_VK:-moltenvk}" = "kk" ]; then
+	VK_ARGS="--moltenvk $HOME/Code/alyx-native/build/kk-integration/src/kosmickrisp/vulkan/libvulkan_kosmickrisp.dylib"
+elif [ "${SPIKE_VK:-moltenvk}" != "moltenvk" ]; then
+	echo "SPIKE_VK must be moltenvk or kk"
+	exit 1
+fi
 
 mkdir -p "$OUT"
 SUMMARY="$OUT/summary.txt"
 git log -1 --format='commit %H %s' > "$SUMMARY"
 echo "build $BUILD" >> "$SUMMARY"
+echo "vulkan ${SPIKE_VK:-moltenvk}" >> "$SUMMARY"
 
 if pgrep -x monado-service > /dev/null; then
 	echo "A monado-service is already running. Stop it first so this check can own the headset."
@@ -45,7 +54,8 @@ run_case() {
 		echo "$name: skipped" >> "$SUMMARY"
 		return
 	fi
-	python3 "$RUNNER" --build "$BUILD" --output "$OUT/$name" --headset --no-readbacks "$@" \
+	# shellcheck disable=SC2086
+	python3 "$RUNNER" --build "$BUILD" --output "$OUT/$name" --headset --no-readbacks $VK_ARGS "$@" \
 		> "$OUT/$name.runner.txt" 2>&1
 	code=$?
 	printf "Runner exit %s. What did you see? (one line): " "$code"
