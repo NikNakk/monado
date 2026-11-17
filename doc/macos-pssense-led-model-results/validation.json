@@ -1,0 +1,417 @@
+{
+  "geometry": [
+    {
+      "session": "20261003-234218-corr-off-grip",
+      "model": "sony",
+      "max_error_um": 0.0
+    },
+    {
+      "session": "20261003-234218-corr-off-grip",
+      "model": "local",
+      "max_error_um": 0.5000000000074389
+    },
+    {
+      "session": "20261003-234218-corr-off-grip",
+      "model": "toolkit",
+      "max_error_um": 1.3877787807814457e-11
+    },
+    {
+      "session": "20261003-234436-corr-on-grip",
+      "model": "sony",
+      "max_error_um": 1.000000000001
+    },
+    {
+      "session": "20261003-234436-corr-on-grip",
+      "model": "local",
+      "max_error_um": 0.7000000000062512
+    },
+    {
+      "session": "20261003-234436-corr-on-grip",
+      "model": "toolkit",
+      "max_error_um": 1.000000000001
+    },
+    {
+      "session": "20261003-235855-corr-on-grip-2",
+      "model": "sony",
+      "max_error_um": 1.000000000001
+    },
+    {
+      "session": "20261003-235855-corr-on-grip-2",
+      "model": "local",
+      "max_error_um": 0.7000000000062512
+    },
+    {
+      "session": "20261003-235855-corr-on-grip-2",
+      "model": "toolkit",
+      "max_error_um": 1.000000000001
+    },
+    {
+      "session": "20261004-000108-hard-cases",
+      "model": "sony",
+      "max_error_um": 1.000000000001
+    },
+    {
+      "session": "20261004-000108-hard-cases",
+      "model": "local",
+      "max_error_um": 0.7000000000062512
+    },
+    {
+      "session": "20261004-000108-hard-cases",
+      "model": "toolkit",
+      "max_error_um": 1.000000000001
+    },
+    {
+      "session": "20261004-000405-hard-cases",
+      "model": "sony",
+      "max_error_um": 1.000000000001
+    },
+    {
+      "session": "20261004-000405-hard-cases",
+      "model": "local",
+      "max_error_um": 0.7000000000062512
+    },
+    {
+      "session": "20261004-000405-hard-cases",
+      "model": "toolkit",
+      "max_error_um": 1.000000000001
+    },
+    {
+      "session": "20261004-000909-distance",
+      "model": "sony",
+      "max_error_um": 1.000000000001
+    },
+    {
+      "session": "20261004-000909-distance",
+      "model": "local",
+      "max_error_um": 0.7000000000062512
+    },
+    {
+      "session": "20261004-000909-distance",
+      "model": "toolkit",
+      "max_error_um": 1.000000000001
+    },
+    {
+      "session": "20261005-2001-openbrush-oriented-recorded",
+      "model": "sony",
+      "max_error_um": 1.000000000001
+    },
+    {
+      "session": "20261005-2001-openbrush-oriented-recorded",
+      "model": "local",
+      "max_error_um": 0.7000000000062512
+    },
+    {
+      "session": "20261005-2001-openbrush-oriented-recorded",
+      "model": "toolkit",
+      "max_error_um": 1.000000000001
+    },
+    {
+      "session": "20261025-controller-survey-both-mode16-v3",
+      "model": "sony",
+      "max_error_um": 1.000000000001
+    },
+    {
+      "session": "20261025-controller-survey-both-mode16-v3",
+      "model": "local",
+      "max_error_um": 0.7000000000062512
+    },
+    {
+      "session": "20261025-controller-survey-both-mode16-v3",
+      "model": "toolkit",
+      "max_error_um": 1.000000000001
+    }
+  ],
+  "repeat": [
+    {
+      "session": "20261003-234218-corr-off-grip",
+      "model": "local",
+      "identical_poses": true
+    },
+    {
+      "session": "20261003-234218-corr-off-grip",
+      "model": "toolkit",
+      "identical_poses": true
+    }
+  ],
+  "marked_interval_spread": [
+    {
+      "session": "20261004-000108-hard-cases",
+      "device": 0,
+      "start_ns": 2757164125479000,
+      "end_ns": 2757179508360000,
+      "model": "sony",
+      "poses": 63,
+      "windows": 1,
+      "spread_mm_p50": 1.2239287717621108,
+      "spread_mm_p95": 1.2239287717621108
+    },
+    {
+      "session": "20261004-000108-hard-cases",
+      "device": 0,
+      "start_ns": 2757164125479000,
+      "end_ns": 2757179508360000,
+      "model": "local",
+      "poses": 63,
+      "windows": 1,
+      "spread_mm_p50": 1.491210400151722,
+      "spread_mm_p95": 1.491210400151722
+    },
+    {
+      "session": "20261004-000108-hard-cases",
+      "device": 0,
+      "start_ns": 2757164125479000,
+      "end_ns": 2757179508360000,
+      "model": "toolkit",
+      "poses": 60,
+      "windows": 1,
+      "spread_mm_p50": 1.9222900299743648,
+      "spread_mm_p95": 1.9222900299743648
+    },
+    {
+      "session": "20261004-000108-hard-cases",
+      "device": 0,
+      "start_ns": 2757189864046000,
+      "end_ns": 2757195309489000,
+      "model": "sony",
+      "poses": 324,
+      "windows": 6,
+      "spread_mm_p50": 192.07913754837116,
+      "spread_mm_p95": 374.0463135477687
+    },
+    {
+      "session": "20261004-000108-hard-cases",
+      "device": 0,
+      "start_ns": 2757189864046000,
+      "end_ns": 2757195309489000,
+      "model": "local",
+      "poses": 324,
+      "windows": 6,
+      "spread_mm_p50": 193.4097255227182,
+      "spread_mm_p95": 375.91828101007576
+    },
+    {
+      "session": "20261004-000108-hard-cases",
+      "device": 0,
+      "start_ns": 2757189864046000,
+      "end_ns": 2757195309489000,
+      "model": "toolkit",
+      "poses": 326,
+      "windows": 6,
+      "spread_mm_p50": 194.48565753514734,
+      "spread_mm_p95": 378.57193432000247
+    },
+    {
+      "session": "20261004-000405-hard-cases",
+      "device": 0,
+      "start_ns": 2757343782474000,
+      "end_ns": 2757343992772000,
+      "model": "sony",
+      "poses": 0,
+      "windows": 0,
+      "spread_mm_p50": null,
+      "spread_mm_p95": null
+    },
+    {
+      "session": "20261004-000405-hard-cases",
+      "device": 0,
+      "start_ns": 2757343782474000,
+      "end_ns": 2757343992772000,
+      "model": "local",
+      "poses": 0,
+      "windows": 0,
+      "spread_mm_p50": null,
+      "spread_mm_p95": null
+    },
+    {
+      "session": "20261004-000405-hard-cases",
+      "device": 0,
+      "start_ns": 2757343782474000,
+      "end_ns": 2757343992772000,
+      "model": "toolkit",
+      "poses": 0,
+      "windows": 0,
+      "spread_mm_p50": null,
+      "spread_mm_p95": null
+    },
+    {
+      "session": "20261004-000405-hard-cases",
+      "device": 0,
+      "start_ns": 2757358106889000,
+      "end_ns": 2757369778095000,
+      "model": "sony",
+      "poses": 591,
+      "windows": 11,
+      "spread_mm_p50": 4.0960117409092796,
+      "spread_mm_p95": 8.037317595146492
+    },
+    {
+      "session": "20261004-000405-hard-cases",
+      "device": 0,
+      "start_ns": 2757358106889000,
+      "end_ns": 2757369778095000,
+      "model": "local",
+      "poses": 578,
+      "windows": 10,
+      "spread_mm_p50": 4.020946778094817,
+      "spread_mm_p95": 8.463789578605766
+    },
+    {
+      "session": "20261004-000405-hard-cases",
+      "device": 0,
+      "start_ns": 2757358106889000,
+      "end_ns": 2757369778095000,
+      "model": "toolkit",
+      "poses": 586,
+      "windows": 11,
+      "spread_mm_p50": 4.183483769830783,
+      "spread_mm_p95": 6.907615224652784
+    },
+    {
+      "session": "20261004-000405-hard-cases",
+      "device": 0,
+      "start_ns": 2757379422862000,
+      "end_ns": 2757391106491000,
+      "model": "sony",
+      "poses": 648,
+      "windows": 12,
+      "spread_mm_p50": 2.1944302571963825,
+      "spread_mm_p95": 274.0623654646098
+    },
+    {
+      "session": "20261004-000405-hard-cases",
+      "device": 0,
+      "start_ns": 2757379422862000,
+      "end_ns": 2757391106491000,
+      "model": "local",
+      "poses": 654,
+      "windows": 12,
+      "spread_mm_p50": 2.138895881113045,
+      "spread_mm_p95": 275.94440859775483
+    },
+    {
+      "session": "20261004-000405-hard-cases",
+      "device": 0,
+      "start_ns": 2757379422862000,
+      "end_ns": 2757391106491000,
+      "model": "toolkit",
+      "poses": 655,
+      "windows": 12,
+      "spread_mm_p50": 2.044950765727001,
+      "spread_mm_p95": 278.7107436059939
+    }
+  ],
+  "common_pose_difference": [
+    {
+      "session": "20261003-234218-corr-off-grip",
+      "device": 0,
+      "n": 2318,
+      "position_mm_p50": 2.555439296872484,
+      "position_mm_p95": 6.978806846445887
+    },
+    {
+      "session": "20261003-234218-corr-off-grip",
+      "device": 1,
+      "n": 3129,
+      "position_mm_p50": 1.185952781522118,
+      "position_mm_p95": 2.0530509004893567
+    },
+    {
+      "session": "20261003-234436-corr-on-grip",
+      "device": 0,
+      "n": 1118,
+      "position_mm_p50": 2.1761953037353887,
+      "position_mm_p95": 5.467403131286384
+    },
+    {
+      "session": "20261003-234436-corr-on-grip",
+      "device": 1,
+      "n": 3295,
+      "position_mm_p50": 1.1507819080955397,
+      "position_mm_p95": 2.660952836861269
+    },
+    {
+      "session": "20261003-235855-corr-on-grip-2",
+      "device": 0,
+      "n": 2823,
+      "position_mm_p50": 2.144754298282193,
+      "position_mm_p95": 4.33733812378049
+    },
+    {
+      "session": "20261003-235855-corr-on-grip-2",
+      "device": 1,
+      "n": 3272,
+      "position_mm_p50": 1.3069433805639286,
+      "position_mm_p95": 2.328287997649798
+    },
+    {
+      "session": "20261004-000108-hard-cases",
+      "device": 0,
+      "n": 2452,
+      "position_mm_p50": 4.30799570566174,
+      "position_mm_p95": 5.206977914299226
+    },
+    {
+      "session": "20261004-000108-hard-cases",
+      "device": 1,
+      "n": 2371,
+      "position_mm_p50": 4.201861849228254,
+      "position_mm_p95": 4.648344651593734
+    },
+    {
+      "session": "20261004-000405-hard-cases",
+      "device": 0,
+      "n": 2637,
+      "position_mm_p50": 3.7294275700166173,
+      "position_mm_p95": 5.618017977899321
+    },
+    {
+      "session": "20261004-000405-hard-cases",
+      "device": 1,
+      "n": 2660,
+      "position_mm_p50": 3.2043679563995084,
+      "position_mm_p95": 5.185892208675369
+    },
+    {
+      "session": "20261004-000909-distance",
+      "device": 0,
+      "n": 1050,
+      "position_mm_p50": 2.4401692564246114,
+      "position_mm_p95": 5.5940508578310215
+    },
+    {
+      "session": "20261004-000909-distance",
+      "device": 1,
+      "n": 890,
+      "position_mm_p50": 1.875676411324729,
+      "position_mm_p95": 3.656503931352991
+    },
+    {
+      "session": "20261005-2001-openbrush-oriented-recorded",
+      "device": 0,
+      "n": 26289,
+      "position_mm_p50": 2.033605173085521,
+      "position_mm_p95": 3.825082221338492
+    },
+    {
+      "session": "20261005-2001-openbrush-oriented-recorded",
+      "device": 1,
+      "n": 26541,
+      "position_mm_p50": 1.0986965004040157,
+      "position_mm_p95": 1.7262314445055842
+    },
+    {
+      "session": "20261025-controller-survey-both-mode16-v3",
+      "device": 0,
+      "n": 29496,
+      "position_mm_p50": 2.049288901058046,
+      "position_mm_p95": 2.9240247946964417
+    },
+    {
+      "session": "20261025-controller-survey-both-mode16-v3",
+      "device": 1,
+      "n": 28804,
+      "position_mm_p50": 1.841569982379262,
+      "position_mm_p95": 2.603238367879691
+    }
+  ]
+}

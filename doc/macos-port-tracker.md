@@ -14,6 +14,11 @@ startup tradeoff and hardware/Linux validation remain.
 Service/native and Wine runtimes are installed at `v25.1.0-2701-gc777eeb73`
 for the user-operated check, preserving saved preferences.
 
+The [17 November Sense LED model comparison](macos-pssense-led-model-comparison.md)
+finds no replacement benefit from PSVR2Toolkit's new table on eight recorded
+sessions. Our measured correction fits better for both hands in all eight;
+no runtime/default or installed-settings change is made.
+
 The [31 October acquisition-phase candidate](macos-wsi-acquire-phase.md)
 tested render-entry rather than post-submit acquisition for graphics WSI.
 Headset pilots did not support it (more source reuse, one unexplained

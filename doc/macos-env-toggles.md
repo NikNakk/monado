@@ -268,6 +268,10 @@ real-game Game Mode comparisons remain a separate gate; see [the implementation]
 for native Vulkan arrays/depth and wraps its textures with `VK_EXT_metal_objects`.
 Default is `1` on the integration branch. Set `=0` in the client
 to disable it. Single-layer colour keeps IOSurface.
+For service-backed RGBA8 or BGRA8 Vulkan clients whose driver cannot implicitly
+allocate an exportable IOSurface, set `XRT_MACOS_VK_CLIENT_METAL_COLOR=1`.
+The client allocates its own private IOSurfaces, sends their Mach ports over XPC,
+and imports Vulkan views of the same storage. This route is opt-in.
 Keep `XRT_MACOS_VK_CLIENT_SHARED_EVENT=1` enabled to avoid the CPU frame
 handoff fallback. No compositor or production texture copy is added.
 

@@ -335,6 +335,12 @@ The per-exposure analysis behind this section is in the experiment directory, un
 
 ## The LED model's fit (1 October 2026)
 
+**17 November follow-up:** the [three-model replay comparison](macos-pssense-led-model-comparison.md)
+tests PSVR2Toolkit's newer calibrated positions against Sony and this measured
+correction on eight October recordings. The local correction has lower
+common-timestamp median error than Toolkit for both hands in every session.
+Keep the correction where selected; no new default is promoted.
+
 This follows up the right controller's RMS. Two options were added to `constellation_replay`:
 
 - `--residuals-csv OUT.csv` writes one row per correspondence of every M1 solve, accepted or not: LED, camera, blob,

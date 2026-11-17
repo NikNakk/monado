@@ -13,6 +13,13 @@ improve offline recovery and pass focused tests; one startup tradeoff, Linux CI
 and wearer acceptance remain. Service/native and Wine runtimes are now installed
 at `v25.1.0-2701-gc777eeb73` for the user-operated check; preferences are preserved.
 
+The [17 November Sense LED model replay](macos-pssense-led-model-comparison.md)
+compares Sony, our measured correction and PSVR2Toolkit's new calibrated table
+on eight recordings. Toolkit has worse common-timestamp median reprojection
+error than our correction for both hands in every session, with similar solve
+coverage. Retain the existing correction where selected; runtime defaults and
+installed settings are unchanged.
+
 The [31 October acquisition-phase candidate](macos-wsi-acquire-phase.md)
 moved graphics WSI image acquisition from after submit to render entry. Desktop
 sessions passed, but headset pilots showed more source reuse and one

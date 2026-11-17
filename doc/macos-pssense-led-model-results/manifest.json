@@ -1,0 +1,144 @@
+{
+  "source_commit": "b6758b7d6b0791fe9594bc1cf15bf85ddf638a94",
+  "replay": "/Users/nickkennedy/Code/monado-2/build/arm64/src/xrt/tracking/constellation/constellation_replay",
+  "replay_sha256": "1f8384869730239d8c8eebe61938a65b36946466ba368202a77b4780f04f7994",
+  "environment": {
+    "CONSTELLATION_TRACKER_ORIENTED_BOOTSTRAP": "1",
+    "CONSTELLATION_TRACKER_PRIOR_REACQUIRE": "0",
+    "CONSTELLATION_TRACKER_RERUN_ENABLE": "0"
+  },
+  "sessions": [
+    {
+      "name": "20261003-234218-corr-off-grip",
+      "path": "/Volumes/nick-mac-external/psvr2-datasets/sessions/20261003-234218-corr-off-grip/constellation.ctd",
+      "sha256": "29a72cfaae0da540bcf621819beab98acf1156b05d72476c225210cdf4c26957",
+      "exposures": 3597,
+      "seconds": 60.0,
+      "start": 2756031531813100,
+      "end": 2756091525079600,
+      "annotations": []
+    },
+    {
+      "name": "20261003-234436-corr-on-grip",
+      "path": "/Volumes/nick-mac-external/psvr2-datasets/sessions/20261003-234436-corr-on-grip/constellation.ctd",
+      "sha256": "8dec2fe3266ca4b2ef833d36caf374afda3249bb9f2d7ac5edada06e3cffbcbd",
+      "exposures": 3596,
+      "seconds": 60.0,
+      "start": 2756168302049100,
+      "end": 2756228278853800,
+      "annotations": []
+    },
+    {
+      "name": "20261003-235855-corr-on-grip-2",
+      "path": "/Volumes/nick-mac-external/psvr2-datasets/sessions/20261003-235855-corr-on-grip-2/constellation.ctd",
+      "sha256": "c97a43cefd7960dd86c1e48e80714b3e8aac82153e042dff3d16f80362c4f489",
+      "exposures": 3597,
+      "seconds": 60.0,
+      "start": 2757027731010700,
+      "end": 2757087724684100,
+      "annotations": []
+    },
+    {
+      "name": "20261004-000108-hard-cases",
+      "path": "/Volumes/nick-mac-external/psvr2-datasets/sessions/20261004-000108-hard-cases/constellation.ctd",
+      "sha256": "9a96a86b814b81a85a22893fd91e7e1919d6056190a282fb7cb1da50fe26714f",
+      "exposures": 3596,
+      "seconds": 60.0,
+      "start": 2757160080886100,
+      "end": 2757220057886800,
+      "annotations": [
+        [
+          "2757164125479000",
+          "0",
+          "static_begin"
+        ],
+        [
+          "2757179508360000",
+          "0",
+          "static_end"
+        ],
+        [
+          "2757189864046000",
+          "0",
+          "static_begin"
+        ],
+        [
+          "2757195309489000",
+          "0",
+          "static_end"
+        ]
+      ]
+    },
+    {
+      "name": "20261004-000405-hard-cases",
+      "path": "/Volumes/nick-mac-external/psvr2-datasets/sessions/20261004-000405-hard-cases/constellation.ctd",
+      "sha256": "a6dc2225b21df25365dbcb00b7958049689eaa9a4f3e7d39ead7883678831c50",
+      "exposures": 3596,
+      "seconds": 60.0,
+      "start": 2757337126478100,
+      "end": 2757397120599600,
+      "annotations": [
+        [
+          "2757343782474000",
+          "0",
+          "static_begin"
+        ],
+        [
+          "2757343992772000",
+          "0",
+          "static_end"
+        ],
+        [
+          "2757358106889000",
+          "0",
+          "static_begin"
+        ],
+        [
+          "2757369778095000",
+          "0",
+          "static_end"
+        ],
+        [
+          "2757379422862000",
+          "0",
+          "static_begin"
+        ],
+        [
+          "2757391106491000",
+          "0",
+          "static_end"
+        ]
+      ]
+    },
+    {
+      "name": "20261004-000909-distance",
+      "path": "/Volumes/nick-mac-external/psvr2-datasets/sessions/20261004-000909-distance/constellation.ctd",
+      "sha256": "7e950909b4164afdc0421fa136dd7e8fe7943bb1145a9e9fefd2e1e9d27ff592",
+      "exposures": 3596,
+      "seconds": 60.0,
+      "start": 2757641249794300,
+      "end": 2757701226809700,
+      "annotations": []
+    },
+    {
+      "name": "20261005-2001-openbrush-oriented-recorded",
+      "path": "/Volumes/nick-mac-external/psvr2-datasets/sessions/20261005-2001-openbrush-oriented-recorded/constellation.ctd",
+      "sha256": "b281fc588c136d0fd897f9ce2078da0adc802d62006682d7cbc1a2616e808463",
+      "exposures": 27462,
+      "seconds": 458.3,
+      "start": 2915144632786400,
+      "end": 2915602892449200,
+      "annotations": []
+    },
+    {
+      "name": "20261025-controller-survey-both-mode16-v3",
+      "path": "/Users/nickkennedy/Code/monado-2/build/arm64/controller-evidence/20261025-controller-survey-both-mode16-v3/constellation.ctd",
+      "sha256": "ec8057572dd9c2edf2ff1c50b996c083ce8404f46ab085f692d5258bb5c7f5e5",
+      "exposures": 31049,
+      "seconds": 518.0,
+      "start": 149001109987900,
+      "end": 149519140319100,
+      "annotations": []
+    }
+  ]
+}
