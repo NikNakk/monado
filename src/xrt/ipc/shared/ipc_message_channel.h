@@ -30,6 +30,8 @@ struct ipc_message_channel
 {
 	xrt_ipc_handle_t ipc_handle;
 	enum u_logging_level log_level;
+	//! Spike: verified peer PID, set by the server only; 0 in a client.
+	int64_t peer_pid;
 };
 
 /*!

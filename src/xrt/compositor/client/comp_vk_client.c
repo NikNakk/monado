@@ -898,9 +898,9 @@ client_vk_swapchain_create(struct xrt_compositor *xc,
 	if (unified_handle) {
 		xret = xrt_comp_native_create_swapchain(c->xcn, &xinfo, &xscn);
 		if (xret == XRT_SUCCESS) {
-			U_LOG_I("Vulkan unified-handle swapchain: format=%lld layers=%u images=%u iosurface=%u remote=0",
+			U_LOG_I("Vulkan unified-handle swapchain: format=%lld layers=%u images=%u iosurface=%u remote=%u",
 			        (long long)xinfo.format, xinfo.array_size, xscn->base.image_count,
-			        xrt_graphics_buffer_is_iosurface(xscn->images[0].handle));
+			        xrt_graphics_buffer_is_iosurface(xscn->images[0].handle), c->xcn->is_remote);
 		}
 	} else if (client_vk_metal_texture_required(&xinfo)) {
 		if (!client_vk_metal_texture_enabled())

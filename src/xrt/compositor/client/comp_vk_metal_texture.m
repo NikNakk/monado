@@ -10,6 +10,7 @@
 
 DEBUG_GET_ONCE_BOOL_OPTION(vk_metal_textures, "XRT_MACOS_VK_CLIENT_METAL_TEXTURES", true)
 DEBUG_GET_ONCE_BOOL_OPTION(vk_unified_handle, "XRT_MACOS_VK_CLIENT_UNIFIED_HANDLE", true)
+DEBUG_GET_ONCE_BOOL_OPTION(vk_unified_handle_remote, "XRT_MACOS_VK_CLIENT_UNIFIED_HANDLE_REMOTE", false)
 static atomic_uint context_count;
 enum
 {
@@ -38,8 +39,9 @@ client_vk_unified_handle_usable(const struct xrt_compositor_native *xcn, const s
 {
 	// Spike: an in-process compositor hands back Metal texture handles for
 	// arrays and depth, so the ordinary native swapchain path can import them.
-	// A remote compositor cannot send that form over the Unix socket yet.
-	return debug_get_bool_option_vk_unified_handle() && !xcn->is_remote && info->face_count == 1 &&
+	// A remote compositor sends that form through the XPC registry; opt-in while experimental.
+	const bool route_allowed = !xcn->is_remote || debug_get_bool_option_vk_unified_handle_remote();
+	return debug_get_bool_option_vk_unified_handle() && route_allowed && info->face_count == 1 &&
 	       info->sample_count == 1 && info->mip_count == 1;
 }
 static MTLPixelFormat
