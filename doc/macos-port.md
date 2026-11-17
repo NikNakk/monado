@@ -10,7 +10,8 @@ The [17 November Sense confirmation investigation](macos-pssense-occlusion.md#re
 reproduces in-view controller losses using recorded live priors. A tentative-track
 refine retry and a [filter-reset alignment refresh](macos-pssense-occlusion.md#lit-gap-diagnosis-stale-alignment-after-a-filter-reset-17-november)
 improve offline recovery and pass focused tests; one startup tradeoff, Linux CI
-and wearer acceptance remain. No installed runtime change.
+and wearer acceptance remain. Service/native and Wine runtimes are now installed
+at `v25.1.0-2701-gc777eeb73` for the user-operated check; preferences are preserved.
 
 The [31 October acquisition-phase candidate](macos-wsi-acquire-phase.md)
 moved graphics WSI image acquisition from after submit to render entry. Desktop

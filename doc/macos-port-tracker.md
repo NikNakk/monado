@@ -11,7 +11,8 @@ The [17 November Sense confirmation retry](macos-pssense-occlusion.md#recorded-p
 addresses a recorded live-prior confirmation loop. The follow-up also refreshes
 alignment after filter resets. Offline recovery and focused tests improve/pass;
 startup tradeoff and hardware/Linux validation remain.
-The installed runtime is unchanged.
+Service/native and Wine runtimes are installed at `v25.1.0-2701-gc777eeb73`
+for the user-operated check, preserving saved preferences.
 
 The [31 October acquisition-phase candidate](macos-wsi-acquire-phase.md)
 tested render-entry rather than post-submit acquisition for graphics WSI.

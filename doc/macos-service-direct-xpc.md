@@ -537,3 +537,28 @@ on-demand preparation, build/install order and build-failure handling. Shell
 syntax and whitespace checks pass. The install mode itself has not been run
 in this follow-up, so the service still has the preceding floor repair only;
 no headset test or runtime replacement is claimed.
+
+## Sense recovery installation — 2026-11-17
+
+User-requested integration commit `c777eeb7325e6b994efbb137afe041264bcaf72a`
+was pushed to `origin/macos-upstream-clean`. The ARM64 service/native runtime
+and development Wine x64 client were rebuilt at `v25.1.0-2701-gc777eeb73` using
+`scripts/macos/rebuild-both --install-local`. The native prefix install required
+host filesystem access after the sandbox denied its first copy. The persistent
+registration helper's bootstrap retries returned launchd error 5; a subsequent
+direct bootstrap of the saved plist succeeded. The loaded on-demand service
+was verified stopped, with every saved environment setting unchanged.
+
+The ARM64 installed service matches the built executable byte for byte; the
+service and both runtime binaries contain the same version tag. Native ARM64
+and translated x64 runtime loading, loader negotiation and extension enumeration
+pass (61/57 extensions), without creating an instance/session. All 96 native
+CTests pass with host IPC/GPU access. Hardware tracking acceptance remains pending.
+Reopen VR applications to load the updated runtime.
+
+The previous prefix and LaunchAgent are preserved at
+`build/arm64/local-install-backups/20261117-203024-sense-recovery/`.
+Build/install/test logs and the binary-hash `installation.json` are retained in
+`build/arm64/controller-evidence/20261117-existing-loss-review/`.
+The following installation-record commit changes documentation only; the
+installed runtime sources are exactly the tracking-fix commit above.
