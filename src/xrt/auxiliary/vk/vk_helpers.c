@@ -486,8 +486,14 @@ vk_create_image_from_native(struct vk_bundle *vk,
 	    .sType = VK_STRUCTURE_TYPE_IMPORT_METAL_IO_SURFACE_INFO_EXT,
 	    .ioSurface = (IOSurfaceRef)image_native->handle,
 	};
+	// Declare the texture exportable, so vk_ic_get_handles can hand it on.
+	VkExportMetalObjectCreateInfoEXT export_metal_texture_info = {
+	    .sType = VK_STRUCTURE_TYPE_EXPORT_METAL_OBJECT_CREATE_INFO_EXT,
+	    .exportObjectType = VK_EXPORT_METAL_OBJECT_TYPE_METAL_TEXTURE_BIT_EXT,
+	};
 	VkImportMetalTextureInfoEXT import_metal_texture_info = {
 	    .sType = VK_STRUCTURE_TYPE_IMPORT_METAL_TEXTURE_INFO_EXT,
+	    .pNext = &export_metal_texture_info,
 	    .plane = VK_IMAGE_ASPECT_PLANE_0_BIT,
 	    .mtlTexture = image_native->handle,
 	};

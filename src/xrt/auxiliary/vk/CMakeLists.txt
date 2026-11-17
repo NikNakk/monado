@@ -80,6 +80,11 @@ target_include_directories(aux_vk PUBLIC ${CMAKE_CURRENT_BINARY_DIR})
 target_link_libraries(aux_vk PUBLIC xrt-external-vulkan-headers aux_os aux_util)
 target_link_libraries(aux_vk PRIVATE xrt-external-vulkan-loader)
 
+if(APPLE)
+	target_sources(aux_vk PRIVATE vk_metal_texture.h vk_metal_texture.m)
+	target_link_libraries(aux_vk PRIVATE "-framework Metal")
+endif()
+
 if(ANDROID)
 	target_link_libraries(aux_vk PUBLIC aux_android)
 	target_link_libraries(aux_vk PUBLIC ${ANDROID_LIBRARY})

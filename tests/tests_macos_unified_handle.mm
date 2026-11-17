@@ -255,8 +255,17 @@ TEST_CASE("Unified macOS handles survive export, import and original-image destr
 			return;
 		}
 
-		id<MTLTexture> texture = (id<MTLTexture>)kept;
-		REQUIRE([texture arrayLength] == layers);
+		id<MTLTexture> original = (id<MTLTexture>)kept;
+		REQUIRE([original arrayLength] == layers);
+		// The texture form must be able to cross a process boundary: take the
+		// shared handle a sender would publish and reopen it as a receiver would.
+		REQUIRE([original isShareable]);
+		MTLSharedTextureHandle *shared = [original newSharedTextureHandle];
+		REQUIRE(shared != nil);
+		id<MTLTexture> texture = [[original device] newSharedTextureWithHandle:shared];
+		REQUIRE(texture != nil);
+		REQUIRE(texture != original);
+		[shared release];
 		id<MTLDevice> device = [texture device];
 		id<MTLCommandQueue> queue = [device newCommandQueue];
 		REQUIRE(queue != nil);
@@ -301,6 +310,7 @@ TEST_CASE("Unified macOS handles survive export, import and original-image destr
 		}
 		[buffer release];
 		[queue release];
+		[texture release];
 		u_graphics_buffer_unref(&kept);
 	}
 }

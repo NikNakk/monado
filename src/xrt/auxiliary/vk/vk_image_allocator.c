@@ -30,6 +30,10 @@
 #include <CoreFoundation/CoreFoundation.h>
 #include <CoreVideo/CoreVideo.h>
 #include <IOSurface/IOSurface.h>
+#include "util/u_debug.h"
+#include "vk/vk_metal_texture.h"
+
+DEBUG_GET_ONCE_BOOL_OPTION(vk_shareable_textures, "XRT_MACOS_VK_SHAREABLE_TEXTURES", true)
 #endif
 
 
@@ -636,6 +640,48 @@ get_image_native_texture_handle(struct vk_bundle *vk, VkImage image, xrt_graphic
 	*out_handle = u_graphics_buffer_ref((xrt_graphics_buffer_handle_t)texture_info.mtlTexture);
 	return VK_SUCCESS;
 }
+
+/*!
+ * Spike: replace a MoltenVK-allocated array or depth image with one backed by
+ * a shareable Metal texture of the same description, so the handle can later
+ * be sent to another process. On any failure the original image is kept.
+ */
+static void
+make_image_shareable(struct vk_bundle *vk, const struct xrt_swapchain_create_info *info, struct vk_image *image)
+{
+	const bool texture_handle = info->array_size > 1 || (info->bits & XRT_SWAPCHAIN_USAGE_DEPTH_STENCIL) != 0;
+	if (!texture_handle || info->face_count != 1 || !debug_get_bool_option_vk_shareable_textures()) {
+		return;
+	}
+
+	xrt_graphics_buffer_handle_t original = XRT_GRAPHICS_BUFFER_HANDLE_INVALID;
+	if (get_image_native_texture_handle(vk, image->handle, &original) != VK_SUCCESS) {
+		return;
+	}
+
+	struct xrt_image_native native = {0};
+	native.handle = vk_metal_texture_create_shareable_like(original);
+	u_graphics_buffer_unref(&original);
+	if (!xrt_graphics_buffer_is_valid(native.handle)) {
+		return;
+	}
+
+	VkImage shareable = VK_NULL_HANDLE;
+	VkDeviceMemory memory = VK_NULL_HANDLE;
+	VkResult ret = vk_create_image_from_native(vk, info, &native, &shareable, &memory);
+	// The import takes its own reference and drops ours on success.
+	if (xrt_graphics_buffer_is_valid(native.handle)) {
+		u_graphics_buffer_unref(&native.handle);
+	}
+	if (ret != VK_SUCCESS) {
+		U_LOG_W("Keeping the non-shareable image: importing its shareable twin failed");
+		return;
+	}
+
+	destroy_image(vk, image);
+	image->handle = shareable;
+	image->memory = memory;
+}
 #endif // XRT_GRAPHICS_BUFFER_HANDLE_IS_IOSURFACE
 
 
@@ -667,8 +713,14 @@ vk_ic_allocate(struct vk_bundle *vk,
 			break;
 		}
 
+#if defined(XRT_GRAPHICS_BUFFER_HANDLE_IS_IOSURFACE)
+		make_image_shareable(vk, xscci, &out_vkic->images[i]);
+#endif
+
 		VK_NAME_IMAGE(vk, out_vkic->images[i].handle, "vk_image_collection image");
-		VK_NAME_DEVICE_MEMORY(vk, out_vkic->images[i].memory, "vk_image_collection device_memory");
+		if (out_vkic->images[i].memory != VK_NULL_HANDLE) {
+			VK_NAME_DEVICE_MEMORY(vk, out_vkic->images[i].memory, "vk_image_collection device_memory");
+		}
 	}
 
 	// Set the fields.
