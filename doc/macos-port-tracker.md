@@ -7,6 +7,12 @@ SPDX-License-Identifier: BSL-1.0
 
 # macOS Port Tracker
 
+The [17 November Sense confirmation retry](macos-pssense-occlusion.md#recorded-prior-reproduction-and-confirmation-retry-17-november)
+addresses a recorded live-prior confirmation loop. The follow-up also refreshes
+alignment after filter resets. Offline recovery and focused tests improve/pass;
+startup tradeoff and hardware/Linux validation remain.
+The installed runtime is unchanged.
+
 The [31 October acquisition-phase candidate](macos-wsi-acquire-phase.md)
 tested render-entry rather than post-submit acquisition for graphics WSI.
 Headset pilots did not support it (more source reuse, one unexplained

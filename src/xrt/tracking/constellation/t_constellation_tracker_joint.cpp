@@ -317,6 +317,24 @@ JointProcessor::process(JointExposure &exposure)
 		bool pushed = t_constellation_tracker_device_push_sample(device->device, &sample);
 		push_ms += ms_since(push_start);
 		if (pushed) {
+			// Optical acceptance can reinitialise a fused source in a new orientation frame. The
+			// alignment above used its pre-update orientation: refresh it before the next exposure
+			// or that old correction will be applied again to the source's corrected orientation.
+			if (device->params.tracking_source != nullptr) {
+				xrt_space_relation refreshed = XRT_SPACE_RELATION_ZERO;
+				t_constellation_tracker_tracking_source_get_tracked_pose(
+				    device->params.tracking_source, exposure.timestamp_ns, &refreshed);
+				if (relation_has(refreshed, XRT_SPACE_RELATION_ORIENTATION_VALID_BIT |
+				                                XRT_SPACE_RELATION_ORIENTATION_TRACKED_BIT)) {
+					xrt_pose Tcv_refreshed;
+					math_pose_convert_from_opencv(&refreshed.pose, &Tcv_refreshed);
+					xrt_quat inverse;
+					math_quat_invert(&Tcv_refreshed.orientation, &inverse);
+					math_quat_rotate(&result.Tcv_world_device.orientation, &inverse, &state.align);
+					math_quat_normalize(&state.align);
+					state.have_align = true;
+				}
+			}
 			std::unique_lock<os::Mutex> lock(device->data_lock);
 			device->locked_data.last_known_pose =
 			    DeviceLastPose(sample.pose, result.Tcv_world_device, sample.timestamp_ns);
@@ -407,18 +425,29 @@ JointProcessor::process(JointExposure &exposure)
 			math_quat_normalize(&prior.orientation);
 		}
 		JointSolveResult result;
-		bool ok = timed([&] {
-			JointSolveParams params;
-			if (have_orientation) {
-				params.orientation_prior_sigma_deg = kOrientationPriorSigmaDeg;
-				if (this->oriented_bootstrap_enabled) {
-					params.min_coverage = kOrientedMinCoverage;
+		auto refine = [&] {
+			return timed([&] {
+				JointSolveParams params;
+				if (have_orientation) {
+					params.orientation_prior_sigma_deg = kOrientationPriorSigmaDeg;
+					if (this->oriented_bootstrap_enabled) {
+						params.min_coverage = kOrientedMinCoverage;
+					}
+					return joint_solve_refine(cameras, device->params.led_model, prior,
+					                          prior.orientation, params, result);
 				}
-				return joint_solve_refine(cameras, device->params.led_model, prior, prior.orientation,
-				                          params, result);
-			}
-			return joint_solve_refine(cameras, device->params.led_model, prior, params, result);
-		});
+				return joint_solve_refine(cameras, device->params.led_model, prior, params, result);
+			});
+		};
+		bool ok = refine();
+		// A tentative solve has not reached the device filter yet. A drifting filter position can
+		// therefore fail every refine, bootstrap again and reset confirmation until it expires.
+		// Retry from the latest tentative optical position, retaining the IMU orientation and gates.
+		// Prefer the predicted seed when it succeeds: it handles motion between exposures better.
+		if (!ok && have_position && state.confirmations < kConfirmSolves) {
+			prior.position = state.Tcv_world_device.position;
+			ok = refine();
+		}
 		if (ok) {
 			commit(device, result, false);
 		} else {

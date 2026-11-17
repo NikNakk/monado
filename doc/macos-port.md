@@ -6,6 +6,12 @@ SPDX-License-Identifier: BSL-1.0
 
 # macOS / PS VR2 Port Status
 
+The [17 November Sense confirmation investigation](macos-pssense-occlusion.md#recorded-prior-reproduction-and-confirmation-retry-17-november)
+reproduces in-view controller losses using recorded live priors. A tentative-track
+refine retry and a [filter-reset alignment refresh](macos-pssense-occlusion.md#lit-gap-diagnosis-stale-alignment-after-a-filter-reset-17-november)
+improve offline recovery and pass focused tests; one startup tradeoff, Linux CI
+and wearer acceptance remain. No installed runtime change.
+
 The [31 October acquisition-phase candidate](macos-wsi-acquire-phase.md)
 moved graphics WSI image acquisition from after submit to render entry. Desktop
 sessions passed, but headset pilots showed more source reuse and one

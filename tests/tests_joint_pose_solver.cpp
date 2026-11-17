@@ -5,6 +5,7 @@
 #include "joint_pose_solver.hpp"
 #include "stereo_bootstrap.hpp"
 #include "oriented_bootstrap.hpp"
+#include "t_constellation_tracker_internal.hpp"
 
 // M_PI on MSVC.
 #include "math/m_mathinclude.h"
@@ -869,4 +870,117 @@ TEST_CASE("Prior re-acquisition stays within its search radius")
 	INFO("accepted " << accepted << " of " << trials);
 	CHECK(trials == 40);
 	CHECK(accepted <= 2);
+}
+
+
+TEST_CASE("Tentative joint tracks confirm despite a drifting device position prior")
+{
+	using namespace xrt::tracking::constellation;
+	Ring ring;
+	Rig rig;
+	const xrt_pose truth = make_pose(Eigen::Quaterniond::Identity(), Eigen::Vector3d(0, 0, 0.5));
+	std::mt19937 rng(7);
+	auto blobs = render(rig, ring, truth, 0.0, 0, rng);
+	t_constellation_tracker_params params{};
+	params.flags = T_CONSTELLATION_TRACKER_FLAGS_DETERMINISTIC;
+	params.num_mosaics = 1;
+	params.mosaics[0].num_cameras = 4;
+	for (auto &camera : params.mosaics[0].cameras) {
+		camera.calibration.image_size_pixels = {508, 508};
+		camera.calibration.intrinsics[0][0] = camera.calibration.intrinsics[1][1] = 188.0;
+		camera.calibration.intrinsics[0][2] = camera.calibration.intrinsics[1][2] = 254.0;
+		camera.calibration.intrinsics[2][2] = 1.0;
+		camera.calibration.distortion_model = T_DISTORTION_OPENCV_RADTAN_8;
+		camera.pose_in_origin = XRT_POSE_IDENTITY;
+		camera.has_concrete_pose = true;
+	}
+	ConstellationTracker tracker(&params);
+	for (auto &camera : tracker.mosaics[0]->cameras) {
+		camera->model.calib = rig.model;
+	}
+	JointProcessor joint(&tracker, 4, true);
+	struct Device : t_constellation_tracker_device
+	{
+		int pushes{0};
+		xrt_space_relation *feedback{nullptr};
+		bool reset_orientation{false};
+	} device{};
+	device.push_optical_sample = [](t_constellation_tracker_device *base, t_constellation_tracker_sample *) {
+		auto *device = static_cast<Device *>(base);
+		if (++device->pushes == 1) {
+			device->feedback->pose.position.x -= 0.2f;
+			if (device->reset_orientation) {
+				// A source can change orientation frame when optical acceptance resets its filter.
+				device->feedback->pose.orientation = {0.0f, 0.0f, (float)M_SQRT1_2, (float)M_SQRT1_2};
+			}
+		}
+		return true;
+	};
+	struct Source : t_constellation_tracker_tracking_source
+	{
+		xrt_space_relation relation{};
+	} source{};
+	device.feedback = &source.relation;
+	device.reset_orientation = GENERATE(false, true);
+	math_pose_convert_from_opencv(&truth, &source.relation.pose);
+	source.relation.pose.position.x += 0.2f;
+	source.relation.relation_flags = (xrt_space_relation_flags)(XRT_SPACE_RELATION_POSITION_VALID_BIT |
+	                                                            XRT_SPACE_RELATION_ORIENTATION_VALID_BIT |
+	                                                            XRT_SPACE_RELATION_ORIENTATION_TRACKED_BIT);
+	source.get_tracked_pose = [](t_constellation_tracker_tracking_source *base, int64_t, xrt_space_relation *out) {
+		*out = static_cast<Source *>(base)->relation;
+	};
+	t_constellation_tracker_device_params dparams{};
+	dparams.led_model = ring.model;
+	// The driver API takes an OpenXR model; the solver fixture and blobs use OpenCV.
+	auto xr_leds = ring.leds;
+	for (auto &led : xr_leds) {
+		math_vec3_convert_from_opencv(&led.position, &led.position);
+		math_vec3_convert_from_opencv(&led.normal, &led.normal);
+	}
+	dparams.led_model.leds = xr_leds.data();
+	dparams.tracking_source = &source;
+	const auto id = tracker.addDevice(&dparams, &device);
+	auto &state = joint.devices[id];
+	state.tracking = true;
+	state.confirmations = 1;
+	state.Tcv_world_device = truth;
+	state.last_solved_ns = 1'000'000'000;
+	state.have_align = true;
+	state.align = XRT_QUAT_IDENTITY;
+
+	const bool missing_confirmation = GENERATE(false, true);
+	for (int frame = 1; frame <= (missing_confirmation ? 2 : 4); frame++) {
+		JointExposure exposure;
+		exposure.timestamp_ns = 1'000'000'000 + frame * 16'666'667;
+		exposure.samples.resize(4);
+		for (size_t c = 0; c < 4; c++) {
+			CameraSample sample{};
+			sample.timestamp_ns = exposure.timestamp_ns;
+			sample.mosaic_index = 0;
+			sample.camera_index = c;
+			xrt_pose camera_pose;
+			math_pose_convert_from_opencv(&rig.cam_poses[c], &camera_pose);
+			sample.Txr_world_cam = camera_pose;
+			if (frame == 2 && missing_confirmation) {
+				// A missing confirming exposure must not publish the tentative pose.
+				sample.blob_count = 0;
+			} else {
+				sample.blob_count = blobs[c].size();
+				std::copy(blobs[c].begin(), blobs[c].end(), sample.blobs);
+			}
+			exposure.samples[c] = sample;
+		}
+		joint.process(exposure);
+		if (frame == 1) {
+			CHECK(device.pushes == 0);
+			CHECK(state.confirmations == 2);
+		} else if (frame == 2) {
+			const bool visible = exposure.samples[0]->blob_count != 0;
+			CHECK(device.pushes == (visible ? 1 : 0));
+		} else {
+			CHECK(device.pushes == frame - 1);
+			CHECK(state.confirmations == (uint32_t)frame + 1);
+		}
+	}
 }

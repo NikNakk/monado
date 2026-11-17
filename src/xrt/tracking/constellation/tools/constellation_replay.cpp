@@ -1031,6 +1031,9 @@ struct FakeDevice
 	FILE *csv{nullptr};
 	//! --tracker-filter: the driver's IMU + optical EKF provides the prior instead.
 	t_imu_optical_filter *filter{nullptr};
+	//! Diagnostic open-loop replay: use the exact live prior, independent of replay pushes.
+	bool recorded_prior{false};
+	uint32_t missing_recorded_priors{0};
 	std::vector<const xrt_imu_sample *> imu;
 	size_t next_imu{0};
 };
@@ -1076,6 +1079,16 @@ fake_device_get(t_constellation_tracker_tracking_source *source, int64_t when_ns
 	 */
 	FakeDevice *fake = fake_device_of_source(source);
 	*out = XRT_SPACE_RELATION_ZERO;
+	if (fake->recorded_prior) {
+		auto it = std::lower_bound(fake->recorded.begin(), fake->recorded.end(), when_ns,
+		                           [](const auto &p, int64_t t) { return p.first < t; });
+		if (it != fake->recorded.end() && it->first == when_ns) {
+			*out = it->second;
+		} else {
+			fake->missing_recorded_priors++;
+		}
+		return;
+	}
 	if (fake->filter != nullptr && t_imu_optical_filter_get_relation(fake->filter, when_ns, out)) {
 		return;
 	}
@@ -1095,7 +1108,8 @@ fake_device_get(t_constellation_tracker_tracking_source *source, int64_t when_ns
 }
 
 int
-replay_tracker(const DatasetReader &dataset, const char *csv_path, bool use_filter, double imu_angle_deg)
+replay_tracker(
+    const DatasetReader &dataset, const char *csv_path, bool use_filter, double imu_angle_deg, bool recorded_prior)
 {
 	FILE *csv = csv_path ? std::fopen(csv_path, "w") : nullptr;
 	if (csv) {
@@ -1176,6 +1190,7 @@ replay_tracker(const DatasetReader &dataset, const char *csv_path, bool use_filt
 		fake->source.get_tracked_pose = fake_device_get;
 		fake->source.device = fake.get();
 		fake->csv = csv;
+		fake->recorded_prior = recorded_prior;
 		for (const DatasetDeviceTracking &t : dataset.device_tracking) {
 			if (t.device_id == device.id) {
 				xrt_space_relation relation = XRT_SPACE_RELATION_ZERO;
@@ -1271,6 +1286,7 @@ replay_tracker(const DatasetReader &dataset, const char *csv_path, bool use_filt
 
 	std::printf("tracker replay (joint path): %zu frames in %.2f s (%.0f us per exposure)\n", order.size(), seconds,
 	            1e6 * seconds / (double)std::max<size_t>(1, exposures.size()));
+	int status = 0;
 	for (auto &fake : fakes) {
 		std::printf("  device %d: %u pushed of %zu exposures; cameras:", (int)fake->id, fake->pushes,
 		            exposures.size());
@@ -1278,8 +1294,13 @@ replay_tracker(const DatasetReader &dataset, const char *csv_path, bool use_filt
 			std::printf(" %u:%u", cams, count);
 		}
 		std::printf("; rms px p50 %.3f p95 %.3f\n", fake->rms_px.pct(0.5), fake->rms_px.pct(0.95));
+		if (recorded_prior) {
+			std::printf("  device %d: %u missing exact recorded priors\n", (int)fake->id,
+			            fake->missing_recorded_priors);
+			status = fake->missing_recorded_priors != 0 ? 1 : status;
+		}
 	}
-	return 0;
+	return status;
 }
 
 /*
@@ -1538,7 +1559,8 @@ main(int argc, char **argv)
 	if (argc < 2) {
 		std::fprintf(
 		    stderr,
-		    "usage: %s DATASET.ctd [--m1] [--seed-recorded] [--csv OUT.csv] [--tracker] [--tracker-csv "
+		    "usage: %s DATASET.ctd [--m1] [--seed-recorded] [--csv OUT.csv] "
+		    "[--tracker | --tracker-filter | --tracker-recorded-prior] [--tracker-csv "
 		    "OUT.csv] [--upstream-distortion-codes] [--calibration CAL.json [--recorded-calibration "
 		    "SESSION/calibration.json]] [--blobs-csv "
 		    "OUT.csv] [--residuals-csv OUT.csv] [--led-offsets OFFSETS.csv] [--geometry PREFIX] [--filter-eval "
@@ -1551,6 +1573,7 @@ main(int argc, char **argv)
 	bool m1 = false;
 	bool tracker = false;
 	bool tracker_filter = false;
+	bool tracker_recorded_prior = false;
 	const char *tracker_csv = nullptr;
 	const char *tracking_csv = nullptr;
 	const char *geometry_prefix = nullptr;
@@ -1583,6 +1606,9 @@ main(int argc, char **argv)
 		} else if (arg == "--tracker-filter") {
 			tracker = true;
 			tracker_filter = true;
+		} else if (arg == "--tracker-recorded-prior") {
+			tracker = true;
+			tracker_recorded_prior = true;
 		} else if (arg == "--tracker") {
 			tracker = true;
 		} else if (arg == "--filter-eval" && i + 1 < argc) {
@@ -1640,6 +1666,11 @@ main(int argc, char **argv)
 			compare_out = argv[++i];
 			compare = true;
 		}
+	}
+
+	if (tracker_filter && tracker_recorded_prior) {
+		std::fprintf(stderr, "--tracker-filter and --tracker-recorded-prior are mutually exclusive\n");
+		return 2;
 	}
 
 	try {
@@ -1776,7 +1807,10 @@ main(int argc, char **argv)
 			             : status;
 		}
 		if (tracker) {
-			status = replay_tracker(dataset, tracker_csv, tracker_filter, imu_angle_deg) != 0 ? 1 : status;
+			status = replay_tracker(dataset, tracker_csv, tracker_filter, imu_angle_deg,
+			                        tracker_recorded_prior) != 0
+			             ? 1
+			             : status;
 		}
 		return status;
 	} catch (const std::exception &e) {

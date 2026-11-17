@@ -274,3 +274,240 @@ counts are not available from this run; `constellation.ctd` is kept for replay.
 Following this run, the three settings are 6DoF defaults (`sense_tracking_defaults`),
 each still overridable; a unit test checks they are applied and that an explicit
 value wins.
+
+## Recent in-view loss log review (17 November 2026)
+
+Read-only review of existing user runs, both reporting service version
+`v25.1.0-2500-ga185d42d5` (not this checkout's current HEAD):
+`~/Code/alyx-native/runs/play-20261115T194853Z/monado-service.log` and
+`~/Code/alyx-native/runs/sourcevr-20261116T232419Z/monado-service.log`.
+The latter's `run.json` identifies Half-Life 2 / SourceVR, 23:24–23:45 UTC.
+Both controllers attach in left/right order, giving tracker IDs 0/1.
+
+| Run | Left recovered gaps / total | Right recovered gaps / total | Right entirely `acquiring` |
+| --- | --- | --- | --- |
+| 15 November play | 45 / 59.43 s | 123 / 83.10 s | 84 / 25.81 s |
+| 16 November SourceVR | 45 / 31.85 s | 85 / 41.74 s | 62 / 19.07 s |
+
+These are optical confirmation gaps of at least 250 ms, not application tracking
+outage durations; short and unfinished losses are excluded. Both right medians
+are 317 ms. `acquiring` means an optical candidate was solved but remained
+tentative, below the three-solve confirmation gate. Thus most logged right gaps
+are not simply a lack of visible blobs. Repeated bootstrap/failed continuation
+is a stronger investigation target than indiscriminately relaxing acceptance.
+The summaries alone cannot establish why confirmation repeatedly fails.
+
+In SourceVR, 81/85 right gaps start with the last confirmed position at least
+50 px inside two or more camera views. Line 35511 records a 1.886 s gap starting
+207 px inside three views: 17 `dark_in_view`, then 93 `dark_unpredicted`
+exposures and two acquiring exposures. Line 621 has a similar 1.718 s gap,
+193 px inside four views. These support investigating in-view LED detection or
+illumination as a separate failure mode. Geometry is predicted, not proof of
+an unobstructed ring throughout the gap; `dark_unpredicted` means the position
+prediction expired, not that the controller moved out of view.
+
+Neither log reports a controller disconnect, HID error or output-write failure
+after initial connection. Detailed HID/IMU timing and application `POSE_STATE`
+diagnostics are absent, so transport health and application-visible loss duration
+cannot be fully verified. Both logs also report right LED timing-lock loss for
+dim detections and failed hinted rescans; in SourceVR these occur near the end
+(lines 37732/37869), not at every short loss. Successful LED writes would not
+by themselves prove pulse/exposure overlap.
+
+Next useful capture: blob/IMU CTD plus per-exposure bootstrap/refine/confirmation
+diagnostics and `PSSENSE_POSE_DIAG=1`, with a wearer time marker for an unexpected
+in-view right loss. This distinguishes tentative-solve churn, missing LED
+detections, and filter/application rejection. No runtime settings were changed
+and no hardware was started during this review.
+
+### Existing recordings contain matching candidates (17 November)
+
+The October 25 `20261025-controller-survey-both-mode16-v3` recording has the
+needed CTD blobs, camera geometry, IMU, live `CONSTELLATION_FUSED_ACCEPT` and
+`POSE_STATE` records, and guided application pose/phase CSVs. Its live log has
+17 right-hand recovered gaps starting at least 50 px inside two or more views;
+11 are entirely `acquiring`. One is before survey start; the remainder include
+ordinary ready/recover phases, not just deliberate shoulder occlusions.
+
+Examples, seconds from the first recorded exposure (`149001109987900` ns):
+
+| Start, s | Right-hand phase | Gap | Acquiring exposures | Start views / margin | Live service.log line |
+| --- | --- | --- | --- | --- | --- |
+| 303.117 | Low, ready | 317.0 ms | 18/18 | 4 / 179 px | 35645 |
+| 312.109 | Low, hold | 650.7 ms | 2/38 | 3 / 124 px | 36766 |
+| 315.446 | Low, recover | 317.0 ms | 17/18 | 4 / 241 px | 37121 |
+| 351.448 | Side, ready | 317.0 ms | 18/18 | 4 / 178 px | 41119 |
+| 368.682 | Cross-body, ready | 400.4 ms | 23/23 | 3 / 226 px | 43189 |
+
+For the first example, the driver's optical age reaches 242.6 ms (`inertial`),
+then 297.1 ms (`orientation_only`), with fresh 11.5 ms IMU input. It returns
+`tracked` immediately after optical acceptance. Filter rejections remain at
+five through the gap, while accepted updates remain at 17,564 until recovery:
+this instance loses confirmed frontend output, rather than repeatedly rejecting
+delivered optical poses in the filter. The 650.7 ms low/hold gap is a contrasting
+case: 17 dark-in-view and 19 dark-unpredicted exposures, with few detections.
+
+The existing measured-model `--tracker-filter` replay accepts 20 poses through
+the first 317 ms interval, instead of the live confirmation drought. Repeating
+it with prior reacquisition enabled also accepts 20, as well as 19, 20 and 25
+poses through the low/recover, side/ready and cross-body/ready intervals.
+Thus toggling prior reacquisition alone does not reproduce these failures.
+Replay rebuilds its own EKF/prior history and runs deterministically; different
+live prediction, delivery timing, settings or source revisions remain possible.
+This is a useful recorded live-versus-replay discrepancy, not yet a root cause
+or evidence that changing a runtime setting fixes it.
+
+The offline run uses the same executable and measured-model offsets as the
+November LED-model comparison, adding only
+`CONSTELLATION_TRACKER_PRIOR_REACQUIRE=1`. Commands, replay output and candidate
+timestamps are in ignored
+`build/arm64/controller-evidence/20261117-existing-loss-review/`. No new wearer
+recording is needed to begin investigating these cases.
+
+### Recorded-prior reproduction and confirmation retry (17 November)
+
+**A drifting live position prior can prevent a visible tentative track from
+confirming.** The offline tool now accepts `--tracker-recorded-prior`, returning
+the exact recorded per-exposure device relation instead of generating a new
+prior. It reports missing exact timestamps and fails if any are missing; it
+cannot be combined with `--tracker-filter`. This is an open-loop diagnostic:
+replayed optical acceptance does not alter the supplied recorded prior.
+
+On the survey, using the measured model and oriented/prior reacquisition enabled,
+this reproduces the live loss at `149304544050716` ns exactly: 317.0 ms,
+18/18 acquiring, four views, 179 px margin. The recorded position differs from
+the independent closed-loop optical replay by about 22 mm on the first missing
+exposure, increasing to 83 mm before validity expires. This comparison has no
+physical ground truth, but the reproduction establishes that the recorded prior
+is sufficient to trigger the live confirmation failure.
+
+Mechanism: a bootstrap resets the tentative track to one confirmation. Its pose
+is withheld from the device filter until three solves agree. The next refine
+uses the filter's position, which has not received that tentative optical
+correction; if that refine fails but bootstrap succeeds again, confirmation
+restarts at one. The process can repeat until the filter position expires at
+300 ms. Repeated 317 ms gaps are consistent with that expiry plus the remaining
+confirmation exposure, rather than a 317 ms transport outage.
+
+Prepared in the working tree over `b6758b7d6`: only after a normal refine fails,
+a tentative track retries from its last optical position. It retains the same
+IMU orientation prior, optical acceptance limits and three-solve confirmation.
+Confirmed-track prediction, Linux stream defaults and the legacy Rift path are
+unchanged. An initial always-use-optical seed was inferior in moving-hand
+recordings and was replaced by this narrower retry; no experiment toggle remains.
+
+With the exact recorded prior, right survey gaps of at least 250 ms fall from
+19 to 7; accepted right poses increase from 28,634 to 28,695, with no baseline
+right poses removed. Left gains 76 with none removed. The open-loop input still
+forces stale predictions after replay accepts a pose, so this is not a prediction
+of live recovery time.
+
+Across the same eight measured-model **closed-loop** recordings as the LED model
+comparison (oriented bootstrap on, prior reacquisition off), accepted poses change
+from 139,545 to 139,638: 148 added timestamps and 55 removed. Gaps above 100 ms
+fall from 124 to 119, and gaps at least 250 ms from 95 to 85. In OpenBrush the
+right-hand latter count is 13 → 9; in the survey it is 8 → 7. A hard-case run
+(`20261004-000405-hard-cases`) delays initial right acquisition by about 0.7 s
+(42 removed right samples), so this is not a blanket non-regression claim.
+There is no independent ground truth or new hardware validation.
+
+The synthetic regression starts a tentative ring with a 20 cm erroneous device
+position prior. It checks confirmation without premature publication, plus
+withholding when the confirming exposure has no blobs. It fails three assertions
+against the original joint source, linked separately into the same test binary,
+and passes with the retry. All five focused CTest suites pass: joint solver,
+filter, pose metrics (including legacy isolation), dataset and Sense clock.
+The replay and test targets build, and `git diff --check` passes. Linux CI and
+wearer acceptance remain pending. Nothing was installed or started on hardware.
+
+Evidence stays in `build/arm64/controller-evidence/20261117-existing-loss-review/`:
+`recorded-prior-receipt.json` gives the reproduction command/environment;
+`recorded-prior.log` is the original-source reproduction;
+`recorded-prior-fallback.log`/`.csv` are the retry results;
+`fallback-scores.csv` compares all eight sessions. For a closed-loop comparison,
+use the LED-model comparison's `local-receipt.json` commands with only a new
+output path. Prefer investigating the remaining recorded dark/detection losses
+before requesting another wearer run solely to diagnose this confirmation loop.
+
+### What remains in the 85 replay gaps (17 November)
+
+These are both hands across eight recordings, not 85 unexpected right-hand
+failures: 52 left and 33 right, including intentional occlusion. Classifying each
+gap by its largest exposure category gives 43 `dark_unpredicted`, 20
+`dark_in_view`, 14 `lit_single`, four `acquiring`, three `dark_out_of_view` and
+one `lit_multi`. No remaining gap is entirely acquiring. These are descriptive
+categories, not mutually proven physical causes. About 79% of missing exposures
+have insufficient excess LED-shaped detections; expired predictions dominate
+that figure and do not establish out-of-view motion.
+
+The guided recording associates its 8.425 s left and 6.440 s right gaps with
+intentional behind-shoulder movement. It also retains unexpected-looking
+in-view cases: right low/hold (650.7 ms) and side/hold (667.3 ms). Predicted
+visibility alone cannot exclude ring occlusion or pulse/exposure misalignment.
+
+The best correspondence/reacquisition investigation target is
+`20261004-000405-hard-cases`, left, 8.926 s after the first exposure: a 3.387 s
+gap contains 89 multi-camera-lit exposures (about 1.5 s) but only two tentative
+solves, starting three views in and 189 px from an edge. This is more informative
+than treating a dark-unpredicted long gap as proven in-view failure. Four gaps
+are still mostly acquiring, supporting further investigation of candidate
+consistency/confirmation, without relaxing the mirror-ring safety gates.
+Per-gap fields, timestamps and source log lines are retained as
+`20261117-existing-loss-review/remaining-losses.json` in the evidence directory.
+
+### Lit-gap diagnosis: stale alignment after a filter reset (17 November)
+
+The multi-camera-lit interval above reveals a second mechanism. Raw saved camera
+frames near 9.04, 10.54, 11.95 and 12.45 s show two rings lit, then one ring's
+LEDs absent, then both lit again. Thus the 3.387 s interval mixes missing
+illumination/detections with failed reacquisition after the LEDs return; it is
+not continuous proof of an unobstructed lit ring.
+
+In an isolated diagnostic build, orientation-guided failed refinements reach
+roughly 0.95–1.74 px RMS, above the unchanged 0.8 px acquisition limit. They are
+not rejected by the rival-hand ambiguity check. Increasing the search budget
+tenfold and refining more candidates does not resolve them. As a diagnostic
+using future information, seeding from the first recovered optical pose fits
+earlier lit exposures with 21–22 matches and roughly 0.55 px RMS. Good fits
+therefore exist under the original acceptance gates; these are missed by the
+reacquisition path, rather than requiring a higher RMS limit.
+
+The cause is the tracker/source orientation-frame handoff. Before delivering a
+confirmed optical pose, the joint tracker computes `align = optical *
+inverse(predicted)`. Accepting that pose can reinitialise the source's EKF and
+change its orientation at the same exposure. The tracker retains the pre-update
+alignment and applies it again on the next exposure. In a controlled trial that
+preserves all earlier processing and changes only the target period, the source
+orientation shifts **68.45°** at `2757346052299500` ns upon acceptance. The stale
+aligned orientation then differs from an independently seeded optical fit by
+about 69° during the later lit period. A subsequent stereo bootstrap clears it.
+
+The working-tree fix refreshes the orientation alignment from the source after
+an accepted optical delivery. Sources with stable orientation frames retain the
+same mapping; fused sources that correct/reset their orientation no longer get
+the old correction applied twice. Acquisition thresholds, mirror-hand gates,
+confirmation count and defaults are unchanged. This only affects the opt-in
+joint tracker; no service was installed or started.
+
+Compared with the position-retry candidate, the target interval now contains
+90 accepted left poses instead of one. Its remaining long gap is 1.718 s
+(`2757347053331200`–`2757348771730100` ns), consistent with the sparse/dark middle
+period, rather than 3.387 s spanning the return of visible LEDs. Across the same
+eight closed-loop recordings, total accepted poses increase from 139,638 to
+139,926, gaps ≥250 ms change 85 → 83, and gaps >100 ms change 119 → 115. One
+distance-run gap splits into two as intervening poses become available, showing
+why gap counts alone are not an accuracy or time-with-tracking metric. There is
+still no independent pose ground truth or wearer acceptance.
+
+The synthetic test now also changes the source's orientation frame on its first
+optical acceptance and verifies uninterrupted confirmation/output on subsequent
+exposures, while preserving the missing-confirmation case. It fails four
+assertions against the position-retry implementation without alignment refresh;
+the final implementation passes all 20 assertions. All five focused CTest suites
+pass and both targets build. Linux CI and hardware validation remain pending.
+
+Diagnostic derivative sources/binaries, sampled raw frames, `frames.png`, search
+probe logs, before/after poses, `alignment-scores.csv` and the negative-control
+test are under `20261117-existing-loss-review/lit-gap/` in the evidence directory.
+Search-limit experiments remain confined to those offline derivative builds;
+they do not change runtime source or add environment switches.
