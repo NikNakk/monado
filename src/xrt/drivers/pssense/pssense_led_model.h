@@ -14,8 +14,9 @@
 #include "math/m_api.h"
 
 
-static const float LED_RADIUS_M = 0.006f; // 6mm
-static const float LED_VISIBILITY_ANGLE = DEG_TO_RAD(90);
+// C static initializers require constant expressions (MSVC does not fold const variables).
+#define LED_RADIUS_M 0.006f // 6mm
+#define LED_VISIBILITY_ANGLE ((float)DEG_TO_RAD(90))
 static const struct t_constellation_tracker_led_model_match_parameters DEFAULT_MATCH_PARAMETERS = {
     .min_leds_for_correspondence_search_without_prior = 7,
     .min_leds_for_correspondence_search_with_prior = 5,
