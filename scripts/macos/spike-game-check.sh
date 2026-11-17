@@ -22,7 +22,9 @@ set -euo pipefail
 spike=${0:A:h:h:h}
 bridge=$HOME/Code/macos-wine-xr
 rig=$HOME/Windows
-service=${spike}/build/arm64/src/xrt/targets/service/monado-service
+# SPIKE_SERVICE_BUILD=build/svc selects the simulated-only service (no headset needed).
+service_build=${spike}/${SPIKE_SERVICE_BUILD:-build/arm64}
+service=${service_build}/src/xrt/targets/service/monado-service
 client_json=${spike}/build/wine-native/monado-x64/openxr_monado-dev.json
 client_lib=${spike}/build/wine-native/monado-x64/src/xrt/targets/openxr/libopenxr_monado.dylib
 installed=$HOME/Library/LaunchAgents/org.freedesktop.monado.service.plist
@@ -48,9 +50,11 @@ export XRT_MACOS_METAL_IPC_SERVICE_NAME=org.freedesktop.monado.metal-ipc.spike-g
 export XDG_RUNTIME_DIR=/private/tmp/monado-spike-game.${UID}.$$
 mkdir -p "${XDG_RUNTIME_DIR}"
 
-python3 - "${installed}" "${out}" "${label}" "${service}" "${SPIKE_VK:-moltenvk}" <<'PY'
+simulated=0
+grep -q '^XRT_BUILD_DRIVER_PSVR2:BOOL=ON' "${service_build}/CMakeCache.txt" || simulated=1
+python3 - "${installed}" "${out}" "${label}" "${service}" "${SPIKE_VK:-moltenvk}" "${simulated}" <<'PY'
 import os, plistlib, sys
-installed, out, label, service, vk = sys.argv[1:]
+installed, out, label, service, vk, simulated = sys.argv[1:]
 with open(installed, 'rb') as f:
     base = plistlib.load(f)
 env = dict(base.get('EnvironmentVariables', {}))
@@ -64,6 +68,13 @@ elif vk != 'installed':
 env.update(XDG_RUNTIME_DIR=os.environ['XDG_RUNTIME_DIR'],
            XRT_MACOS_METAL_IPC_SERVICE_NAME=os.environ['XRT_MACOS_METAL_IPC_SERVICE_NAME'],
            PSVR2_TIMING_TRACE_DIR=out + '/traces', XRT_LOG='info')
+# SPIKE_SERVICE_ENV="NAME=VALUE ..." adds service settings, for example sample logging.
+for item in os.environ.get('SPIKE_SERVICE_ENV', '').split():
+    name, _, value = item.partition('=')
+    env[name] = value
+if simulated == '1':
+    env['SIMULATED_ENABLE'] = '1'
+    print('Simulated HMD: this service build has no PS VR2 driver')
 plist = dict(Label=label, ProgramArguments=[service], RunAtLoad=False, ProcessType='Interactive',
              MachServices={env['XRT_MACOS_METAL_IPC_SERVICE_NAME']: True}, EnvironmentVariables=env,
              StandardOutPath=out + '/service.log', StandardErrorPath=out + '/service.log')
