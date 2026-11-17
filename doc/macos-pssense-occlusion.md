@@ -511,3 +511,27 @@ probe logs, before/after poses, `alignment-scores.csv` and the negative-control
 test are under `20261117-existing-loss-review/lit-gap/` in the evidence directory.
 Search-limit experiments remain confined to those offline derivative builds;
 they do not change runtime source or add environment switches.
+
+### Integration push and installed test build (17 November)
+
+At the user's request, the fixes and evidence were committed as `c777eeb73` and
+pushed to `origin/macos-upstream-clean`, fast-forwarding its existing local
+integration history. The separate in-progress LED-model documentation/results
+were left uncommitted. The installed ARM64 service/native runtime and the
+`build/x86_64` Wine client now carry `v25.1.0-2701-gc777eeb73`.
+
+Both architecture builds and the complete native install build pass. All 96
+native CTests pass with host IPC/GPU access. Installed ARM64 and translated x64
+runtime load, loader negotiation and extension enumeration pass (61/57
+extensions), without creating a headset instance/session. The registered service
+is stopped and starts on demand; all saved LaunchAgent environment settings
+match the pre-install backup. Hardware acceptance remains for the user.
+
+The old prefix and plist are saved under
+`build/arm64/local-install-backups/20261117-203024-sense-recovery/`. Binary hashes
+and source identity are in the investigation's `installation.json`. The initial
+sandboxed prefix copy was denied; the authorised host install succeeded. The
+registration helper exhausted its transient launchd bootstrap-error-5 retries;
+a subsequent direct bootstrap succeeded and the loaded environment was verified.
+No runtime/source change was needed for registration. The installation is also
+recorded in [the service notes](macos-service-direct-xpc.md#sense-recovery-installation--2026-11-17).
