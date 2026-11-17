@@ -153,18 +153,6 @@ ipc_metal_xpc_end_shared_event_request(void **out_metal_shared_event);
 void
 ipc_metal_xpc_discard_token(uint64_t token);
 
-/*!
- * Encode a broker token in xrt_image_native metadata for the existing
- * client-side import_swapchain call. The native handles remain invalid; a
- * macOS IPC shim recognizes the token before ordinary handle transport.
- */
-void
-ipc_metal_xpc_make_token_images(uint64_t token, uint32_t image_count, struct xrt_image_native *out_images);
-
-/*! True if all images contain one valid Metal-broker token and invalid handles. */
-bool
-ipc_metal_xpc_get_token_from_images(const struct xrt_image_native *images, uint32_t image_count, uint64_t *out_token);
-
 #endif // XRT_OS_OSX
 
 #ifdef __cplusplus

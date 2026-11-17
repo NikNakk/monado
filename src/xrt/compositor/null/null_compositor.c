@@ -111,7 +111,10 @@ static const char *required_device_extensions[] = {
 
 static const char *optional_device_extensions[] = {
     VK_GOOGLE_DISPLAY_TIMING_EXTENSION_NAME, //
-    VK_EXT_GLOBAL_PRIORITY_EXTENSION_NAME,   //
+#if defined(XRT_OS_OSX)
+    "VK_KHR_portability_subset", // Spike: required when the device advertises it.
+#endif
+    VK_EXT_GLOBAL_PRIORITY_EXTENSION_NAME, //
 
 // Platform version of "external_fence" and "external_semaphore"
 #if defined(XRT_GRAPHICS_SYNC_HANDLE_IS_FD)      // Optional
@@ -190,6 +193,10 @@ compositor_init_vulkan(struct null_compositor *c)
 	// Consumes the builder and returns a new list.
 	struct u_extension_list *required_instance_ext_list =
 	    u_extension_list_builder_build(&required_instance_ext_builder);
+#if defined(XRT_OS_OSX) && defined(VK_KHR_portability_enumeration)
+	// Spike: MoltenVK is a portability driver and is only enumerated on request.
+	u_extension_list_builder_append(optional_instance_ext_builder, VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME);
+#endif
 	struct u_extension_list *optional_instance_ext_list =
 	    u_extension_list_builder_build(&optional_instance_ext_builder);
 

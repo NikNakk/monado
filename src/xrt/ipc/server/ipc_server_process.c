@@ -1154,6 +1154,7 @@ ipc_server_handle_client_connected(struct ipc_server *vs, xrt_ipc_handle_t ipc_h
 	ics->local_space_overseer_index = UINT32_MAX;
 	ics->client_state.id = id;
 	ics->imc.ipc_handle = ipc_handle;
+	ics->imc.peer_pid = peer_pid;
 	ics->peer_pid = peer_pid;
 	ics->server = vs;
 	ics->server_thread_index = cs_index;

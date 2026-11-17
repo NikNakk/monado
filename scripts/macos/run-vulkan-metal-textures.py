@@ -35,6 +35,7 @@ def main():
     parser.add_argument('--unsupported-cube', action='store_true')
     parser.add_argument('--suite', action='store_true', help='Concurrent healthy client, failed overlay and replacement')
     parser.add_argument('--repeat', type=int, default=1, help='Sessions in one process, runtime pinned (1–16)')
+    parser.add_argument('--service-no-shareable', action='store_true', help='Spike negative control: service allocates non-shareable textures')
     parser.add_argument('--child', action='store_true', help=argparse.SUPPRESS)
     args = parser.parse_args()
     if not 1 <= args.repeat <= 16:
@@ -103,6 +104,8 @@ def main():
                 command += ['--sample-interval', '15']
             if args.headset:
                 command += ['--headset']
+            if args.service_no_shareable:
+                command += ['--service-env', 'XRT_MACOS_VK_SHAREABLE_TEXTURES=0']
             child = Path(temporary)/'client.py'
             child.write_text('import runpy, sys\n' +
                              f'sys.argv = {[str(Path(__file__).resolve()), *sys.argv[1:], "--child"]!r}\n' +

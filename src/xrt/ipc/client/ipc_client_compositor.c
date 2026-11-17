@@ -341,18 +341,13 @@ swapchain_server_import(struct ipc_client_compositor *icc,
 	}
 
 	// This does not consume the handles, it copies them.
-#ifdef XRT_IPC_MACOS_METAL_IMPORT
-	// Metal textures go through the Metal import calls, everything else as usual.
-	xret = ipc_metal_call_swapchain_import_or_default( //
-#else
 	xret = ipc_call_swapchain_import( //
-#endif
-	    icc->ipc_c,  // connection
-	    info,        // in
-	    &args,       // in
-	    handles,     // handles
-	    image_count, // handles
-	    &id);        // out
+	    icc->ipc_c,                   // connection
+	    info,                         // in
+	    &args,                        // in
+	    handles,                      // handles
+	    image_count,                  // handles
+	    &id);                         // out
 	if (xret == XRT_ERROR_SWAPCHAIN_FLAG_VALID_BUT_UNSUPPORTED) {
 		// Don't error print this, not an error.
 		IPC_DEBUG(icc->ipc_c, "Got XRT_ERROR_SWAPCHAIN_FLAG_VALID_BUT_UNSUPPORTED");

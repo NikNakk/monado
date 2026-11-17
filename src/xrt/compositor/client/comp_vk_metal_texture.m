@@ -32,22 +32,12 @@ client_vk_metal_texture_required(const struct xrt_swapchain_create_info *info)
 	return info->array_size != 1 || info->face_count != 1 || info->sample_count != 1 || info->mip_count != 1 ||
 	       (vk_csci_get_barrier_aspect_mask(info->format) & VK_IMAGE_ASPECT_DEPTH_BIT) != 0;
 }
-static MTLPixelFormat
-format_to_metal(VkFormat format)
+bool
+client_vk_unified_handle_usable(const struct xrt_compositor_native *xcn, const struct xrt_swapchain_create_info *info)
 {
-	switch (format) {
-	case VK_FORMAT_R8G8B8A8_UNORM: return MTLPixelFormatRGBA8Unorm;
-	case VK_FORMAT_R8G8B8A8_SRGB: return MTLPixelFormatRGBA8Unorm_sRGB;
-	case VK_FORMAT_B8G8R8A8_UNORM: return MTLPixelFormatBGRA8Unorm;
-	case VK_FORMAT_B8G8R8A8_SRGB: return MTLPixelFormatBGRA8Unorm_sRGB;
-	case VK_FORMAT_R16G16B16A16_UNORM: return MTLPixelFormatRGBA16Unorm;
-	case VK_FORMAT_R16G16B16A16_SFLOAT: return MTLPixelFormatRGBA16Float;
-	case VK_FORMAT_R32_SFLOAT: return MTLPixelFormatR32Float;
-	case VK_FORMAT_D16_UNORM: return MTLPixelFormatDepth16Unorm;
-	case VK_FORMAT_D32_SFLOAT: return MTLPixelFormatDepth32Float;
-	case VK_FORMAT_D32_SFLOAT_S8_UINT: return MTLPixelFormatDepth32Float_Stencil8;
-	default: return MTLPixelFormatInvalid;
-	}
+	(void)xcn;
+	// Cube, MSAA and mipped images have no supported Metal texture path.
+	return info->face_count == 1 && info->sample_count == 1 && info->mip_count == 1;
 }
 struct client_vk_metal_texture_context *
 client_vk_metal_texture_context_create(struct xrt_compositor_native *xcn, struct vk_bundle *vk)
@@ -90,64 +80,6 @@ client_vk_metal_texture_context_destroy(struct client_vk_metal_texture_context *
 	[c->device release];
 	atomic_fetch_sub_explicit(&context_count, 1, memory_order_relaxed);
 	free(c);
-}
-xrt_result_t
-client_vk_metal_texture_swapchain_create(struct client_vk_metal_texture_context *c,
-                                         const struct xrt_swapchain_create_info *info,
-                                         struct xrt_swapchain_metal **out_swapchain,
-                                         struct xrt_swapchain_native **out_native)
-{
-	*out_swapchain = NULL;
-	*out_native = NULL;
-	if (!c || info->face_count != 1 || info->sample_count != 1 || info->mip_count != 1 || info->array_size == 0 ||
-	    (info->create & XRT_SWAPCHAIN_CREATE_PROTECTED_CONTENT) ||
-	    (info->bits & XRT_SWAPCHAIN_USAGE_MUTABLE_FORMAT))
-		return XRT_ERROR_SWAPCHAIN_FLAG_VALID_BUT_UNSUPPORTED;
-	MTLPixelFormat format = format_to_metal(info->format);
-	if (format == MTLPixelFormatInvalid)
-		return XRT_ERROR_SWAPCHAIN_FORMAT_UNSUPPORTED;
-	if (!c->metal) {
-		c->queue = [c->device newCommandQueue];
-		if (!c->queue)
-			return XRT_ERROR_ALLOCATION;
-#ifdef XRT_FEATURE_SERVICE
-		c->metal = c->native->is_remote ? client_metal_service_compositor_create(c->native, c->device, c->queue)
-		                                : client_metal_direct_compositor_create(c->native, c->device, c->queue);
-#else
-		c->metal = client_metal_direct_compositor_create(c->native, c->device, c->queue);
-#endif
-		// The existing factories can fall back to IOSurface on wrapper allocation
-		// failure. That fallback cannot represent the requested array/depth shape.
-		if (c->metal && !client_metal_compositor_has_texture_provider(c->metal)) {
-			struct xrt_compositor *base = &c->metal->base;
-			xrt_comp_destroy(&base);
-			c->metal = NULL;
-		}
-		if (!c->metal) {
-			[c->queue release];
-			c->queue = nil;
-			return XRT_ERROR_ALLOCATION;
-		}
-	}
-	struct xrt_swapchain_create_properties properties = {0};
-	xrt_result_t property_result = xrt_comp_get_swapchain_create_properties(&c->native->base, info, &properties);
-	if (property_result != XRT_SUCCESS)
-		return property_result;
-	struct xrt_swapchain_create_info metal_info = *info;
-	metal_info.format = format;
-	// Keep the Vulkan frontend's native allocation depth for colour/depth parity.
-	if (properties.image_count == 3)
-		metal_info.create |= XRT_SWAPCHAIN_CREATE_MACOS_THREE_IMAGES;
-
-	struct xrt_swapchain *sc = NULL;
-	xrt_result_t result = xrt_comp_create_swapchain(&c->metal->base, &metal_info, &sc);
-	if (result != XRT_SUCCESS)
-		return result;
-	*out_swapchain = (struct xrt_swapchain_metal *)sc;
-	xrt_swapchain_native_reference(out_native, client_metal_swapchain_get_native(*out_swapchain));
-	U_LOG_I("Vulkan Metal-backed swapchain: format=%lld layers=%u images=%u remote=%u", (long long)info->format,
-	        info->array_size, sc->image_count, c->native->is_remote);
-	return XRT_SUCCESS;
 }
 VkResult
 client_vk_metal_texture_import(struct vk_bundle *vk,

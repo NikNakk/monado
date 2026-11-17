@@ -11,15 +11,13 @@ bool
 client_vk_metal_texture_enabled(void);
 bool
 client_vk_metal_texture_required(const struct xrt_swapchain_create_info *info);
+/*! Spike: can the ordinary native swapchain path carry this array/depth swapchain as Metal texture handles? */
+bool
+client_vk_unified_handle_usable(const struct xrt_compositor_native *xcn, const struct xrt_swapchain_create_info *info);
 struct client_vk_metal_texture_context *
 client_vk_metal_texture_context_create(struct xrt_compositor_native *xcn, struct vk_bundle *vk);
 void
 client_vk_metal_texture_context_destroy(struct client_vk_metal_texture_context *context);
-xrt_result_t
-client_vk_metal_texture_swapchain_create(struct client_vk_metal_texture_context *context,
-                                         const struct xrt_swapchain_create_info *info,
-                                         struct xrt_swapchain_metal **out_swapchain,
-                                         struct xrt_swapchain_native **out_native);
 VkResult
 client_vk_metal_texture_import(struct vk_bundle *vk,
                                const struct xrt_swapchain_create_info *info,

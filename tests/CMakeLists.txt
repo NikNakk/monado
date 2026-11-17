@@ -448,6 +448,32 @@ if(APPLE)
 			LABELS "macos;gpu" RUN_SERIAL TRUE)
 		set_target_properties(tests_macos_vk_metal_texture_import PROPERTIES FOLDER monado_tests)
 	endif()
+	if(XRT_HAVE_VULKAN AND XRT_MODULE_COMPOSITOR_UTIL)
+		add_executable(tests_macos_unified_handle tests_macos_unified_handle.mm)
+		target_compile_features(tests_macos_unified_handle PRIVATE cxx_std_20)
+		target_link_libraries(
+			tests_macos_unified_handle
+			PRIVATE
+				xrt-external-catch2
+				comp_util
+				aux_vk
+				aux_util
+				"-framework Metal"
+				"-framework IOSurface"
+			)
+		add_test(NAME tests_macos_unified_handle COMMAND tests_macos_unified_handle "[gpu]")
+		set_tests_properties(
+			tests_macos_unified_handle
+			PROPERTIES
+				TIMEOUT
+				45
+				LABELS
+				"macos;gpu"
+				SKIP_RETURN_CODE
+				4
+			)
+		set_target_properties(tests_macos_unified_handle PROPERTIES FOLDER monado_tests)
+	endif()
 	add_executable(tests_macos_openxr_vulkan_probe tests_macos_openxr_vulkan_probe.c)
 	target_link_libraries(
 		tests_macos_openxr_vulkan_probe PRIVATE aux_vk xrt-interfaces xrt-external-openxr
