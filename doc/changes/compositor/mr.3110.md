@@ -1,0 +1,3 @@
+- c/main: Add a macOS AppKit/CAMetalLayer target, selected with XRT_MACOS_DISPLAY_ID or XRT_MACOS_WINDOWED, defaulting to three images and the fallback pacer.
+- c/main: Remove a duplicate VK_KHR_get_surface_capabilities2 instance extension entry.
+- c/client: Support Metal texture swapchain images using the queue-idle synchronisation fallback.

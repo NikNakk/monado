@@ -280,3 +280,7 @@ if(XRT_HAVE_OPENCV)
 	target_link_libraries(aux_util_scribble PUBLIC ${OpenCV_LIBRARIES})
 	target_include_directories(aux_util_scribble SYSTEM PRIVATE ${OpenCV_INCLUDE_DIRS})
 endif()
+
+if(APPLE)
+	target_link_libraries(aux_util PRIVATE "-framework CoreFoundation")
+endif()

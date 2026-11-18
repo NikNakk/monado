@@ -11,7 +11,7 @@
 #include "util/u_debug.h"
 #include "comp_settings.h"
 
-#ifdef XRT_OS_ANDROID
+#if defined(XRT_OS_ANDROID) || defined(XRT_OS_OSX)
 #define USE_COMPUTE_DEFAULT false
 #else
 #define USE_COMPUTE_DEFAULT true

@@ -236,7 +236,24 @@ xrt_graphics_buffer_is_valid(xrt_graphics_buffer_handle_t handle)
  */
 #define XRT_GRAPHICS_BUFFER_HANDLE_INVALID NULL
 
-#elif defined(XRT_OS_ANDROID) && !defined(XRT_OS_ANDROID_USE_AHB) || defined(XRT_OS_LINUX) || defined(XRT_OS_OSX)
+#elif defined(XRT_OS_OSX)
+
+/*!
+ * Retained id<MTLTexture>, shared between Vulkan devices in the same process.
+ * This handle cannot be sent over Unix IPC. macOS service support is separate.
+ */
+typedef void *xrt_graphics_buffer_handle_t;
+#define XRT_GRAPHICS_BUFFER_HANDLE_IS_METAL_TEXTURE 1
+#define XRT_GRAPHICS_BUFFER_HANDLE_REFERENCE_ADDED_BY_VULKAN_IMPORT 1
+#define XRT_GRAPHICS_BUFFER_HANDLE_INVALID NULL
+
+static inline bool
+xrt_graphics_buffer_is_valid(xrt_graphics_buffer_handle_t handle)
+{
+	return handle != NULL;
+}
+
+#elif defined(XRT_OS_ANDROID) && !defined(XRT_OS_ANDROID_USE_AHB) || defined(XRT_OS_LINUX)
 
 /*!
  * The type underlying buffers shared between compositor clients and the main

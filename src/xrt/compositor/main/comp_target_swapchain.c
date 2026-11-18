@@ -9,6 +9,8 @@
  * @ingroup comp_main
  */
 
+#include "xrt/xrt_config_os.h"
+
 #include "os/os_threading.h"
 
 #include "util/u_misc.h"
@@ -46,9 +48,20 @@
  * probably want 3, but most compositors on Linux sets the minImageCount
  * to 3 anyways so we get what we want.
  */
-DEBUG_GET_ONCE_NUM_OPTION(preferred_at_least_image_count, "XRT_COMPOSITOR_PREFERRED_IMAGE_COUNT", 2)
+#ifdef XRT_OS_OSX
+// Two images throttle FIFO WSI on macOS. Raw MoltenVK timing feedback also
+// includes presentation delay that the display-timing pacer treats as a miss.
+#define PREFERRED_IMAGE_COUNT_DEFAULT 3
+#define USE_DISPLAY_TIMING_DEFAULT false
+#else
+#define PREFERRED_IMAGE_COUNT_DEFAULT 2
+#define USE_DISPLAY_TIMING_DEFAULT true
+#endif
+DEBUG_GET_ONCE_NUM_OPTION(preferred_at_least_image_count,
+                          "XRT_COMPOSITOR_PREFERRED_IMAGE_COUNT",
+                          PREFERRED_IMAGE_COUNT_DEFAULT)
 DEBUG_GET_ONCE_BOOL_OPTION(use_present_wait, "XRT_COMPOSITOR_USE_PRESENT_WAIT", false)
-DEBUG_GET_ONCE_BOOL_OPTION(use_display_timing, "XRT_COMPOSITOR_USE_DISPLAY_TIMING", true)
+DEBUG_GET_ONCE_BOOL_OPTION(use_display_timing, "XRT_COMPOSITOR_USE_DISPLAY_TIMING", USE_DISPLAY_TIMING_DEFAULT)
 
 static inline struct vk_bundle *
 get_vk(struct comp_target_swapchain *cts)

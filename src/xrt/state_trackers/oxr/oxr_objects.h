@@ -1113,7 +1113,7 @@ struct oxr_system
 
 	/*!
 	 * Stores the vkGetInstanceProcAddr passed to xrCreateVulkanInstanceKHR to be
-	 * used when looking up Vulkan functions used by xrGetVulkanGraphicsDevice2KHR.
+	 * used when looking up application Vulkan functions, including during session setup.
 	 */
 	PFN_vkGetInstanceProcAddr vk_get_instance_proc_addr;
 

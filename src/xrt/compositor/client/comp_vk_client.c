@@ -718,7 +718,9 @@ client_vk_swapchain_create(struct xrt_compositor *xc,
 		}
 
 		VK_NAME_IMAGE(vk, sc->base.images[i], "vk_image_collection image");
-		VK_NAME_DEVICE_MEMORY(vk, sc->mems[i], "vk_image_collection device_memory");
+		if (sc->mems[i] != VK_NULL_HANDLE) {
+			VK_NAME_DEVICE_MEMORY(vk, sc->mems[i], "vk_image_collection device_memory");
+		}
 	}
 
 	vk_cmd_pool_lock(&c->pool);
@@ -767,8 +769,13 @@ client_vk_swapchain_create(struct xrt_compositor *xc,
 		    .dstAccessMask = 0,
 		    .oldLayout = barrier_optimal_layout,
 		    .newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+#ifdef XRT_OS_OSX
+		    .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+		    .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+#else
 		    .srcQueueFamilyIndex = vk->main_queue->family_index,
 		    .dstQueueFamilyIndex = VK_QUEUE_FAMILY_EXTERNAL,
+#endif
 		    .image = sc->base.images[i],
 		    .subresourceRange = subresource_range,
 		};

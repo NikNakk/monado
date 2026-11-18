@@ -6,6 +6,7 @@
 set(tests
     tests_cxx_wrappers
     tests_deque
+    tests_dead_reckoning
     tests_generic_callbacks
     tests_glue_device
     tests_glue_frameserver
@@ -38,6 +39,7 @@ if(XRT_HAVE_VULKAN)
 		APPEND
 		tests
 		tests_comp_client_vulkan
+		tests_vk_bundle
 		tests_uv_to_tangent
 		tests_render_pipeline_cache
 		)
@@ -74,6 +76,7 @@ target_link_libraries(tests_cxx_wrappers PRIVATE xrt-interfaces)
 target_link_libraries(tests_glue_device PRIVATE xrt-interfaces aux_glue)
 target_link_libraries(tests_glue_frameserver PRIVATE xrt-interfaces aux_glue)
 target_link_libraries(tests_glue_traits PRIVATE xrt-interfaces aux_glue)
+target_link_libraries(tests_dead_reckoning PRIVATE aux_tracking aux_math)
 target_link_libraries(tests_history_buf PRIVATE aux_math)
 target_link_libraries(tests_lowpass_float PRIVATE aux_math)
 target_link_libraries(tests_lowpass_integer PRIVATE aux_math)
@@ -109,6 +112,7 @@ if(XRT_HAVE_D3D12)
 endif()
 
 if(XRT_HAVE_VULKAN)
+	target_link_libraries(tests_vk_bundle PRIVATE aux_vk)
 	target_link_libraries(
 		tests_comp_client_vulkan PRIVATE comp_client comp_mock comp_util aux_vk
 		)
@@ -159,4 +163,28 @@ if(TARGET ipc_server)
 		)
 	target_link_libraries(tests_ipc_thread_shutdown PRIVATE ipc_shared aux_os base)
 	set_tests_properties(tests_ipc_thread_shutdown PROPERTIES TIMEOUT 10)
+endif()
+
+if(APPLE AND XRT_HAVE_VULKAN)
+	enable_language(OBJCXX)
+	add_executable(tests_macos_vulkan tests_macos_vulkan.mm)
+	set_target_properties(
+		tests_macos_vulkan PROPERTIES OBJCXX_STANDARD 20 OBJCXX_STANDARD_REQUIRED YES
+		)
+	target_compile_options(tests_macos_vulkan PRIVATE -Wall -Wextra -Wno-unused-parameter)
+	target_link_libraries(
+		tests_macos_vulkan PRIVATE xrt-external-catch2 comp_util aux_vk "-framework Metal"
+		)
+	# Needs a Metal GPU and MoltenVK; Catch2 returns 4 when every selected test is skipped.
+	add_test(NAME tests_macos_vulkan_gpu COMMAND tests_macos_vulkan "[gpu]")
+	set_tests_properties(
+		tests_macos_vulkan_gpu
+		PROPERTIES
+			TIMEOUT
+			45
+			LABELS
+			gpu
+			SKIP_RETURN_CODE
+			4
+		)
 endif()

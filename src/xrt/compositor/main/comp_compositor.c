@@ -534,9 +534,6 @@ static const char *optional_instance_extensions[] = {
 #ifdef VK_EXT_swapchain_colorspace
     VK_EXT_SWAPCHAIN_COLORSPACE_EXTENSION_NAME,
 #endif
-#ifdef VK_KHR_get_surface_capabilities2
-    VK_KHR_GET_SURFACE_CAPABILITIES_2_EXTENSION_NAME,
-#endif
 #ifdef VK_EXT_display_surface_counter
     VK_EXT_DISPLAY_SURFACE_COUNTER_EXTENSION_NAME,
 #endif
@@ -556,7 +553,9 @@ static const char *required_device_extensions[] = {
     VK_KHR_GET_MEMORY_REQUIREMENTS_2_EXTENSION_NAME, //
 
 // Platform version of "external_memory"
-#if defined(XRT_GRAPHICS_BUFFER_HANDLE_IS_FD)
+#if defined(XRT_GRAPHICS_BUFFER_HANDLE_IS_METAL_TEXTURE)
+    VK_EXT_METAL_OBJECTS_EXTENSION_NAME,
+#elif defined(XRT_GRAPHICS_BUFFER_HANDLE_IS_FD)
     VK_KHR_EXTERNAL_MEMORY_FD_EXTENSION_NAME,
 
 #elif defined(XRT_GRAPHICS_BUFFER_HANDLE_IS_AHARDWAREBUFFER)
@@ -590,7 +589,9 @@ static const char *optional_device_extensions[] = {
     VK_EXT_GLOBAL_PRIORITY_EXTENSION_NAME,   //
 
 // Platform version of "external_fence" and "external_semaphore"
-#if defined(XRT_GRAPHICS_SYNC_HANDLE_IS_FD)
+#if defined(XRT_OS_OSX)
+// No FD fence/semaphore export: use the queue-idle fallback.
+#elif defined(XRT_GRAPHICS_SYNC_HANDLE_IS_FD)
     VK_KHR_EXTERNAL_SEMAPHORE_FD_EXTENSION_NAME, //
     VK_KHR_EXTERNAL_FENCE_FD_EXTENSION_NAME,     //
 
@@ -817,6 +818,9 @@ compositor_init_vulkan(struct comp_compositor *c)
  */
 
 const struct comp_target_factory *ctfs[] = {
+#ifdef XRT_OS_OSX
+    &comp_target_factory_macos_wsi,
+#endif
 #if defined VK_USE_PLATFORM_WAYLAND_KHR && defined XRT_HAVE_WAYLAND_DIRECT
     &comp_target_factory_direct_wayland,
 #endif

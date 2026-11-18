@@ -34,8 +34,7 @@ extern "C" {
  * @param base_rel_ts           The timestamp of the base relation.
  * @param out_relation          The predicted relation output.
  *
- * @returns Whether the dead reckoning succeeded, we might fail if the base relation is older than the oldest IMU
- *          sample.
+ * @returns Whether dead reckoning succeeded.
  */
 bool
 t_apply_dead_reckoning(struct m_ff_vec3_f32 *gyro_ff,

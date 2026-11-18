@@ -94,12 +94,29 @@ vk_build_instance_extensions(struct vk_bundle *vk,
                              struct u_extension_list *optional_instance_ext_list,
                              struct u_extension_list **out_instance_ext_list)
 {
+#if defined(XRT_OS_OSX) && defined(VK_KHR_portability_enumeration)
+	// MoltenVK is a portability driver, hidden by the loader unless explicitly enumerated.
+	struct u_extension_list_builder *builder = u_extension_list_builder_create();
+	u_extension_list_builder_append_array(builder, u_extension_list_get_data(optional_instance_ext_list),
+	                                      u_extension_list_get_size(optional_instance_ext_list));
+	u_extension_list_builder_append_unique(builder, VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME);
+	struct u_extension_list *optional = u_extension_list_builder_build_sorted_for_extensions(&builder);
+	VkResult ret = vk_build_instance_extensions_with_skip( //
+	    vk,                                                //
+	    required_instance_ext_list,                        //
+	    optional,                                          //
+	    should_skip_optional_instance_ext,                 //
+	    out_instance_ext_list);                            //
+	u_extension_list_destroy(&optional);
+	return ret;
+#else
 	return vk_build_instance_extensions_with_skip( //
 	    vk,                                        //
 	    required_instance_ext_list,                //
 	    optional_instance_ext_list,                //
 	    should_skip_optional_instance_ext,         //
 	    out_instance_ext_list);                    //
+#endif
 }
 
 VkResult
@@ -189,7 +206,7 @@ fill_in_device_features(struct vk_bundle *vk, const uint32_t queue_family_index)
 	free(props);
 }
 
-static void
+static XRT_MAYBE_UNUSED void
 get_external_image_support(struct vk_bundle *vk,
                            bool depth,
                            VkExternalMemoryHandleTypeFlagBits handle_type,
@@ -207,7 +224,7 @@ get_external_image_support(struct vk_bundle *vk,
 	vk_csci_get_image_external_support(vk, image_format, bits, handle_type, out_importable, out_exportable);
 }
 
-static bool
+static XRT_MAYBE_UNUSED bool
 is_fence_bit_supported(struct vk_bundle *vk, VkExternalFenceHandleTypeFlagBits handle_type)
 {
 	VkPhysicalDeviceExternalFenceInfo external_fence_info = {
@@ -262,7 +279,7 @@ get_binary_semaphore_bit_support(struct vk_bundle *vk,
 	*out_exportable = (bits & VK_EXTERNAL_SEMAPHORE_FEATURE_EXPORTABLE_BIT) != 0;
 }
 
-static bool
+static XRT_MAYBE_UNUSED bool
 is_binary_semaphore_bit_supported(struct vk_bundle *vk, VkExternalSemaphoreHandleTypeFlagBits handle_type)
 {
 	bool importable = false, exportable = false;
@@ -315,7 +332,7 @@ get_timeline_semaphore_bit_support(struct vk_bundle *vk,
 #endif
 }
 
-static bool
+static XRT_MAYBE_UNUSED bool
 is_timeline_semaphore_bit_supported(struct vk_bundle *vk, VkExternalSemaphoreHandleTypeFlagBits handle_type)
 {
 	bool importable = false, exportable = false;
@@ -382,7 +399,7 @@ fill_in_external_object_properties(struct vk_bundle *vk)
 	                           &vk->external.depth_image_import_ahardwarebuffer,
 	                           &vk->external.depth_image_export_ahardwarebuffer);
 #endif
-#if defined(XRT_GRAPHICS_SYNC_HANDLE_IS_FD)
+#if defined(XRT_GRAPHICS_SYNC_HANDLE_IS_FD) && !defined(XRT_OS_OSX)
 
 	vk->external.fence_sync_fd = is_fence_bit_supported( //
 	    vk, VK_EXTERNAL_FENCE_HANDLE_TYPE_SYNC_FD_BIT);
@@ -416,6 +433,8 @@ fill_in_external_object_properties(struct vk_bundle *vk)
 	vk->external.timeline_semaphore_win32_handle = is_timeline_semaphore_bit_supported( //
 	    vk, VK_EXTERNAL_SEMAPHORE_HANDLE_TYPE_OPAQUE_WIN32_BIT);
 
+#elif defined(XRT_OS_OSX)
+	// No native Vulkan fence/semaphore export. Queue-idle fallback is used.
 #else
 #error "Need port for fence sync handles checkers"
 #endif
@@ -940,13 +959,22 @@ vk_create_device(struct vk_bundle *vk,
 	ret = select_physical_device(vk, forced_index);
 	VK_CHK_WITH_GOTO(ret, "select_physical_device", err_destroy);
 
+	// Vulkan requires portability_subset to be enabled whenever it is advertised.
+	struct u_extension_list_builder *ext_builder = u_extension_list_builder_create();
+	u_extension_list_builder_append_array(ext_builder, u_extension_list_get_data(optional_device_ext_list),
+	                                      u_extension_list_get_size(optional_device_ext_list));
+#ifdef VK_KHR_portability_subset
+	u_extension_list_builder_append_unique(ext_builder, VK_KHR_PORTABILITY_SUBSET_EXTENSION_NAME);
+#endif
+	struct u_extension_list *optional = u_extension_list_builder_build_sorted_for_extensions(&ext_builder);
 	ret = vk_build_device_extensions_with_skip( //
 	    vk,                                     //
 	    vk->physical_device,                    //
 	    required_device_ext_list,               //
-	    optional_device_ext_list,               //
+	    optional,                               //
 	    should_skip_optional_device_ext,        //
 	    &device_ext_list);                      //
+	u_extension_list_destroy(&optional);
 	VK_CHK_WITH_GOTO(ret, "vk_build_device_extensions_with_skip", err_destroy);
 
 	// Fill in has_* fields based on the extension list.
@@ -1285,14 +1313,14 @@ VkResult
 vk_init_mutex(struct vk_bundle *vk)
 {
 	assert(vk != NULL);
-
+	assert(vk->initialized_queue_mutex_count == 0);
 	for (uint32_t i = 0; i < ARRAY_SIZE(vk->queues); ++i) {
-		struct vk_bundle_queue *q = &vk->queues[i];
-
-		if (os_mutex_init(&q->mutex) < 0) {
+		if (os_mutex_init(&vk->queues[i].mutex) < 0) {
 			VK_ERROR(vk, "failed to initialize queue mutex");
+			vk_deinit_mutex(vk);
 			return VK_ERROR_INITIALIZATION_FAILED;
 		}
+		vk->initialized_queue_mutex_count++;
 	}
 	return VK_SUCCESS;
 }
@@ -1301,9 +1329,8 @@ VkResult
 vk_deinit_mutex(struct vk_bundle *vk)
 {
 	assert(vk != NULL);
-
-	for (uint32_t i = 0; i < ARRAY_SIZE(vk->queues); ++i) {
-		struct vk_bundle_queue *q = &vk->queues[i];
+	while (vk->initialized_queue_mutex_count > 0) {
+		struct vk_bundle_queue *q = &vk->queues[--vk->initialized_queue_mutex_count];
 		os_mutex_destroy(&q->mutex);
 		q->mutex = (struct os_mutex){0};
 	}
@@ -1357,6 +1384,16 @@ vk_init_from_given(struct vk_bundle *vk,
 	// Fill out the device memory props here, as we are
 	// passed a vulkan context and do not call selectPhysicalDevice()
 	vk->vkGetPhysicalDeviceMemoryProperties(vk->physical_device, &vk->device_memory_props);
+
+#ifdef XRT_OS_OSX
+	/*
+	 * Vulkan cannot report which extensions the application enabled, so
+	 * assume it honoured xrt_gfx_vk_device_extensions, which requires this
+	 * on macOS. XR_KHR_vulkan_enable2 does this for the application, while
+	 * XR_KHR_vulkan_enable applications must enable it themselves.
+	 */
+	vk->has_EXT_metal_objects = true;
+#endif
 
 	// Vulkan does not let us read what extensions was enabled.
 	if (external_fence_fd_enabled) {

@@ -1,0 +1,4 @@
+- a/os: Use CLOCK_UPTIME_RAW for the monotonic clock and mach_wait_until() for precise sleeps on macOS.
+- a/vk: Enable portability enumeration and subset for MoltenVK, share images with VK_EXT_metal_objects, and convert macOS calibrated timestamps to the uptime clock.
+- a/vk: Only destroy queue mutexes that were initialised.
+- a/util: Reference-count Metal texture graphics buffer handles.

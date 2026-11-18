@@ -30,7 +30,9 @@ const char *xrt_gfx_vk_device_extensions = VK_KHR_DEDICATED_ALLOCATION_EXTENSION
     " " VK_KHR_IMAGE_FORMAT_LIST_EXTENSION_NAME
 
 // Platform version of "external_memory"
-#if defined(XRT_GRAPHICS_BUFFER_HANDLE_IS_FD)
+#if defined(XRT_GRAPHICS_BUFFER_HANDLE_IS_METAL_TEXTURE)
+    " " VK_EXT_METAL_OBJECTS_EXTENSION_NAME
+#elif defined(XRT_GRAPHICS_BUFFER_HANDLE_IS_FD)
     " " VK_KHR_EXTERNAL_MEMORY_FD_EXTENSION_NAME
 
 #elif defined(XRT_GRAPHICS_BUFFER_HANDLE_IS_AHARDWAREBUFFER)
@@ -47,7 +49,9 @@ const char *xrt_gfx_vk_device_extensions = VK_KHR_DEDICATED_ALLOCATION_EXTENSION
 #endif
 
 // Platform version of "external_fence" and "external_semaphore"
-#if defined(XRT_GRAPHICS_SYNC_HANDLE_IS_FD)
+#if defined(XRT_OS_OSX)
+    ; // In-process client uses the existing queue-idle synchronization fallback.
+#elif defined(XRT_GRAPHICS_SYNC_HANDLE_IS_FD)
     " " VK_KHR_EXTERNAL_SEMAPHORE_FD_EXTENSION_NAME " " VK_KHR_EXTERNAL_FENCE_FD_EXTENSION_NAME;
 
 #elif defined(XRT_GRAPHICS_SYNC_HANDLE_IS_WIN32_HANDLE)

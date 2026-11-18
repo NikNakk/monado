@@ -31,7 +31,9 @@
 #include <string.h>
 
 
+#ifndef XRT_GRAPHICS_BUFFER_HANDLE_IS_METAL_TEXTURE
 DEBUG_GET_ONCE_BOOL_OPTION(vk_ignore_memory_size_mismatch, "XRT_VK_IGNORE_MEMORY_SIZE_MISMATCH", false)
+#endif
 
 
 /*
@@ -439,11 +441,19 @@ vk_create_image_from_native(struct vk_bundle *vk,
 		image_create_flags |= VK_IMAGE_CREATE_PROTECTED_BIT;
 	}
 
+#ifdef XRT_GRAPHICS_BUFFER_HANDLE_IS_METAL_TEXTURE
+	VkImportMetalTextureInfoEXT external_memory_image_create_info = {
+	    .sType = VK_STRUCTURE_TYPE_IMPORT_METAL_TEXTURE_INFO_EXT,
+	    .plane = VK_IMAGE_ASPECT_PLANE_0_BIT,
+	    .mtlTexture = image_native->handle,
+	};
+#else
 	// In->pNext
 	VkExternalMemoryImageCreateInfoKHR external_memory_image_create_info = {
 	    .sType = VK_STRUCTURE_TYPE_EXTERNAL_MEMORY_IMAGE_CREATE_INFO_KHR,
 	    .handleTypes = handle_type,
 	};
+#endif
 
 #ifdef VK_KHR_image_format_list
 	VkFormat formats[XRT_MAX_SWAPCHAIN_CREATE_INFO_FORMAT_LIST_COUNT] = {0};
@@ -505,6 +515,13 @@ vk_create_image_from_native(struct vk_bundle *vk,
 	VkMemoryRequirements requirements = {0};
 	vk->vkGetImageMemoryRequirements(vk->device, image, &requirements);
 
+#ifdef XRT_GRAPHICS_BUFFER_HANDLE_IS_METAL_TEXTURE
+	// VkImportMetalTextureInfoEXT creates a memory-bound image.
+	u_graphics_buffer_unref(&image_native->handle);
+	*out_image = image;
+	*out_mem = VK_NULL_HANDLE;
+	return VK_SUCCESS;
+#else
 #if defined(XRT_GRAPHICS_BUFFER_HANDLE_IS_FD)
 	VkImportMemoryFdInfoKHR import_memory_info = {
 	    .sType = VK_STRUCTURE_TYPE_IMPORT_MEMORY_FD_INFO_KHR,
@@ -612,9 +629,19 @@ vk_create_image_from_native(struct vk_bundle *vk,
 
 	*out_image = image;
 	return ret;
+#endif
 }
 
-#if defined(XRT_GRAPHICS_BUFFER_HANDLE_IS_FD)
+#if defined(XRT_GRAPHICS_BUFFER_HANDLE_IS_METAL_TEXTURE)
+
+static VkResult
+get_device_memory_handle(struct vk_bundle *vk, VkDeviceMemory memory, xrt_graphics_buffer_handle_t *out_handle)
+{
+	*out_handle = XRT_GRAPHICS_BUFFER_HANDLE_INVALID;
+	return VK_ERROR_EXTENSION_NOT_PRESENT;
+}
+
+#elif defined(XRT_GRAPHICS_BUFFER_HANDLE_IS_FD)
 
 static VkResult
 get_device_memory_handle(struct vk_bundle *vk, VkDeviceMemory device_memory, xrt_graphics_buffer_handle_t *out_handle)

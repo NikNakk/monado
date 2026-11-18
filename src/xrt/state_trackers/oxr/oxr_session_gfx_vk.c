@@ -34,11 +34,12 @@ DEBUG_GET_ONCE_BOOL_OPTION(force_debug_utils, "OXR_DEBUG_FORCE_VK_DEBUG_UTILS", 
 
 static bool
 check_for_layer_mnd_enable_timeline_semaphore(struct oxr_logger *log,
+                                              PFN_vkGetInstanceProcAddr get_proc_addr,
                                               VkInstance instance,
                                               VkPhysicalDevice physical_device)
 {
 	PFN_vkEnumerateDeviceLayerProperties func =
-	    (PFN_vkEnumerateDeviceLayerProperties)vkGetInstanceProcAddr(instance, "vkEnumerateDeviceLayerProperties");
+	    (PFN_vkEnumerateDeviceLayerProperties)get_proc_addr(instance, "vkEnumerateDeviceLayerProperties");
 	uint32_t prop_count = 0;
 	VkResult ret = VK_SUCCESS;
 
@@ -80,6 +81,14 @@ oxr_session_populate_vk(struct oxr_logger *log,
                         XrGraphicsBindingVulkanKHR const *next,
                         struct oxr_session *sess)
 {
+	PFN_vkGetInstanceProcAddr get_proc_addr = vkGetInstanceProcAddr;
+#ifdef OXR_HAVE_KHR_vulkan_enable2
+	if (sys->inst->extensions.KHR_vulkan_enable2 && next->instance == sys->vulkan_enable2_instance) {
+		// The application may use its own Vulkan loader or link directly to a driver.
+		get_proc_addr = sys->vk_get_instance_proc_addr;
+	}
+#endif
+
 	bool timeline_semaphore_enabled = sess->sys->vk.timeline_semaphore_enabled;
 	bool external_fence_fd_enabled = sess->sys->vk.external_fence_fd_enabled;
 	bool external_semaphore_fd_enabled = sess->sys->vk.external_semaphore_fd_enabled;
@@ -105,7 +114,7 @@ oxr_session_populate_vk(struct oxr_logger *log,
 #endif
 
 	if (!timeline_semaphore_enabled &&
-	    check_for_layer_mnd_enable_timeline_semaphore(log, next->instance, next->physicalDevice)) {
+	    check_for_layer_mnd_enable_timeline_semaphore(log, get_proc_addr, next->instance, next->physicalDevice)) {
 		oxr_log(log, "Found VK_LAYER_MND_enable_timeline_semaphore and enabled them!");
 		timeline_semaphore_enabled = true;
 	}
@@ -143,7 +152,7 @@ oxr_session_populate_vk(struct oxr_logger *log,
 	struct xrt_compositor *xc = xrt_gfx_vk_provider_create( //
 	    xcn,                                                //
 	    next->instance,                                     //
-	    vkGetInstanceProcAddr,                              //
+	    get_proc_addr,                                      //
 	    next->physicalDevice,                               //
 	    next->device,                                       //
 	    external_fence_fd_enabled,                          //

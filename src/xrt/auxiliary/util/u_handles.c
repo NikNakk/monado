@@ -93,6 +93,21 @@ ref_graphics_handle(xrt_graphics_buffer_handle_t handle)
 	return handle;
 }
 
+#elif defined(XRT_GRAPHICS_BUFFER_HANDLE_IS_METAL_TEXTURE)
+#include <CoreFoundation/CoreFoundation.h>
+
+static inline void
+release_graphics_handle(xrt_graphics_buffer_handle_t handle)
+{
+	CFRelease(handle);
+}
+
+static inline xrt_graphics_buffer_handle_t
+ref_graphics_handle(xrt_graphics_buffer_handle_t handle)
+{
+	return (void *)CFRetain(handle);
+}
+
 #elif defined(XRT_GRAPHICS_BUFFER_HANDLE_IS_FD)
 #include <unistd.h>
 

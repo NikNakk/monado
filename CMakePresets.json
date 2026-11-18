@@ -79,6 +79,32 @@
             "cacheVariables": {
                 "CMAKE_BUILD_TYPE": "RelWithDebInfo"
             }
+        },
+        {
+            "name": "macos-inproc",
+            "displayName": "macOS in-process Vulkan WSI",
+            "inherits": ".base-ninja",
+            "binaryDir": "${sourceDir}/build-macos-inproc",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Debug",
+                "XRT_MODULE_IPC": "OFF",
+                "XRT_FEATURE_SERVICE": "OFF",
+                "XRT_FEATURE_STEAMVR_PLUGIN": "OFF",
+                "XRT_HAVE_OPENGL": "OFF",
+                "XRT_HAVE_OPENGLES": "OFF",
+                "XRT_HAVE_EGL": "OFF",
+                "XRT_HAVE_OPENCV": "OFF",
+                "XRT_MODULE_CONSTELLATION_TRACKING": "OFF"
+            }
+        },
+        {
+            "name": "macos-inproc-release",
+            "displayName": "macOS in-process Vulkan WSI (optimized)",
+            "inherits": "macos-inproc",
+            "binaryDir": "${sourceDir}/build-macos-inproc-release",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "RelWithDebInfo"
+            }
         }
     ],
     "buildPresets": [

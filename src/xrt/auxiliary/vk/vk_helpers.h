@@ -80,6 +80,7 @@ struct vk_bundle_queue
  */
 struct vk_bundle
 {
+	uint32_t initialized_queue_mutex_count;
 	enum u_logging_level log_level;
 
 	VkInstance instance;
