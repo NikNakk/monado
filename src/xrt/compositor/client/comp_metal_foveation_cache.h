@@ -121,8 +121,10 @@ comp_metal_foveation_cache_lookup_packed(struct comp_metal_foveation_cache *cach
 xrt_result_t
 comp_metal_foveation_cache_lookup_extent(struct comp_metal_foveation_cache *cache,
                                          const struct xrt_metal_foveation_view_layout *views,
-                                         uint32_t view_count, uint32_t array_layer,
-                                         uint32_t width, uint32_t height,
+                                         uint32_t view_count,
+                                         uint32_t array_layer,
+                                         uint32_t width,
+                                         uint32_t height,
                                          struct xrt_metal_foveation_state *out_state);
 
 /*!

@@ -425,14 +425,16 @@ client_metal_swapchain_get_packed_foveation_state(struct xrt_swapchain_metal *xs
 
 static xrt_result_t
 client_metal_swapchain_lookup_packed_foveation_state(struct xrt_swapchain_metal *xscm,
-                                                  const struct xrt_metal_foveation_view_layout *views,
-                                                  uint32_t view_count,
-                                                  uint32_t array_layer,
-                                                  uint32_t width, uint32_t height,
-                                                  struct xrt_metal_foveation_state *out_state)
+                                                     const struct xrt_metal_foveation_view_layout *views,
+                                                     uint32_t view_count,
+                                                     uint32_t array_layer,
+                                                     uint32_t width,
+                                                     uint32_t height,
+                                                     struct xrt_metal_foveation_state *out_state)
 {
 	struct client_metal_swapchain *sc = (struct client_metal_swapchain *)xscm;
-	return comp_metal_foveation_cache_lookup_extent(&sc->foveation, views, view_count, array_layer, width, height, out_state);
+	return comp_metal_foveation_cache_lookup_extent(&sc->foveation, views, view_count, array_layer, width, height,
+	                                                out_state);
 }
 
 static xrt_result_t

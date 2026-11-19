@@ -551,18 +551,23 @@ TEST_CASE("Metal intermediate map extents are part of the lookup identity")
 	xrt_metal_foveation_view_layout views[2] = {kSideBySide[0], kSideBySide[1]};
 	xrt_metal_foveation_state selected = {}, borrowed = {}, image = {};
 	REQUIRE(comp_metal_foveation_cache_get_packed(&cache, views, 2, 0, &selected) == XRT_SUCCESS);
-	REQUIRE(comp_metal_foveation_cache_lookup_extent(&cache, views, 2, 0, kWidth * 2, kHeight * 2, &borrowed) == XRT_SUCCESS);
+	REQUIRE(comp_metal_foveation_cache_lookup_extent(&cache, views, 2, 0, kWidth * 2, kHeight * 2, &borrowed) ==
+	        XRT_SUCCESS);
 	CHECK(borrowed.rasterization_rate_map != selected.rasterization_rate_map);
 	CHECK([(id<MTLRasterizationRateMap>)borrowed.rasterization_rate_map screenSize].width == kWidth * 2);
 	REQUIRE(comp_metal_foveation_cache_bind_released_image(&cache, 0) == XRT_SUCCESS);
 	REQUIRE(comp_metal_foveation_cache_get_image(&cache, 0, 0, &image) == XRT_SUCCESS);
 	CHECK(image.rasterization_rate_map == selected.rasterization_rate_map);
-	CHECK(comp_metal_foveation_cache_lookup_extent(&cache, views, 2, 0, 0, kHeight, &borrowed) == XRT_ERROR_INVALID_ARGUMENT);
-	CHECK(comp_metal_foveation_cache_lookup_extent(&cache, views, 2, 0, 16385, kHeight, &borrowed) == XRT_ERROR_INVALID_ARGUMENT);
-	CHECK(comp_metal_foveation_cache_lookup_extent(&cache, views, 2, 0, kWidth / 4, kHeight, &borrowed) == XRT_ERROR_INVALID_ARGUMENT);
+	CHECK(comp_metal_foveation_cache_lookup_extent(&cache, views, 2, 0, 0, kHeight, &borrowed) ==
+	      XRT_ERROR_INVALID_ARGUMENT);
+	CHECK(comp_metal_foveation_cache_lookup_extent(&cache, views, 2, 0, 16385, kHeight, &borrowed) ==
+	      XRT_ERROR_INVALID_ARGUMENT);
+	CHECK(comp_metal_foveation_cache_lookup_extent(&cache, views, 2, 0, kWidth / 4, kHeight, &borrowed) ==
+	      XRT_ERROR_INVALID_ARGUMENT);
 	policy.enabled = false;
 	REQUIRE(comp_metal_foveation_cache_set(&cache, &policy) == XRT_SUCCESS);
-	REQUIRE(comp_metal_foveation_cache_lookup_extent(&cache, views, 2, 0, kWidth * 2, kHeight * 2, &borrowed) == XRT_SUCCESS);
+	REQUIRE(comp_metal_foveation_cache_lookup_extent(&cache, views, 2, 0, kWidth * 2, kHeight * 2, &borrowed) ==
+	        XRT_SUCCESS);
 	CHECK_FALSE(borrowed.enabled);
 	CHECK(borrowed.physical_width == kWidth * 2);
 	CHECK(borrowed.physical_height == kHeight * 2);

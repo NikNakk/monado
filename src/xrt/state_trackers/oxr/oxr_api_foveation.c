@@ -506,17 +506,19 @@ oxr_xrGetFoveationEyeTrackedStateMETA(XrSession session, XrFoveationEyeTrackedSt
 #ifdef OXR_HAVE_MNDX_foveation_metal
 static XrResult
 foveation_metal_state(XrSwapchain swapchain,
-                                 uint32_t viewIndex,
-                                 uint32_t arrayLayer,
-                                 XrFoveationMetalStateMNDX *state,
-                                 bool select, uint32_t width, uint32_t height)
+                      uint32_t viewIndex,
+                      uint32_t arrayLayer,
+                      XrFoveationMetalStateMNDX *state,
+                      bool select,
+                      uint32_t width,
+                      uint32_t height)
 {
 	OXR_TRACE_MARKER();
 
 	struct oxr_swapchain *sc;
 	struct oxr_logger log;
 	OXR_VERIFY_SWAPCHAIN_AND_INIT_LOG(&log, swapchain, sc,
-	                                 select ? "xrGetFoveationMetalStateMNDX" : "xrLookupFoveationMetalStateMNDX");
+	                                  select ? "xrGetFoveationMetalStateMNDX" : "xrLookupFoveationMetalStateMNDX");
 	OXR_VERIFY_SESSION_NOT_LOST(&log, sc->sess);
 	OXR_VERIFY_ARG_TYPE_AND_NOT_NULL(&log, state, XR_TYPE_FOVEATION_METAL_STATE_MNDX);
 
@@ -598,8 +600,8 @@ foveation_metal_state(XrSwapchain swapchain,
 			};
 		}
 		if (select) {
-			xret = xrt_swapchain_metal_get_packed_foveation_state(xscm, layouts, packed->viewCount, arrayLayer,
-			                                                      &native);
+			xret = xrt_swapchain_metal_get_packed_foveation_state(xscm, layouts, packed->viewCount,
+			                                                      arrayLayer, &native);
 		} else {
 			xret = xrt_swapchain_metal_lookup_packed_foveation_state(xscm, layouts, packed->viewCount,
 			                                                         arrayLayer, width, height, &native);
@@ -608,9 +610,12 @@ foveation_metal_state(XrSwapchain swapchain,
 		xret = xrt_swapchain_metal_get_foveation_state(xscm, viewIndex, arrayLayer, &native);
 	} else {
 		const struct xrt_metal_foveation_view_layout layout = {
-		    .view_index = viewIndex, .width = width, .height = height,
+		    .view_index = viewIndex,
+		    .width = width,
+		    .height = height,
 		};
-		xret = xrt_swapchain_metal_lookup_packed_foveation_state(xscm, &layout, 1, arrayLayer, width, height, &native);
+		xret = xrt_swapchain_metal_lookup_packed_foveation_state(xscm, &layout, 1, arrayLayer, width, height,
+		                                                         &native);
 	}
 	if (xret == XRT_ERROR_NOT_IMPLEMENTED) {
 		return oxr_error(&log, XR_ERROR_FEATURE_UNSUPPORTED,
@@ -643,21 +648,29 @@ foveation_metal_state(XrSwapchain swapchain,
 	return oxr_session_success_result(sc->sess);
 }
 XRAPI_ATTR XrResult XRAPI_CALL
-oxr_xrGetFoveationMetalStateMNDX(XrSwapchain swapchain, uint32_t viewIndex, uint32_t arrayLayer,
+oxr_xrGetFoveationMetalStateMNDX(XrSwapchain swapchain,
+                                 uint32_t viewIndex,
+                                 uint32_t arrayLayer,
                                  XrFoveationMetalStateMNDX *state)
 {
 	return foveation_metal_state(swapchain, viewIndex, arrayLayer, state, true, 0, 0);
 }
 
 XRAPI_ATTR XrResult XRAPI_CALL
-oxr_xrLookupFoveationMetalStateMNDX(XrSwapchain swapchain, uint32_t viewIndex, uint32_t arrayLayer,
+oxr_xrLookupFoveationMetalStateMNDX(XrSwapchain swapchain,
+                                    uint32_t viewIndex,
+                                    uint32_t arrayLayer,
                                     XrFoveationMetalStateMNDX *state)
 {
 	return foveation_metal_state(swapchain, viewIndex, arrayLayer, state, false, 0, 0);
 }
 XRAPI_ATTR XrResult XRAPI_CALL
-oxr_xrLookupFoveationMetalStateForExtentMNDX(XrSwapchain swapchain, uint32_t viewIndex, uint32_t arrayLayer,
-                                            uint32_t width, uint32_t height, XrFoveationMetalStateMNDX *state)
+oxr_xrLookupFoveationMetalStateForExtentMNDX(XrSwapchain swapchain,
+                                             uint32_t viewIndex,
+                                             uint32_t arrayLayer,
+                                             uint32_t width,
+                                             uint32_t height,
+                                             XrFoveationMetalStateMNDX *state)
 {
 	if (width == 0 || height == 0) {
 		return XR_ERROR_VALIDATION_FAILURE;

@@ -455,15 +455,17 @@ oxr_xrGetFoveationMetalStateMNDX(XrSwapchain swapchain,
 
 XRAPI_ATTR XrResult XRAPI_CALL
 oxr_xrLookupFoveationMetalStateMNDX(XrSwapchain swapchain,
-                                 uint32_t viewIndex,
-                                 uint32_t arrayLayer,
-                                 XrFoveationMetalStateMNDX *state);
+                                    uint32_t viewIndex,
+                                    uint32_t arrayLayer,
+                                    XrFoveationMetalStateMNDX *state);
 
 XRAPI_ATTR XrResult XRAPI_CALL
 oxr_xrLookupFoveationMetalStateForExtentMNDX(XrSwapchain swapchain,
-                                 uint32_t viewIndex,
-                                 uint32_t arrayLayer,
-                                 uint32_t width, uint32_t height, XrFoveationMetalStateMNDX *state);
+                                             uint32_t viewIndex,
+                                             uint32_t arrayLayer,
+                                             uint32_t width,
+                                             uint32_t height,
+                                             XrFoveationMetalStateMNDX *state);
 #endif
 
 #ifdef OXR_HAVE_FB_foveation
