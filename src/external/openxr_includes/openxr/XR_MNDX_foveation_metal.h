@@ -195,7 +195,9 @@ typedef struct XrFoveationMetalAngularProfileCreateInfoMNDX {
 /* Version 6: optional shape chain on AngularProfileCreateInfoMNDX. Absent
  * means legacy smoothstep, preserving every v5 field and default. Gaussian
  * sigma is in degrees (.25..180); gaze filtering/cache/rendering are unchanged.
- * Gaussian-core uses the existing active core (20 degrees for fixed/fallback).
+ * Gaussian-core uses the existing active core (20 degrees for fixed mode).
+ * Missing tracked gaze uses the original 20/35 smoothstep until valid/held
+ * gaze is available. Fixed-mode alternatives retain their selected shape.
  */
 XR_STRUCT_ENUM(XR_TYPE_FOVEATION_METAL_ANGULAR_SHAPE_CREATE_INFO_MNDX, 0x7fff505d);
 typedef enum XrFoveationMetalAngularShapeMNDX {

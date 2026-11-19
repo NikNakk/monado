@@ -88,3 +88,22 @@ TEST_CASE("Gaussian alternatives preserve linear-rate bounds and separable ident
 	c.sigma_degrees = 0;
 	REQUIRE(u_foveation_angular_config_valid(&c));
 }
+
+TEST_CASE("Tracked alternatives preserve the broad legacy loss fallback", "[foveation][angular]")
+{
+	struct u_foveation_angular_target t = {
+	    1024, 512, {{0, 0, 512, 512, -.9f, .8f, .85f, -.8f}, {512, 0, 512, 512, -.8f, .9f, .85f, -.8f}}};
+	struct u_foveation_angular_config c = {.3f, 12, 27, 2, true, U_FOVEATION_ANGULAR_SMOOTHSTEP, 20};
+	struct u_foveation_angular_history h = {};
+	struct u_foveation_angular_recipe legacy = {}, alternative = {};
+	u_foveation_angular_build_recipe(&c, &t, &h, &legacy);
+	for (int shape = 1; shape <= 3; ++shape) {
+		c.shape = (enum u_foveation_angular_shape)shape;
+		u_foveation_angular_build_recipe(&c, &t, &h, &alternative);
+		REQUIRE(std::memcmp(&legacy, &alternative, sizeof(legacy)) == 0);
+		c.eye_tracked = false;
+		u_foveation_angular_build_recipe(&c, &t, &h, &alternative);
+		REQUIRE(std::memcmp(&legacy, &alternative, sizeof(legacy)) != 0);
+		c.eye_tracked = true;
+	}
+}
