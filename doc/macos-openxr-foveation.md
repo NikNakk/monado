@@ -129,6 +129,48 @@ clients such as Chromium: the XR process can publish the small numeric recipe
 while the GPU process reconstructs an equivalent `MTLRasterizationRateMap`
 on the same Metal device.
 
+### Non-selecting lookup (experimental version 4)
+
+The isolated Threshold integration adds `xrLookupFoveationMetalStateMNDX` with
+the same arguments/output chains as `xrGetFoveationMetalStateMNDX`. It queries
+the current policy without selecting the map for subsequent released images.
+This lets an intermediate renderer borrow a runtime map and reconstruct its
+output itself without asking the compositor to reconstruct that output again.
+The existing Get entry point retains its selecting semantics.
+
+A successful lookup retains one independent result per array layer until the
+next successful lookup for that layer or swapchain destruction. A failed lookup
+preserves the prior borrowed result and compositor selection. Selecting queries,
+policy changes and lookup-list eviction do not invalidate that borrowed result.
+The returned map remains process-local. `xrLookupFoveationMetalStateForExtentMNDX`
+adds target width/height arguments (1..16384 per axis) for intermediate scenes.
+View rectangles are checked against that extent, and dimensions are part of the
+cache key. No extra swapchain images are allocated. Both lookup entry points
+share the per-layer borrow lifetime and leave compositor selections unchanged.
+
+An opt-in Wine bridge DXMT provider now consumes the extent query. Packed-stereo
+fixed and simulated-gaze tests draw a 768x384 intermediate, reconstruct a
+1024x512 ordinary final output, check pixels, and recreate the session. Native
+cache tests independently verify that borrowing at another extent leaves the
+released-image selection unchanged. This is an isolated candidate, not deployed
+or validated on physical hardware.
+
+Native Metal cache tests cover ordinary release after lookup, unchanged prior
+selection after successful/failed lookup, retained maps during eviction, and
+cleanup. An isolated service probe also passes v4 advertisement/dispatch,
+packed and single-view lookup, invalid-rectangle rejection, legacy selecting Get
+compatibility, and a client-retained snapshot across swapchain destruction.
+The legacy selecting GLES fixture passes 80 frames with simulated gaze. These
+are offscreen tests, with no headset validation or deployment.
+
+The maintained-branch candidate also tests independent per-layer lookup owners
+through disable/re-enable and map eviction. GPU-less cache tests skip explicitly
+rather than failing or being reported as GPU validation. Runtime map generation
+and compositor image selection stay here; DXMT read translation, image-layout
+tracking and conversions remain in the renderer. The shared helper library is
+an independent consumer dependency, not part of this OpenXR transport ABI.
+
+
 ### Per-image map association
 
 The compositor must sample each submitted image with exactly the map that image
@@ -138,12 +180,13 @@ repeated frames, video playback) while eye tracking keeps moving the runtime
 state on.
 
 Each Metal swapchain therefore keeps a cache of immutable, reference-counted
-map entries with three kinds of owner:
+map entries with four kinds of owner:
 
 - a lookup list for the current revision (bounded, so entries for one
   revision are reused rather than rebuilt);
 - a per-array-layer **selection**: exactly the map most recently returned to
   the application by `xrGetFoveationMetalStateMNDX` for that layer;
+- an independent per-array-layer borrow for non-selecting lookups;
 - a per-**(image index, array layer)** **binding**.
 
 The concrete swapchain's `release_image` binds every layer's selection to the

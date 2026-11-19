@@ -7,6 +7,12 @@ SPDX-License-Identifier: BSL-1.0
 
 # macOS Port Tracker
 
+The [Metal foveation lookup candidate](macos-openxr-foveation.md#non-selecting-lookup-experimental-version-4)
+adds non-selecting intermediate maps with independent target extents. It is
+rebased onto the maintained branch for desktop validation; installed runtimes
+and defaults are unchanged. Synthetic gaze/loss remains explicitly opt-in.
+
+
 The [17 November Sense confirmation retry](macos-pssense-occlusion.md#recorded-prior-reproduction-and-confirmation-retry-17-november)
 addresses a recorded live-prior confirmation loop. The follow-up also refreshes
 alignment after filter resets. Offline recovery and focused tests improve/pass;

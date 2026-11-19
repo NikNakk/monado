@@ -327,6 +327,7 @@ TEST_CASE("metal foveation cache binds every array layer independently")
 	CHECK(same_map(submitted(cache, 1, 1), right));
 
 	comp_metal_foveation_cache_destroy(&cache);
+	CHECK(cache.live_entry_count == 0);
 }
 
 namespace {
@@ -420,6 +421,7 @@ check_packed_layout(id<MTLDevice> device,
 	[layer release];
 
 	comp_metal_foveation_cache_destroy(&cache);
+	CHECK(cache.live_entry_count == 0);
 }
 
 } // namespace
@@ -485,4 +487,121 @@ TEST_CASE("packed stereo maps use view-local profile extents")
 		};
 		check_packed_layout(metal.device, views, make_state(-0.2f, 0.6f));
 	}
+}
+
+TEST_CASE("Metal lookup maps do not select released-image reconstruction", "[metal][foveation]")
+{
+	MetalDevice metal;
+	if (metal.device == nil) {
+		SKIP("Metal rasterization-rate maps are unavailable on this device");
+	}
+	comp_metal_foveation_cache cache = {};
+	REQUIRE(comp_metal_foveation_cache_init(&cache, (__bridge void *)metal.device, kWidth, kHeight, 1, 3));
+	xrt_foveation_state state = make_state(-0.4f, 0.4f);
+	REQUIRE(comp_metal_foveation_cache_set(&cache, &state) == XRT_SUCCESS);
+	xrt_metal_foveation_view_layout views[2] = {kSideBySide[0], kSideBySide[1]};
+	xrt_metal_foveation_state borrowed = {}, image = {}, selected = {};
+	REQUIRE(comp_metal_foveation_cache_lookup_packed(&cache, views, 2, 0, &borrowed) == XRT_SUCCESS);
+	REQUIRE(borrowed.enabled);
+	REQUIRE(comp_metal_foveation_cache_bind_released_image(&cache, 0) == XRT_SUCCESS);
+	REQUIRE(comp_metal_foveation_cache_get_image(&cache, 0, 0, &image) == XRT_SUCCESS);
+	CHECK_FALSE(image.enabled);
+
+	REQUIRE(comp_metal_foveation_cache_get_packed(&cache, views, 2, 0, &selected) == XRT_SUCCESS);
+	REQUIRE(comp_metal_foveation_cache_bind_released_image(&cache, 1) == XRT_SUCCESS);
+	state = make_state(0.7f, -0.7f);
+	REQUIRE(comp_metal_foveation_cache_set(&cache, &state) == XRT_SUCCESS);
+	REQUIRE(comp_metal_foveation_cache_lookup_packed(&cache, views, 2, 0, &borrowed) == XRT_SUCCESS);
+	CHECK(borrowed.rasterization_rate_map != selected.rasterization_rate_map);
+	REQUIRE(comp_metal_foveation_cache_bind_released_image(&cache, 2) == XRT_SUCCESS);
+	REQUIRE(comp_metal_foveation_cache_get_image(&cache, 2, 0, &image) == XRT_SUCCESS);
+	CHECK(image.rasterization_rate_map == selected.rasterization_rate_map);
+
+	const void *borrowed_map = borrowed.rasterization_rate_map;
+	views[0].flags = 0x80u;
+	CHECK(comp_metal_foveation_cache_lookup_packed(&cache, views, 2, 0, &image) == XRT_ERROR_INVALID_ARGUMENT);
+	views[0].flags = 0;
+	REQUIRE(comp_metal_foveation_cache_bind_released_image(&cache, 2) == XRT_SUCCESS);
+	REQUIRE(comp_metal_foveation_cache_get_image(&cache, 2, 0, &image) == XRT_SUCCESS);
+	CHECK(image.rasterization_rate_map == selected.rasterization_rate_map);
+	for (uint32_t i = 0; i < COMP_METAL_FOVEATION_CACHE_MAX_LOOKUP_ENTRIES + 2; ++i) {
+		views[0].width = kWidth / 2 - i - 1;
+		REQUIRE(comp_metal_foveation_cache_get_packed(&cache, views, 2, 0, &image) == XRT_SUCCESS);
+	}
+	// Selecting queries and lookup-list eviction do not free a borrowed result.
+	CHECK([(id<MTLRasterizationRateMap>)borrowed_map screenSize].width == kWidth);
+	REQUIRE(comp_metal_foveation_cache_get_image(&cache, 0, 0, &image) == XRT_SUCCESS);
+	CHECK_FALSE(image.enabled);
+	REQUIRE(comp_metal_foveation_cache_get_image(&cache, 1, 0, &image) == XRT_SUCCESS);
+	CHECK(image.rasterization_rate_map == selected.rasterization_rate_map);
+	comp_metal_foveation_cache_destroy(&cache);
+	CHECK(cache.live_entry_count == 0);
+}
+
+TEST_CASE("Metal intermediate map extents are part of the lookup identity")
+{
+	MetalDevice metal;
+	if (metal.device == nil) {
+		SKIP("Metal rasterization-rate maps are unavailable on this device");
+	}
+	comp_metal_foveation_cache cache = {};
+	REQUIRE(comp_metal_foveation_cache_init(&cache, (__bridge void *)metal.device, kWidth, kHeight, 1, 1));
+	xrt_foveation_state policy = make_state(-0.4f, 0.4f);
+	REQUIRE(comp_metal_foveation_cache_set(&cache, &policy) == XRT_SUCCESS);
+	xrt_metal_foveation_view_layout views[2] = {kSideBySide[0], kSideBySide[1]};
+	xrt_metal_foveation_state selected = {}, borrowed = {}, image = {};
+	REQUIRE(comp_metal_foveation_cache_get_packed(&cache, views, 2, 0, &selected) == XRT_SUCCESS);
+	REQUIRE(comp_metal_foveation_cache_lookup_extent(&cache, views, 2, 0, kWidth * 2, kHeight * 2, &borrowed) == XRT_SUCCESS);
+	CHECK(borrowed.rasterization_rate_map != selected.rasterization_rate_map);
+	CHECK([(id<MTLRasterizationRateMap>)borrowed.rasterization_rate_map screenSize].width == kWidth * 2);
+	REQUIRE(comp_metal_foveation_cache_bind_released_image(&cache, 0) == XRT_SUCCESS);
+	REQUIRE(comp_metal_foveation_cache_get_image(&cache, 0, 0, &image) == XRT_SUCCESS);
+	CHECK(image.rasterization_rate_map == selected.rasterization_rate_map);
+	CHECK(comp_metal_foveation_cache_lookup_extent(&cache, views, 2, 0, 0, kHeight, &borrowed) == XRT_ERROR_INVALID_ARGUMENT);
+	CHECK(comp_metal_foveation_cache_lookup_extent(&cache, views, 2, 0, 16385, kHeight, &borrowed) == XRT_ERROR_INVALID_ARGUMENT);
+	CHECK(comp_metal_foveation_cache_lookup_extent(&cache, views, 2, 0, kWidth / 4, kHeight, &borrowed) == XRT_ERROR_INVALID_ARGUMENT);
+	policy.enabled = false;
+	REQUIRE(comp_metal_foveation_cache_set(&cache, &policy) == XRT_SUCCESS);
+	REQUIRE(comp_metal_foveation_cache_lookup_extent(&cache, views, 2, 0, kWidth * 2, kHeight * 2, &borrowed) == XRT_SUCCESS);
+	CHECK_FALSE(borrowed.enabled);
+	CHECK(borrowed.physical_width == kWidth * 2);
+	CHECK(borrowed.physical_height == kHeight * 2);
+	comp_metal_foveation_cache_destroy(&cache);
+	CHECK(cache.live_entry_count == 0);
+}
+
+TEST_CASE("Metal borrowed maps have independent per-layer lifetimes")
+{
+	MetalDevice metal;
+	if (metal.device == nil) {
+		SKIP("Metal rasterization-rate maps are unavailable on this device");
+	}
+	comp_metal_foveation_cache cache = {};
+	REQUIRE(comp_metal_foveation_cache_init(&cache, (__bridge void *)metal.device, kWidth, kHeight, 2, 1));
+	xrt_foveation_state policy = make_state(-0.4f, 0.4f);
+	REQUIRE(comp_metal_foveation_cache_set(&cache, &policy) == XRT_SUCCESS);
+	xrt_metal_foveation_view_layout views[2] = {kSideBySide[0], kSideBySide[1]};
+	xrt_metal_foveation_state a = {}, b = {}, image = {};
+	REQUIRE(comp_metal_foveation_cache_lookup_packed(&cache, views, 2, 0, &a) == XRT_SUCCESS);
+	policy = make_state(0.7f, -0.7f);
+	REQUIRE(comp_metal_foveation_cache_set(&cache, &policy) == XRT_SUCCESS);
+	REQUIRE(comp_metal_foveation_cache_lookup_packed(&cache, views, 2, 1, &b) == XRT_SUCCESS);
+	CHECK(a.rasterization_rate_map != b.rasterization_rate_map);
+	CHECK([(id<MTLRasterizationRateMap>)a.rasterization_rate_map screenSize].width == kWidth);
+	policy.enabled = false;
+	REQUIRE(comp_metal_foveation_cache_set(&cache, &policy) == XRT_SUCCESS);
+	CHECK(cache.live_entry_count == 2);
+	REQUIRE(comp_metal_foveation_cache_lookup_packed(&cache, views, 2, 1, &b) == XRT_SUCCESS);
+	CHECK_FALSE(b.enabled);
+	CHECK(cache.live_entry_count == 1);
+	CHECK([(id<MTLRasterizationRateMap>)a.rasterization_rate_map screenSize].width == kWidth);
+	REQUIRE(comp_metal_foveation_cache_bind_released_image(&cache, 0) == XRT_SUCCESS);
+	for (uint32_t layer = 0; layer < 2; ++layer) {
+		REQUIRE(comp_metal_foveation_cache_get_image(&cache, 0, layer, &image) == XRT_SUCCESS);
+		CHECK_FALSE(image.enabled);
+	}
+	REQUIRE(comp_metal_foveation_cache_lookup_packed(&cache, views, 2, 0, &a) == XRT_SUCCESS);
+	CHECK_FALSE(a.enabled);
+	CHECK(cache.live_entry_count == 0);
+	comp_metal_foveation_cache_destroy(&cache);
 }

@@ -504,17 +504,19 @@ oxr_xrGetFoveationEyeTrackedStateMETA(XrSession session, XrFoveationEyeTrackedSt
 
 
 #ifdef OXR_HAVE_MNDX_foveation_metal
-XRAPI_ATTR XrResult XRAPI_CALL
-oxr_xrGetFoveationMetalStateMNDX(XrSwapchain swapchain,
+static XrResult
+foveation_metal_state(XrSwapchain swapchain,
                                  uint32_t viewIndex,
                                  uint32_t arrayLayer,
-                                 XrFoveationMetalStateMNDX *state)
+                                 XrFoveationMetalStateMNDX *state,
+                                 bool select, uint32_t width, uint32_t height)
 {
 	OXR_TRACE_MARKER();
 
 	struct oxr_swapchain *sc;
 	struct oxr_logger log;
-	OXR_VERIFY_SWAPCHAIN_AND_INIT_LOG(&log, swapchain, sc, "xrGetFoveationMetalStateMNDX");
+	OXR_VERIFY_SWAPCHAIN_AND_INIT_LOG(&log, swapchain, sc,
+	                                 select ? "xrGetFoveationMetalStateMNDX" : "xrLookupFoveationMetalStateMNDX");
 	OXR_VERIFY_SESSION_NOT_LOST(&log, sc->sess);
 	OXR_VERIFY_ARG_TYPE_AND_NOT_NULL(&log, state, XR_TYPE_FOVEATION_METAL_STATE_MNDX);
 
@@ -525,6 +527,14 @@ oxr_xrGetFoveationMetalStateMNDX(XrSwapchain swapchain,
 	if (arrayLayer >= sc->array_layer_count) {
 		return oxr_error(&log, XR_ERROR_VALIDATION_FAILURE, "arrayLayer %u is outside swapchain array size %u",
 		                 arrayLayer, sc->array_layer_count);
+	}
+
+	if (select || (width == 0 && height == 0)) {
+		width = sc->width;
+		height = sc->height;
+	}
+	if (width == 0 || height == 0 || width > 16384 || height > 16384) {
+		return oxr_error(&log, XR_ERROR_VALIDATION_FAILURE, "Invalid Metal lookup target extent");
 	}
 
 	struct xrt_device *head = GET_STATIC_XDEV_BY_ROLE(sc->sess->sys, head);
@@ -573,8 +583,8 @@ oxr_xrGetFoveationMetalStateMNDX(XrSwapchain swapchain,
 			if (view->viewIndex >= head->hmd->view_count || view->imageRect.offset.x < 0 ||
 			    view->imageRect.offset.y < 0 || view->imageRect.extent.width <= 0 ||
 			    view->imageRect.extent.height <= 0 ||
-			    (uint64_t)view->imageRect.offset.x + (uint32_t)view->imageRect.extent.width > sc->width ||
-			    (uint64_t)view->imageRect.offset.y + (uint32_t)view->imageRect.extent.height > sc->height) {
+			    (uint64_t)view->imageRect.offset.x + (uint32_t)view->imageRect.extent.width > width ||
+			    (uint64_t)view->imageRect.offset.y + (uint32_t)view->imageRect.extent.height > height) {
 				return oxr_error(&log, XR_ERROR_VALIDATION_FAILURE,
 				                 "Invalid packed Metal foveation view %u", i);
 			}
@@ -587,10 +597,20 @@ oxr_xrGetFoveationMetalStateMNDX(XrSwapchain swapchain,
 			    .flags = layout_flags,
 			};
 		}
-		xret = xrt_swapchain_metal_get_packed_foveation_state(xscm, layouts, packed->viewCount, arrayLayer,
-		                                                      &native);
-	} else {
+		if (select) {
+			xret = xrt_swapchain_metal_get_packed_foveation_state(xscm, layouts, packed->viewCount, arrayLayer,
+			                                                      &native);
+		} else {
+			xret = xrt_swapchain_metal_lookup_packed_foveation_state(xscm, layouts, packed->viewCount,
+			                                                         arrayLayer, width, height, &native);
+		}
+	} else if (select) {
 		xret = xrt_swapchain_metal_get_foveation_state(xscm, viewIndex, arrayLayer, &native);
+	} else {
+		const struct xrt_metal_foveation_view_layout layout = {
+		    .view_index = viewIndex, .width = width, .height = height,
+		};
+		xret = xrt_swapchain_metal_lookup_packed_foveation_state(xscm, &layout, 1, arrayLayer, width, height, &native);
 	}
 	if (xret == XRT_ERROR_NOT_IMPLEMENTED) {
 		return oxr_error(&log, XR_ERROR_FEATURE_UNSUPPORTED,
@@ -621,5 +641,27 @@ oxr_xrGetFoveationMetalStateMNDX(XrSwapchain swapchain,
 		memcpy(packed->y, native.compositor_map.y, native.compositor_map.boundary_count * sizeof(float));
 	}
 	return oxr_session_success_result(sc->sess);
+}
+XRAPI_ATTR XrResult XRAPI_CALL
+oxr_xrGetFoveationMetalStateMNDX(XrSwapchain swapchain, uint32_t viewIndex, uint32_t arrayLayer,
+                                 XrFoveationMetalStateMNDX *state)
+{
+	return foveation_metal_state(swapchain, viewIndex, arrayLayer, state, true, 0, 0);
+}
+
+XRAPI_ATTR XrResult XRAPI_CALL
+oxr_xrLookupFoveationMetalStateMNDX(XrSwapchain swapchain, uint32_t viewIndex, uint32_t arrayLayer,
+                                    XrFoveationMetalStateMNDX *state)
+{
+	return foveation_metal_state(swapchain, viewIndex, arrayLayer, state, false, 0, 0);
+}
+XRAPI_ATTR XrResult XRAPI_CALL
+oxr_xrLookupFoveationMetalStateForExtentMNDX(XrSwapchain swapchain, uint32_t viewIndex, uint32_t arrayLayer,
+                                            uint32_t width, uint32_t height, XrFoveationMetalStateMNDX *state)
+{
+	if (width == 0 || height == 0) {
+		return XR_ERROR_VALIDATION_FAILURE;
+	}
+	return foveation_metal_state(swapchain, viewIndex, arrayLayer, state, false, width, height);
 }
 #endif // OXR_HAVE_MNDX_foveation_metal

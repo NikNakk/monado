@@ -20,12 +20,13 @@ extern "C" {
 /*!
  * Per-swapchain Metal foveation map cache.
  *
- * Entries are immutable once built and reference counted. Three kinds of
+ * Entries are immutable once built and reference counted. Four kinds of
  * owner hold references:
  *
  * - the lookup list, which only contains entries for the current revision;
  * - the per-array-layer selection, which is exactly the map most recently
- *   returned to the application for that layer;
+ *   returned by a selecting query for that layer;
+ * - the independent per-array-layer borrow returned by non-selecting lookups;
  * - the per-(image, array layer) binding, which is the selection that was in
  *   effect when that image was successfully released.
  *
@@ -51,6 +52,9 @@ struct comp_metal_foveation_cache
 
 	//! [array_size] entries most recently returned to the application.
 	void **selected;
+
+	//! Independent per-layer lifetime for non-selecting map lookups.
+	void **borrowed;
 
 	//! [image_count * array_size] entries bound on image release.
 	void **image_entries;
@@ -99,6 +103,27 @@ comp_metal_foveation_cache_get_packed(struct comp_metal_foveation_cache *cache,
                                       uint32_t view_count,
                                       uint32_t array_layer,
                                       struct xrt_metal_foveation_state *out_state);
+
+/*!
+ * Borrow a packed map without changing the compositor selection. The most
+ * recent successful lookup for a layer owns its result until the next
+ * successful lookup for that layer or swapchain destruction. Failed lookups
+ * preserve both the existing borrowed map and the compositor selection.
+ */
+xrt_result_t
+comp_metal_foveation_cache_lookup_packed(struct comp_metal_foveation_cache *cache,
+                                         const struct xrt_metal_foveation_view_layout *views,
+                                         uint32_t view_count,
+                                         uint32_t array_layer,
+                                         struct xrt_metal_foveation_state *out_state);
+
+//! Non-selecting lookup at an intermediate target extent (1..16384 per axis).
+xrt_result_t
+comp_metal_foveation_cache_lookup_extent(struct comp_metal_foveation_cache *cache,
+                                         const struct xrt_metal_foveation_view_layout *views,
+                                         uint32_t view_count, uint32_t array_layer,
+                                         uint32_t width, uint32_t height,
+                                         struct xrt_metal_foveation_state *out_state);
 
 /*!
  * Bind the current selection of every array layer to @p image_index. Call
