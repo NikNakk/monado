@@ -16,6 +16,7 @@ set(tests
     tests_floor_calibration
     tests_generic_callbacks
     tests_foveation
+    tests_foveation_angular
     tests_glue_device
     tests_glue_frameserver
     tests_glue_traits
@@ -138,6 +139,7 @@ endif()
 target_link_libraries(tests_cxx_wrappers PRIVATE xrt-interfaces)
 target_link_libraries(tests_glue_device PRIVATE xrt-interfaces aux_glue)
 target_link_libraries(tests_foveation PRIVATE aux_foveation)
+target_link_libraries(tests_foveation_angular PRIVATE aux_foveation)
 target_link_libraries(tests_glue_frameserver PRIVATE xrt-interfaces aux_glue)
 target_link_libraries(tests_glue_traits PRIVATE xrt-interfaces aux_glue)
 target_link_libraries(tests_history_buf PRIVATE aux_math)
@@ -723,4 +725,11 @@ if(UNIX AND XRT_FEATURE_OPENXR AND TARGET ipc_server AND TARGET target_instance)
 		base st_oxr aux_util aux_os xrt-external-openxr xrt-external-catch2)
 	add_test(NAME tests_io_cache_ipc COMMAND tests_io_cache_ipc)
 	set_tests_properties(tests_io_cache_ipc PROPERTIES TIMEOUT 30)
+endif()
+
+if(APPLE)
+ add_executable(tests_metal_foveation_angular tests_metal_foveation_angular.mm)
+ target_compile_features(tests_metal_foveation_angular PRIVATE cxx_std_17)
+ target_link_libraries(tests_metal_foveation_angular PRIVATE aux_metal_foveation xrt-external-openxr xrt-external-catch2 "-framework Metal")
+ add_test(NAME tests_metal_foveation_angular COMMAND tests_metal_foveation_angular)
 endif()

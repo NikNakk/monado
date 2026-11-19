@@ -466,6 +466,10 @@ oxr_xrLookupFoveationMetalStateForExtentMNDX(XrSwapchain swapchain,
                                              uint32_t width,
                                              uint32_t height,
                                              XrFoveationMetalStateMNDX *state);
+XRAPI_ATTR XrResult XRAPI_CALL
+oxr_xrLookupFoveationMetalAngularStateMNDX(XrFoveationProfileFB profile,
+                                           const XrFoveationMetalAngularLookupInfoMNDX *info,
+                                           XrFoveationMetalStateMNDX *state);
 #endif
 
 #ifdef OXR_HAVE_FB_foveation

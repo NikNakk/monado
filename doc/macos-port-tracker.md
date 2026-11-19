@@ -7,6 +7,10 @@ SPDX-License-Identifier: BSL-1.0
 
 # macOS Port Tracker
 
+The [experimental angular-map port](macos-openxr-foveation.md#legacy-angular-intermediate-maps-experimental-version-5)
+preserves the legacy Wine/DXMT policy inside Monado, separately from standard
+FB levels. It remains opt-in and changes no installed runtime or default.
+
 The [Metal foveation lookup candidate](macos-openxr-foveation.md#non-selecting-lookup-experimental-version-4)
 adds non-selecting intermediate maps with independent target extents. It is
 rebased onto the maintained branch for desktop validation; installed runtimes

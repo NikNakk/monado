@@ -4,9 +4,9 @@
  * @file
  * @brief Experimental Metal transport companion for XR_FB_foveation.
  *
- * XR_FB_foveation owns policy and swapchain state. This extension only exposes
- * the current Metal rasterization-rate map required by a Metal application to
- * encode rendering that actually benefits from that policy.
+ * Versions 1..4 expose the Metal rasterization-rate map for standard FB policy.
+ * Version 5 additionally preserves the legacy DXMT angular policy for borrowed
+ * intermediate maps; it never changes standard FB policy or selects composition.
  */
 
 #ifndef XR_MNDX_FOVEATION_METAL_H
@@ -19,7 +19,7 @@ extern "C" {
 #endif
 
 #define XR_MNDX_foveation_metal 1
-#define XR_MNDX_foveation_metal_SPEC_VERSION 4
+#define XR_MNDX_foveation_metal_SPEC_VERSION 5
 #define XR_MNDX_FOVEATION_METAL_EXTENSION_NAME "XR_MNDX_foveation_metal"
 #define XR_MNDX_FOVEATION_METAL_RATE_SAMPLE_COUNT 16
 #define XR_MNDX_FOVEATION_METAL_MAP_BOUNDARY_COUNT 129
@@ -170,6 +170,55 @@ typedef XrResult (XRAPI_PTR *PFN_xrLookupFoveationMetalStateMNDX)(
 typedef XrResult (XRAPI_PTR *PFN_xrLookupFoveationMetalStateForExtentMNDX)(
     XrSwapchain swapchain, uint32_t viewIndex, uint32_t arrayLayer,
     uint32_t width, uint32_t height, XrFoveationMetalStateMNDX* state);
+
+/* Version 5: optional angular policy for non-selecting intermediate maps.
+ * Chain to XrFoveationProfileCreateInfoFB (no other policy chain). The profile
+ * cannot be applied to a swapchain: only the lookup below consumes it.
+ * Requires a Metal session and, for eyeTracked, META_foveation_eye_tracked.
+ * Rates are separable 64 x 32 smoothstep samples in each render view's FOV.
+ * Centres use 0.6*step hysteresis, round to step, clamp to +/-45 degrees.
+ * Missing gaze holds the last centre for 30 successful lookups, then uses
+ * fixed 20/35-degree core/edge radii. eyeTracked=false uses that fixed policy.
+ * The profile caches 256 maps, flushing on the next miss at capacity.
+ */
+XR_STRUCT_ENUM(XR_TYPE_FOVEATION_METAL_ANGULAR_PROFILE_CREATE_INFO_MNDX, 0x7fff505a);
+XR_STRUCT_ENUM(XR_TYPE_FOVEATION_METAL_ANGULAR_LOOKUP_INFO_MNDX, 0x7fff505b);
+XR_STRUCT_ENUM(XR_TYPE_FOVEATION_METAL_ANGULAR_DIAGNOSTICS_MNDX, 0x7fff505c);
+typedef struct XrFoveationMetalAngularProfileCreateInfoMNDX {
+ XrStructureType type; const void* XR_MAY_ALIAS next;
+ float peripheralRate; /* finite, .1..1 */
+ float coreAngleDegrees; /* >=1 */
+ float transitionAngleDegrees; /* >=core+1 */
+ float gazeStepDegrees; /* .25..10 */
+ XrBool32 eyeTracked;
+} XrFoveationMetalAngularProfileCreateInfoMNDX;
+typedef struct XrFoveationMetalAngularViewMNDX {
+ XrRect2Di imageRect;
+ XrFovf fov;
+} XrFoveationMetalAngularViewMNDX;
+typedef struct XrFoveationMetalAngularLookupInfoMNDX {
+ XrStructureType type; const void* XR_MAY_ALIAS next;
+ uint32_t width, height; /* 1..16384 */
+ uint32_t referenceViewIndex;
+ XrFoveationMetalAngularViewMNDX views[2]; /* actual render FOVs, may overlap */
+} XrFoveationMetalAngularLookupInfoMNDX;
+typedef struct XrFoveationMetalAngularDiagnosticsMNDX {
+ XrStructureType type; void* XR_MAY_ALIAS next;
+ XrBool32 gazeValid, hasGaze;
+ float yawDegrees, pitchDegrees;
+ uint32_t buildCount, cacheCount;
+ float horizontalSampleRates[64], verticalSampleRates[32];
+} XrFoveationMetalAngularDiagnosticsMNDX;
+/* Runtime-owned native Metal object; borrowed until next successful lookup on
+ * this profile or profile destruction. Retain for longer use. No compositor
+ * selection or swapchain state changes. Failure preserves history and borrow.
+ * state.next may point to angular diagnostics only; previous structs unchanged.
+ * Normalized runtime gaze of referenceViewIndex is interpreted through views[0]
+ * render FOV, matching the legacy DXMT angular policy. No raw gaze ray exposed.
+ */
+typedef XrResult (XRAPI_PTR *PFN_xrLookupFoveationMetalAngularStateMNDX)(
+ XrFoveationProfileFB profile, const XrFoveationMetalAngularLookupInfoMNDX* info,
+ XrFoveationMetalStateMNDX* state);
 
 #ifdef __cplusplus
 }
