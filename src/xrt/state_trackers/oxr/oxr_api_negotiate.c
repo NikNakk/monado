@@ -308,6 +308,7 @@ handle_non_null(struct oxr_instance *inst, struct oxr_logger *log, const char *n
 	ENTRY_IF_EXT(xrGetFoveationMetalStateMNDX, MNDX_foveation_metal);
 	ENTRY_IF_EXT(xrLookupFoveationMetalStateMNDX, MNDX_foveation_metal);
 	ENTRY_IF_EXT(xrLookupFoveationMetalStateForExtentMNDX, MNDX_foveation_metal);
+	ENTRY_IF_EXT(xrLookupFoveationMetalAngularStateMNDX, MNDX_foveation_metal);
 #endif
 
 #ifdef OXR_HAVE_FB_passthrough

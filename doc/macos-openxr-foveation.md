@@ -460,7 +460,7 @@ The intended incubation path is:
 6. consider broader generalization only if Khronos wants to replace or
    generalize the existing FB-family graphics companions.
 
-The prospective standards description should be narrow:
+For versions 1..4, the prospective standards description should be narrow:
 
 > `XR_FB_foveation` remains authoritative for whether, how strongly and where
 > foveation occurs. The Metal companion introduces no foveation policy. It only
@@ -558,3 +558,37 @@ This supports desktop gaze loss/recovery tests using the normal runtime policy;
 it does not synthesize gaze inside the Wine bridge or change hardware defaults.
 The DXMT provider fixture verifies invalid-to-valid META state transitions,
 continued correct final pixels and ordinary compositor bindings.
+
+## Legacy angular intermediate maps (experimental version 5)
+
+Version 5 adds an optional angular create-info on `XrFoveationProfileFB` and
+`xrLookupFoveationMetalAngularStateMNDX`. This is a compatibility experiment for
+moving the existing Wine/DXMT policy into Monado without changing its rendering
+work. It is **not** a replacement interpretation of FB HIGH or a proposed
+cross-platform standard. Versions 1..4 and standard FB/META behavior stay intact.
+
+The angular profile owns runtime-private gaze, history and its Metal map cache.
+The client supplies the actual two render rectangles/FOVs and intermediate
+extent. The sole policy chain sets peripheral rate, core/transition angles,
+quantization step and tracked/fixed mode. A profile cannot be applied with
+`xrUpdateSwapchainFB`: this entry point only borrows maps and never selects
+compositor reconstruction or allocates swapchain images. Existing explicit
+application FDM remains authoritative in the graphics driver.
+
+The port preserves the legacy 64 x 32 separable smoothstep descriptor, 0.6-step
+hysteresis, step quantization, +/-45-degree clamp, 30-successful-lookup gaze hold,
+20/35-degree fixed fallback and 256-map flush cache. The normalized runtime
+reference-eye centre is interpreted in the first render FOV, matching the legacy
+bridge. Cache hits do not regenerate descriptor rates. Diagnostics are optional.
+The old key omitted vertical FOVs; the new binary key includes complete render
+FOVs to avoid that incorrect reuse. Failed lookups preserve the previous history
+and borrowed map; retained snapshots survive cache flush/profile destruction.
+
+The policy math and cache port preserve the original LGPL-2.1-or-later license
+in separate auxiliary files. No other Monado sources are relicensed. Desktop
+unit tests compare every descriptor float and sampled Metal coordinates against
+the frozen Wine implementation on ARM and Rosetta. They cover hysteresis,
+loss/fallback, geometry validation, A-B-A reuse and eviction. Runtime/API and
+Wine integration results are tracked by threshold-runtime's foveation receipts.
+Hardware acceptance and representative performance validation remain required;
+feature gates, installed runtimes and defaults are unchanged.

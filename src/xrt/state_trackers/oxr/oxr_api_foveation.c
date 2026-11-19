@@ -18,6 +18,10 @@
 #include "os/os_time.h"
 
 #include <stdlib.h>
+#include <string.h>
+#ifdef OXR_HAVE_MNDX_foveation_metal
+#include "metal/m_metal_foveation_angular.h"
+#endif
 
 
 #if defined(OXR_HAVE_FB_foveation) || defined(OXR_HAVE_META_foveation_eye_tracked)
@@ -188,6 +192,13 @@ oxr_foveation_profile_destroy(struct oxr_logger *log, struct oxr_handle_base *hb
 		}
 	}
 
+#ifdef OXR_HAVE_MNDX_foveation_metal
+	m_metal_foveation_angular_destroy(profile->angular);
+#ifdef OXR_HAVE_META_foveation_eye_tracked
+	if (profile->angular_eye_acquired)
+		eye_tracking_release(profile->sess);
+#endif
+#endif
 	free(profile);
 	return XR_SUCCESS;
 }
@@ -229,6 +240,50 @@ oxr_xrCreateFoveationProfileFB(XrSession session,
 	OXR_VERIFY_ARG_NOT_NULL(&log, profile);
 
 	struct oxr_instance *inst = sess->sys->inst;
+#ifdef OXR_HAVE_MNDX_foveation_metal
+	const XrBaseInStructure *chain = createInfo->next;
+	for (const XrBaseInStructure *p = chain; p; p = p->next) {
+		if (p->type == XR_TYPE_FOVEATION_METAL_ANGULAR_PROFILE_CREATE_INFO_MNDX && p != chain)
+			return oxr_error(&log, XR_ERROR_VALIDATION_FAILURE,
+			                 "Angular profile must be the sole policy chain");
+	}
+	if (chain && chain->type == XR_TYPE_FOVEATION_METAL_ANGULAR_PROFILE_CREATE_INFO_MNDX) {
+		const XrFoveationMetalAngularProfileCreateInfoMNDX *a = (const void *)chain;
+		if (!inst->extensions.MNDX_foveation_metal || a->next || a->eyeTracked > XR_TRUE) {
+			return oxr_error(&log, XR_ERROR_VALIDATION_FAILURE,
+			                 "Invalid angular profile chain or extension not enabled");
+		}
+		if (!sess->sys->suggested_metal_device || !sess->compositor ||
+		    sess->gfx_ext != OXR_SESSION_GRAPHICS_EXT_METAL) {
+			return oxr_error(&log, XR_ERROR_FEATURE_UNSUPPORTED, "Angular maps require a Metal session");
+		}
+		if (a->eyeTracked) {
+#ifdef OXR_HAVE_META_foveation_eye_tracked
+			if (!inst->extensions.META_foveation_eye_tracked)
+#endif
+				return oxr_error(&log, XR_ERROR_FEATURE_UNSUPPORTED,
+				                 "Angular gaze requires META_foveation_eye_tracked");
+		}
+		struct u_foveation_angular_config config = {a->peripheralRate, a->coreAngleDegrees,
+		                                            a->transitionAngleDegrees, a->gazeStepDegrees,
+		                                            a->eyeTracked != XR_FALSE};
+		if (!u_foveation_angular_config_valid(&config))
+			return XR_ERROR_VALIDATION_FAILURE;
+		struct oxr_foveation_profile *fp = NULL;
+		OXR_ALLOCATE_HANDLE_OR_RETURN(&log, fp, OXR_XR_DEBUG_FOVEATION_PROFILE, oxr_foveation_profile_destroy,
+		                              &sess->handle);
+		fp->sess = sess;
+		fp->angular = m_metal_foveation_angular_create(sess->sys->suggested_metal_device, &config);
+		if (!fp->angular) {
+			oxr_handle_destroy(&log, &fp->handle);
+			return XR_ERROR_FEATURE_UNSUPPORTED;
+		}
+		fp->angular_eye_tracked = config.eye_tracked;
+		*profile = oxr_foveation_profile_to_openxr(fp);
+		return oxr_session_success_result(sess);
+	}
+#endif
+
 	struct u_foveation_request request = {0};
 	enum oxr_foveation_parse_result parsed =
 	    oxr_foveation_request_from_fb(createInfo,
@@ -307,6 +362,11 @@ oxr_xrUpdateSwapchainFB(XrSwapchain swapchain, const XrSwapchainStateBaseHeaderF
 			return oxr_error(&log, XR_ERROR_HANDLE_INVALID,
 			                 "Foveation profile belongs to a different session");
 		}
+
+#ifdef OXR_HAVE_MNDX_foveation_metal
+		if (fp->angular)
+			return oxr_error(&log, XR_ERROR_FEATURE_UNSUPPORTED, "Angular profiles are non-selecting only");
+#endif
 
 #ifdef OXR_HAVE_META_foveation_eye_tracked
 		const bool old_eye_tracked =
@@ -677,3 +737,82 @@ oxr_xrLookupFoveationMetalStateForExtentMNDX(XrSwapchain swapchain,
 	return foveation_metal_state(swapchain, viewIndex, arrayLayer, state, false, width, height);
 }
 #endif // OXR_HAVE_MNDX_foveation_metal
+
+#ifdef OXR_HAVE_MNDX_foveation_metal
+XRAPI_ATTR XrResult XRAPI_CALL
+oxr_xrLookupFoveationMetalAngularStateMNDX(XrFoveationProfileFB profile,
+                                           const XrFoveationMetalAngularLookupInfoMNDX *info,
+                                           XrFoveationMetalStateMNDX *state)
+{
+	struct oxr_foveation_profile *fp;
+	struct oxr_logger log;
+	OXR_VERIFY_FOVEATION_PROFILE_AND_INIT_LOG(&log, profile, fp, "xrLookupFoveationMetalAngularStateMNDX");
+	OXR_VERIFY_SESSION_NOT_LOST(&log, fp->sess);
+	OXR_VERIFY_ARG_TYPE_AND_NOT_NULL(&log, info, XR_TYPE_FOVEATION_METAL_ANGULAR_LOOKUP_INFO_MNDX);
+	OXR_VERIFY_ARG_TYPE_AND_NOT_NULL(&log, state, XR_TYPE_FOVEATION_METAL_STATE_MNDX);
+	if (!fp->sess->sys->inst->extensions.MNDX_foveation_metal || !fp->angular)
+		return XR_ERROR_FEATURE_UNSUPPORTED;
+	if (info->next || info->referenceViewIndex >= 2)
+		return XR_ERROR_VALIDATION_FAILURE;
+	XrFoveationMetalAngularDiagnosticsMNDX *diag = state->next;
+	if (diag && (diag->type != XR_TYPE_FOVEATION_METAL_ANGULAR_DIAGNOSTICS_MNDX || diag->next))
+		return XR_ERROR_VALIDATION_FAILURE;
+	struct u_foveation_angular_target target = {.width = info->width, .height = info->height};
+	for (unsigned i = 0; i < 2; ++i) {
+		const XrFoveationMetalAngularViewMNDX *v = &info->views[i];
+		target.views[i] = (struct u_foveation_angular_view){v->imageRect.offset.x,
+		                                                    v->imageRect.offset.y,
+		                                                    v->imageRect.extent.width,
+		                                                    v->imageRect.extent.height,
+		                                                    v->fov.angleLeft,
+		                                                    v->fov.angleRight,
+		                                                    v->fov.angleUp,
+		                                                    v->fov.angleDown};
+	}
+	if (!u_foveation_angular_target_valid(&target))
+		return XR_ERROR_VALIDATION_FAILURE;
+	bool valid = false;
+	float yaw = 0, pitch = 0;
+#ifdef OXR_HAVE_META_foveation_eye_tracked
+	if (fp->angular_eye_tracked) {
+		struct xrt_device *eyes = GET_STATIC_XDEV_BY_ROLE(fp->sess->sys, eyes);
+		if (!fp->angular_eye_acquired && eyes && eyes->supported.eye_gaze) {
+			XrResult ret = eye_tracking_acquire(&log, fp->sess);
+			if (XR_FAILED(ret))
+				return ret;
+			fp->angular_eye_acquired = true;
+		}
+		struct xrt_fov fovs[XRT_MAX_VIEWS] = {0};
+		uint32_t count = 0;
+		struct xrt_foveation_state gaze = {0};
+		if (fp->angular_eye_acquired && get_current_view_fovs(fp->sess, fovs, &count) &&
+		    info->referenceViewIndex < count) {
+			valid = sample_eye_tracked_centres(fp->sess, fovs, count, &gaze);
+			if (valid) {
+				const struct xrt_vec2 *center = &gaze.views[info->referenceViewIndex].center;
+				u_foveation_angular_angles(&target.views[0], center->x, center->y, &yaw, &pitch);
+			}
+		}
+	}
+#endif
+	struct m_metal_foveation_angular_result result = {0};
+	if (!m_metal_foveation_angular_lookup(fp->angular, &target, valid, yaw, pitch, diag != NULL, &result))
+		return XR_ERROR_RUNTIME_FAILURE;
+	state->foveationEnabled = XR_TRUE;
+	state->rasterizationRateMap = result.map;
+	state->physicalWidth = result.width;
+	state->physicalHeight = result.height;
+	state->revision = result.revision;
+	if (diag) {
+		diag->gazeValid = valid;
+		diag->hasGaze = result.history.have_gaze;
+		diag->yawDegrees = result.history.have_gaze ? result.history.yaw : 0;
+		diag->pitchDegrees = result.history.have_gaze ? result.history.pitch : 0;
+		diag->buildCount = result.builds;
+		diag->cacheCount = result.cache_count;
+		memcpy(diag->horizontalSampleRates, result.recipe.horizontal, sizeof(diag->horizontalSampleRates));
+		memcpy(diag->verticalSampleRates, result.recipe.vertical, sizeof(diag->verticalSampleRates));
+	}
+	return oxr_session_success_result(fp->sess);
+}
+#endif

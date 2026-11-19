@@ -1465,6 +1465,7 @@ struct oxr_session
 		 * XR_EXT_eye_gaze_interaction and is never exposed as an action/space.
 		 */
 		struct xrt_space *gaze_space;
+		//! Swapchain policies plus borrowed angular-profile gaze owners.
 		uint32_t active_swapchain_count;
 		bool feature_acquired;
 
@@ -2092,6 +2093,11 @@ struct oxr_foveation_profile
 	struct oxr_handle_base handle;
 	struct oxr_session *sess;
 	struct u_foveation_request request;
+#ifdef OXR_HAVE_MNDX_foveation_metal
+	struct m_metal_foveation_angular *angular;
+	bool angular_eye_tracked;
+	bool angular_eye_acquired;
+#endif
 };
 
 static inline XrFoveationProfileFB
