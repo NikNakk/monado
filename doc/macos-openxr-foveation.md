@@ -548,3 +548,13 @@ alone does not deliver foveation. Audit D3DMetal/DXMT capabilities and engine
 hooks before choosing an implementation. A Vulkan client would likewise need
 a real Vulkan foveation backend, which is not implemented here. Prove a fixed
 map on one Wine-rendered scene before adding gaze and game compatibility.
+
+### Desktop synthetic eye regression
+
+`XRT_SIMULATED_EYE_GAZE=1` enables an opt-in synthetic gaze input and eye role
+on the simulated HMD. `XRT_SIMULATED_EYE_GAZE_LOSS=1` additionally clears only
+the eye relation's validity for 300 ms each second. Head tracking stays valid.
+This supports desktop gaze loss/recovery tests using the normal runtime policy;
+it does not synthesize gaze inside the Wine bridge or change hardware defaults.
+The DXMT provider fixture verifies invalid-to-valid META state transitions,
+continued correct final pixels and ordinary compositor bindings.
