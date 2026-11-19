@@ -243,13 +243,16 @@ oxr_xrCreateFoveationProfileFB(XrSession session,
 #ifdef OXR_HAVE_MNDX_foveation_metal
 	const XrBaseInStructure *chain = createInfo->next;
 	for (const XrBaseInStructure *p = chain; p; p = p->next) {
+		if (p->type == XR_TYPE_FOVEATION_METAL_ANGULAR_SHAPE_CREATE_INFO_MNDX &&
+		    (chain->type != XR_TYPE_FOVEATION_METAL_ANGULAR_PROFILE_CREATE_INFO_MNDX || p != chain->next))
+			return oxr_error(&log, XR_ERROR_VALIDATION_FAILURE, "Shape requires an angular profile");
 		if (p->type == XR_TYPE_FOVEATION_METAL_ANGULAR_PROFILE_CREATE_INFO_MNDX && p != chain)
 			return oxr_error(&log, XR_ERROR_VALIDATION_FAILURE,
 			                 "Angular profile must be the sole policy chain");
 	}
 	if (chain && chain->type == XR_TYPE_FOVEATION_METAL_ANGULAR_PROFILE_CREATE_INFO_MNDX) {
 		const XrFoveationMetalAngularProfileCreateInfoMNDX *a = (const void *)chain;
-		if (!inst->extensions.MNDX_foveation_metal || a->next || a->eyeTracked > XR_TRUE) {
+		if (!inst->extensions.MNDX_foveation_metal || a->eyeTracked > XR_TRUE) {
 			return oxr_error(&log, XR_ERROR_VALIDATION_FAILURE,
 			                 "Invalid angular profile chain or extension not enabled");
 		}
@@ -267,6 +270,13 @@ oxr_xrCreateFoveationProfileFB(XrSession session,
 		struct u_foveation_angular_config config = {a->peripheralRate, a->coreAngleDegrees,
 		                                            a->transitionAngleDegrees, a->gazeStepDegrees,
 		                                            a->eyeTracked != XR_FALSE};
+		if (a->next) {
+			const XrFoveationMetalAngularShapeCreateInfoMNDX *shape = a->next;
+			if (shape->type != XR_TYPE_FOVEATION_METAL_ANGULAR_SHAPE_CREATE_INFO_MNDX || shape->next)
+				return oxr_error(&log, XR_ERROR_VALIDATION_FAILURE, "Invalid angular shape chain");
+			config.shape = (enum u_foveation_angular_shape)shape->shape;
+			config.sigma_degrees = shape->sigmaDegrees;
+		}
 		if (!u_foveation_angular_config_valid(&config))
 			return XR_ERROR_VALIDATION_FAILURE;
 		struct oxr_foveation_profile *fp = NULL;

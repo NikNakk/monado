@@ -7,7 +7,10 @@ static const float deg = 57.29577951308232f;
 bool
 u_foveation_angular_config_valid(const struct u_foveation_angular_config *c)
 {
-	return c && isfinite(c->outer) && c->outer >= .1f && c->outer <= 1.f && isfinite(c->core) && c->core >= 1.f &&
+	return c && c->shape >= U_FOVEATION_ANGULAR_SMOOTHSTEP && c->shape <= U_FOVEATION_ANGULAR_GAUSSIAN_CORE &&
+	       (c->shape == U_FOVEATION_ANGULAR_SMOOTHSTEP ||
+	        (isfinite(c->sigma_degrees) && c->sigma_degrees >= .25f && c->sigma_degrees <= 180.f)) &&
+	       isfinite(c->outer) && c->outer >= .1f && c->outer <= 1.f && isfinite(c->core) && c->core >= 1.f &&
 	       isfinite(c->edge) && c->edge >= c->core + 1.f && isfinite(c->step) && c->step >= .25f && c->step <= 10.f;
 }
 bool
@@ -58,6 +61,23 @@ rate(float delta, float core, float edge, float outer)
 	t = t * t * (3.f - 2.f * t);
 	return 1.f + (outer - 1.f) * t;
 }
+float
+u_foveation_angular_axis_rate(const struct u_foveation_angular_config *c,
+                              float delta,
+                              float active_core,
+                              float active_edge)
+{
+	if (c->shape == U_FOVEATION_ANGULAR_SMOOTHSTEP)
+		return rate(delta, active_core, active_edge, c->outer);
+	float d = fabsf(delta);
+	if (c->shape == U_FOVEATION_ANGULAR_GAUSSIAN_CORE)
+		d = fmaxf(0.f, d - active_core);
+	float z = d / c->sigma_degrees;
+	float g = expf(-.5f * z * z);
+	if (c->shape == U_FOVEATION_ANGULAR_GAUSSIAN_FLOOR)
+		return c->outer + (1.f - c->outer) * g;
+	return fmaxf(c->outer, g);
+}
 void
 u_foveation_angular_build_recipe(const struct u_foveation_angular_config *c,
                                  const struct u_foveation_angular_target *t,
@@ -74,7 +94,7 @@ u_foveation_angular_build_recipe(const struct u_foveation_angular_config *c,
 				continue;
 			float l = tanf(v->left), r = tanf(v->right);
 			float angle = atanf(l + (x - v->x) / v->width * (r - l)) * deg;
-			rr = fmaxf(rr, rate(angle - yaw, core, edge, c->outer));
+			rr = fmaxf(rr, u_foveation_angular_axis_rate(c, angle - yaw, core, edge));
 		}
 		out->horizontal[i] = rr;
 	}
@@ -86,7 +106,7 @@ u_foveation_angular_build_recipe(const struct u_foveation_angular_config *c,
 				continue;
 			float u = tanf(v->up), d = tanf(v->down);
 			float angle = atanf(u - (y - v->y) / v->height * (u - d)) * deg;
-			rr = fmaxf(rr, rate(angle - pitch, core, edge, c->outer));
+			rr = fmaxf(rr, u_foveation_angular_axis_rate(c, angle - pitch, core, edge));
 		}
 		out->vertical[j] = rr;
 	}

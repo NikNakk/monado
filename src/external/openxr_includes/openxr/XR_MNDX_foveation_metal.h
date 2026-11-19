@@ -19,7 +19,7 @@ extern "C" {
 #endif
 
 #define XR_MNDX_foveation_metal 1
-#define XR_MNDX_foveation_metal_SPEC_VERSION 5
+#define XR_MNDX_foveation_metal_SPEC_VERSION 6
 #define XR_MNDX_FOVEATION_METAL_EXTENSION_NAME "XR_MNDX_foveation_metal"
 #define XR_MNDX_FOVEATION_METAL_RATE_SAMPLE_COUNT 16
 #define XR_MNDX_FOVEATION_METAL_MAP_BOUNDARY_COUNT 129
@@ -192,6 +192,24 @@ typedef struct XrFoveationMetalAngularProfileCreateInfoMNDX {
  float gazeStepDegrees; /* .25..10 */
  XrBool32 eyeTracked;
 } XrFoveationMetalAngularProfileCreateInfoMNDX;
+/* Version 6: optional shape chain on AngularProfileCreateInfoMNDX. Absent
+ * means legacy smoothstep, preserving every v5 field and default. Gaussian
+ * sigma is in degrees (.25..180); gaze filtering/cache/rendering are unchanged.
+ * Gaussian-core uses the existing active core (20 degrees for fixed/fallback).
+ */
+XR_STRUCT_ENUM(XR_TYPE_FOVEATION_METAL_ANGULAR_SHAPE_CREATE_INFO_MNDX, 0x7fff505d);
+typedef enum XrFoveationMetalAngularShapeMNDX {
+ XR_FOVEATION_METAL_ANGULAR_SHAPE_SMOOTHSTEP_MNDX = 0,
+ XR_FOVEATION_METAL_ANGULAR_SHAPE_GAUSSIAN_CLAMPED_MNDX = 1,
+ XR_FOVEATION_METAL_ANGULAR_SHAPE_GAUSSIAN_FLOOR_MNDX = 2,
+ XR_FOVEATION_METAL_ANGULAR_SHAPE_GAUSSIAN_CORE_MNDX = 3,
+ XR_FOVEATION_METAL_ANGULAR_SHAPE_MAX_ENUM_MNDX = 0x7fffffff
+} XrFoveationMetalAngularShapeMNDX;
+typedef struct XrFoveationMetalAngularShapeCreateInfoMNDX {
+ XrStructureType type; const void* XR_MAY_ALIAS next;
+ XrFoveationMetalAngularShapeMNDX shape;
+ float sigmaDegrees;
+} XrFoveationMetalAngularShapeCreateInfoMNDX;
 typedef struct XrFoveationMetalAngularViewMNDX {
  XrRect2Di imageRect;
  XrFovf fov;

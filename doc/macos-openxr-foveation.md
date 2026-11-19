@@ -592,3 +592,40 @@ loss/fallback, geometry validation, A-B-A reuse and eviction. Runtime/API and
 Wine integration results are tracked by threshold-runtime's foveation receipts.
 Hardware acceptance and representative performance validation remain required;
 feature gates, installed runtimes and defaults are unchanged.
+
+## Selectable angular shapes (experimental version 6)
+
+The optional `XrFoveationMetalAngularShapeCreateInfoMNDX` chained to the v5
+angular create-info selects a Gaussian alternative and sigma in degrees. No
+chain means exactly the existing smoothstep; v5 structs/lookup ABI and standard
+FB/META profiles are unchanged. The additional shapes are:
+
+- Gaussian-clamped: `max(peripheralRate, exp(-0.5 * (delta/sigma)^2))`.
+- Gaussian-floor: `peripheralRate + (1-peripheralRate) * exp(-0.5 * (delta/sigma)^2)`.
+- Gaussian-core: the clamped Gaussian after subtracting the active full-rate
+  core from absolute angular distance (20 degrees for fixed/fallback, configured
+  core for valid/held gaze).
+
+These are **per-axis linear rates**. Two-axis area density is their product.
+A product Gaussian is radial in a flat angular chart before floors; it is not
+exactly radial in spherical eccentricity or after independent axis clamping.
+No single separable map can realize an arbitrary radial density field. The
+core variant retains the existing broad protected centre and is close to the
+legacy profile at an equal budget; the clamped variant trades some 10–30-degree
+sampling for a more circular density distribution. Neither is perceptually
+validated. Gaze filtering, cache-hit behavior, Metal bindings, stay-warped
+rendering and explicit application FDM precedence are unchanged.
+
+The Wine bridge selects these only with `MWXR_FOVEATION_PROVIDER=monado-angular`,
+`MWXR_ANGULAR_PROFILE=gaussian-clamped|gaussian-floor|gaussian-core` and optional
+`MWXR_ANGULAR_SIGMA_DEGREES` (default 15, valid 0.25..180). Sigma is chosen once
+at profile creation; there is no per-frame fitting or allocation on cache hits.
+No override selects the original profile. Unknown names and invalid sigmas fail.
+
+The companion threshold-runtime study in `foveation/profiles/` extracts the
+actual PSVR2 driver FOVs, creates Metal maps, fits centred physical-pixel budgets
+offline, decodes the actual coordinate mapping, and compares registered FB
+levels using Monado's real Metal policy implementation. The FB budget-blended
+shape is an analysis-only diagnostic, not an additional registered FB level.
+Pixel budgets are not GPU timings or perceptual acceptance. Installed runtimes,
+feature gates and defaults stay unchanged; on-headset runs remain user-operated.
