@@ -424,6 +424,20 @@ client_metal_swapchain_get_packed_foveation_state(struct xrt_swapchain_metal *xs
 }
 
 static xrt_result_t
+client_metal_swapchain_lookup_packed_foveation_state(struct xrt_swapchain_metal *xscm,
+                                                     const struct xrt_metal_foveation_view_layout *views,
+                                                     uint32_t view_count,
+                                                     uint32_t array_layer,
+                                                     uint32_t width,
+                                                     uint32_t height,
+                                                     struct xrt_metal_foveation_state *out_state)
+{
+	struct client_metal_swapchain *sc = (struct client_metal_swapchain *)xscm;
+	return comp_metal_foveation_cache_lookup_extent(&sc->foveation, views, view_count, array_layer, width, height,
+	                                                out_state);
+}
+
+static xrt_result_t
 client_metal_swapchain_get_image_foveation_state(struct xrt_swapchain_metal *xscm,
                                                  uint32_t image_index,
                                                  uint32_t array_layer,
@@ -683,6 +697,7 @@ client_metal_compositor_create_swapchain(struct xrt_compositor *xc,
 	    XRT_FOVEATION_CAPABILITY_FIXED | XRT_FOVEATION_CAPABILITY_DYNAMIC | XRT_FOVEATION_CAPABILITY_EYE_TRACKED;
 	sc->base.get_foveation_metal_state = client_metal_swapchain_get_foveation_state;
 	sc->base.get_foveation_metal_packed_state = client_metal_swapchain_get_packed_foveation_state;
+	sc->base.lookup_foveation_metal_packed_state = client_metal_swapchain_lookup_packed_foveation_state;
 	sc->base.get_foveation_metal_image_state = client_metal_swapchain_get_image_foveation_state;
 	sc->base.base.reference.count = 1;
 	sc->base.base.image_count = xscn->base.image_count;

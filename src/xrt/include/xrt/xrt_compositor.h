@@ -2216,6 +2216,15 @@ struct xrt_swapchain_metal
 	                                                 uint32_t array_layer,
 	                                                 struct xrt_metal_foveation_state *out_state);
 
+	//! Borrow a packed map without changing any released-image selection.
+	xrt_result_t (*lookup_foveation_metal_packed_state)(struct xrt_swapchain_metal *xscm,
+	                                                    const struct xrt_metal_foveation_view_layout *views,
+	                                                    uint32_t view_count,
+	                                                    uint32_t array_layer,
+	                                                    uint32_t width,
+	                                                    uint32_t height,
+	                                                    struct xrt_metal_foveation_state *out_state);
+
 	/*!
 	 * Return the map that was bound to image_index/array_layer when that
 	 * image was last successfully released. The compositor uses this to
@@ -2279,6 +2288,22 @@ xrt_swapchain_metal_get_packed_foveation_state(struct xrt_swapchain_metal *xscm,
 		return XRT_ERROR_NOT_IMPLEMENTED;
 	}
 	return xscm->get_foveation_metal_packed_state(xscm, views, view_count, array_layer, out_state);
+}
+
+static inline xrt_result_t
+xrt_swapchain_metal_lookup_packed_foveation_state(struct xrt_swapchain_metal *xscm,
+                                                  const struct xrt_metal_foveation_view_layout *views,
+                                                  uint32_t view_count,
+                                                  uint32_t array_layer,
+                                                  uint32_t width,
+                                                  uint32_t height,
+                                                  struct xrt_metal_foveation_state *out_state)
+{
+	if (xscm->lookup_foveation_metal_packed_state == NULL) {
+		return XRT_ERROR_NOT_IMPLEMENTED;
+	}
+	return xscm->lookup_foveation_metal_packed_state(xscm, views, view_count, array_layer, width, height,
+	                                                 out_state);
 }
 
 static inline xrt_result_t

@@ -19,7 +19,7 @@ extern "C" {
 #endif
 
 #define XR_MNDX_foveation_metal 1
-#define XR_MNDX_foveation_metal_SPEC_VERSION 3
+#define XR_MNDX_foveation_metal_SPEC_VERSION 4
 #define XR_MNDX_FOVEATION_METAL_EXTENSION_NAME "XR_MNDX_foveation_metal"
 #define XR_MNDX_FOVEATION_METAL_RATE_SAMPLE_COUNT 16
 #define XR_MNDX_FOVEATION_METAL_MAP_BOUNDARY_COUNT 129
@@ -140,6 +140,36 @@ typedef XrResult (XRAPI_PTR *PFN_xrGetFoveationMetalStateMNDX)(
     uint32_t viewIndex,
     uint32_t arrayLayer,
     XrFoveationMetalStateMNDX* state);
+
+/*!
+ * Spec version 4: borrow the same map without selecting it for composition.
+ * This supports intermediate stay-warped rendering followed by ordinary final
+ * output. Successful and failed lookups never change a layer's compositor
+ * selection or an existing released-image binding. A borrowed map remains
+ * alive until the next successful lookup for this array layer or swapchain
+ * destruction; selecting queries have an independent lifetime. The caller
+ * must retain the Metal object for use beyond that boundary.
+ *
+ * Arguments and packed-view/image-layout chains match the selecting query.
+ * This entry point uses the swapchain extent. For intermediate targets use
+ * xrLookupFoveationMetalStateForExtentMNDX.
+ */
+typedef XrResult (XRAPI_PTR *PFN_xrLookupFoveationMetalStateMNDX)(
+    XrSwapchain swapchain,
+    uint32_t viewIndex,
+    uint32_t arrayLayer,
+    XrFoveationMetalStateMNDX* state);
+
+/*!
+ * Version 4: non-selecting lookup at a scene target's extent, independent of
+ * the swapchain extent. width/height must be 1..16384; view rectangles are in
+ * target pixels. The policy/view indices still belong to this swapchain.
+ * Same per-array-layer borrowed lifetime as xrLookupFoveationMetalStateMNDX.
+ * No target images are allocated and no compositor selection is changed.
+ */
+typedef XrResult (XRAPI_PTR *PFN_xrLookupFoveationMetalStateForExtentMNDX)(
+    XrSwapchain swapchain, uint32_t viewIndex, uint32_t arrayLayer,
+    uint32_t width, uint32_t height, XrFoveationMetalStateMNDX* state);
 
 #ifdef __cplusplus
 }
