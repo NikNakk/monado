@@ -621,7 +621,9 @@ rendering and explicit application FDM precedence are unchanged.
 The Wine bridge selects these only with `MWXR_FOVEATION_PROVIDER=monado-angular`,
 `MWXR_ANGULAR_PROFILE=gaussian-clamped|gaussian-floor|gaussian-core` and optional
 `MWXR_ANGULAR_SIGMA_DEGREES` (default 15, valid 0.25..180). Sigma is chosen once
-at profile creation; there is no per-frame fitting or allocation on cache hits.
+at profile creation; there is no per-frame fitting or new native-map allocation on cache hits.
+The existing dictionary-key allocation/lookup remains; it is included in the
+CPU cache-hit measurements.
 No override selects the original profile. Unknown names and invalid sigmas fail.
 
 The companion threshold-runtime study in `foveation/profiles/` extracts the
