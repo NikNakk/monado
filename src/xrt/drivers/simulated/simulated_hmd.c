@@ -100,8 +100,8 @@ simulated_hmd_get_tracked_pose(struct xrt_device *xdev,
 	struct simulated_hmd *hmd = simulated_hmd(xdev);
 
 	if (name == XRT_INPUT_GENERIC_EYE_GAZE_POSE && hmd->base.supported.eye_gaze) {
-		xrt_result_t result = simulated_hmd_get_tracked_pose(xdev, XRT_INPUT_GENERIC_HEAD_POSE,
-		                                                     at_timestamp_ns, out_relation);
+		xrt_result_t result =
+		    simulated_hmd_get_tracked_pose(xdev, XRT_INPUT_GENERIC_HEAD_POSE, at_timestamp_ns, out_relation);
 		const double t = time_ns_to_s(at_timestamp_ns - hmd->created_ns);
 		// Optional desktop regression: repeat 300 ms of invalid gaze each
 		// second. Head tracking stays valid; only the synthetic eye relation
@@ -196,8 +196,8 @@ simulated_hmd_set_passthrough_sinks(struct xrt_device *xdev, struct xrt_frame_si
 static xrt_result_t
 simulated_eye_feature(struct xrt_device *xdev, enum xrt_device_feature_type type)
 {
-	return xdev->supported.eye_gaze && type == XRT_DEVICE_FEATURE_EYE_TRACKING
-	           ? XRT_SUCCESS : XRT_ERROR_FEATURE_NOT_SUPPORTED;
+	return xdev->supported.eye_gaze && type == XRT_DEVICE_FEATURE_EYE_TRACKING ? XRT_SUCCESS
+	                                                                           : XRT_ERROR_FEATURE_NOT_SUPPORTED;
 }
 
 static xrt_result_t
@@ -255,7 +255,8 @@ simulated_hmd_create(enum simulated_movement movement, const struct xrt_pose *ce
 {
 	enum u_device_alloc_flags flags =
 	    (enum u_device_alloc_flags)(U_DEVICE_ALLOC_HMD | U_DEVICE_ALLOC_TRACKING_NONE);
-	struct simulated_hmd *hmd = U_DEVICE_ALLOCATE(struct simulated_hmd, flags, debug_get_bool_option_simulated_eye_gaze() ? 2 : 1, 0);
+	struct simulated_hmd *hmd =
+	    U_DEVICE_ALLOCATE(struct simulated_hmd, flags, debug_get_bool_option_simulated_eye_gaze() ? 2 : 1, 0);
 	hmd->base.update_inputs = simulated_update_inputs;
 	hmd->base.get_tracked_pose = simulated_hmd_get_tracked_pose;
 	hmd->base.get_view_poses = u_device_get_view_poses;
