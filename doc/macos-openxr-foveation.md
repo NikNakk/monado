@@ -613,7 +613,9 @@ No single separable map can realize an arbitrary radial density field. The
 core variant retains the existing broad protected centre and is close to the
 legacy profile at an equal budget; the clamped variant trades some 10–30-degree
 sampling for a more circular density distribution. Neither is perceptually
-validated. Gaze filtering, cache-hit behavior, Metal bindings, stay-warped
+validated. Missing tracked gaze uses the original broad 20/35-degree smoothstep
+fallback after the existing 30-lookup hold; fixed-mode comparisons retain the
+selected shape. Gaze filtering, cache-hit behavior, Metal bindings, stay-warped
 rendering and explicit application FDM precedence are unchanged.
 
 The Wine bridge selects these only with `MWXR_FOVEATION_PROVIDER=monado-angular`,

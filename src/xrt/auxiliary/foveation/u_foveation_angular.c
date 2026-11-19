@@ -84,6 +84,14 @@ u_foveation_angular_build_recipe(const struct u_foveation_angular_config *c,
                                  const struct u_foveation_angular_history *h,
                                  struct u_foveation_angular_recipe *out)
 {
+	/* Preserve the legacy broad safety profile for missing tracked gaze.
+	 * Explicit fixed-mode profiles still use the selected alternative. */
+	struct u_foveation_angular_config fallback;
+	if (c->eye_tracked && !h->have_gaze && c->shape != U_FOVEATION_ANGULAR_SMOOTHSTEP) {
+		fallback = *c;
+		fallback.shape = U_FOVEATION_ANGULAR_SMOOTHSTEP;
+		c = &fallback;
+	}
 	float yaw = h->have_gaze ? h->yaw : 0.f, pitch = h->have_gaze ? h->pitch : 0.f;
 	float core = h->have_gaze ? c->core : 20.f, edge = h->have_gaze ? c->edge : 35.f;
 	for (unsigned i = 0; i < 64; ++i) {
