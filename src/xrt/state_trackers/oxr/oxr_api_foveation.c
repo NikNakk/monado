@@ -112,16 +112,13 @@ eye_tracking_release(struct oxr_session *sess)
 }
 
 static bool
-sample_eye_tracked_centres(struct oxr_session *sess, struct xrt_foveation_state *state)
+sample_eye_tracked_centres(struct oxr_session *sess,
+                           const struct xrt_fov *fovs,
+                           uint32_t view_count,
+                           struct xrt_foveation_state *state)
 {
-	if (sess == NULL || state == NULL || sess->eye_tracked_foveation.gaze_space == NULL ||
-	    sess->sys->xso->semantic.view == NULL) {
-		return false;
-	}
-
-	struct xrt_fov fovs[XRT_MAX_VIEWS] = {0};
-	uint32_t view_count = 0;
-	if (!get_current_view_fovs(sess, fovs, &view_count)) {
+	if (sess == NULL || state == NULL || fovs == NULL || view_count == 0 ||
+	    sess->eye_tracked_foveation.gaze_space == NULL || sess->sys->xso->semantic.view == NULL) {
 		return false;
 	}
 
@@ -375,7 +372,9 @@ oxr_xrUpdateSwapchainFB(XrSwapchain swapchain, const XrSwapchainStateBaseHeaderF
 
 #ifdef OXR_HAVE_META_foveation_eye_tracked
 			if (xrt_state.eye_tracked) {
-				gaze_valid = sample_eye_tracked_centres(sc->sess, &xrt_state);
+				// Reuse the FOVs already queried for this update. On an IPC
+				// client, querying them again would repeat a service round trip.
+				gaze_valid = sample_eye_tracked_centres(sc->sess, fovs, view_count, &xrt_state);
 				if (!gaze_valid && !oxr_foveation_resolve_fixed_centres(fovs, view_count, &xrt_state)) {
 					if (acquired_eye_tracking) {
 						eye_tracking_release(sc->sess);
