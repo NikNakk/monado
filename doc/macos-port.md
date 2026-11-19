@@ -6,6 +6,10 @@ SPDX-License-Identifier: BSL-1.0
 
 # macOS / PS VR2 Port Status
 
+[Experimental angular shape alternatives](macos-openxr-foveation.md#selectable-angular-shapes-experimental-version-6)
+add opt-in Gaussian rate maps for matched-budget study. Smoothstep defaults,
+standard FB/META, explicit FDM and the stay-warped pipeline remain unchanged.
+
 The [experimental angular-map port](macos-openxr-foveation.md#legacy-angular-intermediate-maps-experimental-version-5)
 preserves the legacy Wine/DXMT policy inside Monado, separately from standard
 FB levels. It remains opt-in and changes no installed runtime or default.

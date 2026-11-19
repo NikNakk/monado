@@ -15,7 +15,7 @@ TEST_CASE("Angular runtime maps match legacy descriptors and coordinates", "[fov
 		SKIP("Metal rate-map device required");
 	}
 	@autoreleasepool {
-		u_foveation_angular_config c = {.3f, 12, 27, 2, true};
+		u_foveation_angular_config c = {.3f, 12, 27, 2, true, U_FOVEATION_ANGULAR_SMOOTHSTEP, 0};
 		gaze.outer = c.outer;
 		auto *cache = m_metal_foveation_angular_create((void *)device, &c);
 		REQUIRE(cache);

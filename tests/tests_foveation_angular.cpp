@@ -6,7 +6,7 @@
 #include <cstring>
 TEST_CASE("Angular gaze preserves quantization, hysteresis, hold and fallback", "[foveation][angular]")
 {
-	u_foveation_angular_config c = {.3f, 12.f, 27.f, 2.f, true};
+	u_foveation_angular_config c = {.3f, 12.f, 27.f, 2.f, true, U_FOVEATION_ANGULAR_SMOOTHSTEP, 0};
 	u_foveation_angular_history h = {};
 	REQUIRE(u_foveation_angular_config_valid(&c));
 	u_foveation_angular_update(&c, true, 10.1f, -4.1f, &h);
@@ -45,10 +45,46 @@ TEST_CASE("Angular targets reject invalid geometry and FOVs", "[foveation][angul
 	REQUIRE_FALSE(u_foveation_angular_target_valid(&t));
 	t.views[0].up = 1.58f;
 	REQUIRE_FALSE(u_foveation_angular_target_valid(&t));
-	u_foveation_angular_config c = {.3f, 12, 27, 2, true};
+	u_foveation_angular_config c = {.3f, 12, 27, 2, true, U_FOVEATION_ANGULAR_SMOOTHSTEP, 0};
 	c.outer = NAN;
 	REQUIRE_FALSE(u_foveation_angular_config_valid(&c));
 	c.outer = .3f;
 	c.step = 0;
 	REQUIRE_FALSE(u_foveation_angular_config_valid(&c));
+}
+
+TEST_CASE("Gaussian alternatives preserve linear-rate bounds and separable identity", "[foveation][angular]")
+{
+	struct u_foveation_angular_config c = {.3f, 12, 27, 2, true, U_FOVEATION_ANGULAR_GAUSSIAN_CLAMPED, 15};
+	REQUIRE(u_foveation_angular_config_valid(&c));
+	for (int shape = 1; shape <= 3; ++shape) {
+		c.shape = (enum u_foveation_angular_shape)shape;
+		float last = 1;
+		for (unsigned angle = 0; angle <= 90; ++angle) {
+			float a = u_foveation_angular_axis_rate(&c, float(angle), 20, 35);
+			REQUIRE(a >= .3f);
+			REQUIRE(a <= 1);
+			REQUIRE(a <= last);
+			REQUIRE(a == u_foveation_angular_axis_rate(&c, -float(angle), 20, 35));
+			last = a;
+		}
+		REQUIRE(u_foveation_angular_axis_rate(&c, 0, 20, 35) == 1);
+	}
+	c.shape = U_FOVEATION_ANGULAR_GAUSSIAN_CLAMPED;
+	float x = u_foveation_angular_axis_rate(&c, 8, 20, 35), y = u_foveation_angular_axis_rate(&c, 12, 20, 35);
+	REQUIRE(x * y == Catch::Approx(std::exp(-.5f * (8 * 8 + 12 * 12) / (15 * 15))));
+	c.shape = U_FOVEATION_ANGULAR_GAUSSIAN_CORE;
+	REQUIRE(u_foveation_angular_axis_rate(&c, 20, 20, 35) == 1);
+	REQUIRE(u_foveation_angular_axis_rate(&c, 21, 20, 35) < 1);
+	c.sigma_degrees = 0;
+	REQUIRE_FALSE(u_foveation_angular_config_valid(&c));
+	c.sigma_degrees = NAN;
+	REQUIRE_FALSE(u_foveation_angular_config_valid(&c));
+	c.sigma_degrees = 181;
+	REQUIRE_FALSE(u_foveation_angular_config_valid(&c));
+	c.shape = (enum u_foveation_angular_shape)99;
+	REQUIRE_FALSE(u_foveation_angular_config_valid(&c));
+	c.shape = U_FOVEATION_ANGULAR_SMOOTHSTEP;
+	c.sigma_degrees = 0;
+	REQUIRE(u_foveation_angular_config_valid(&c));
 }
