@@ -6,6 +6,12 @@ SPDX-License-Identifier: BSL-1.0
 
 # macOS / PS VR2 Port Status
 
+The [Metal foveation lookup candidate](macos-openxr-foveation.md#non-selecting-lookup-experimental-version-4)
+adds non-selecting intermediate maps with independent target extents. It is
+rebased onto the maintained branch for desktop validation; installed runtimes
+and defaults are unchanged. Synthetic gaze/loss remains explicitly opt-in.
+
+
 The [17 November Sense confirmation investigation](macos-pssense-occlusion.md#recorded-prior-reproduction-and-confirmation-retry-17-november)
 reproduces in-view controller losses using recorded live priors. A tentative-track
 refine retry and a [filter-reset alignment refresh](macos-pssense-occlusion.md#lit-gap-diagnosis-stale-alignment-after-a-filter-reset-17-november)
