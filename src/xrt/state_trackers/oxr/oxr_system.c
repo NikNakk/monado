@@ -572,6 +572,23 @@ oxr_system_get_properties(struct oxr_logger *log, struct oxr_system *sys, XrSyst
 	}
 #endif
 
+#ifdef OXR_HAVE_META_foveation_eye_tracked
+	XrSystemFoveationEyeTrackedPropertiesMETA *foveation_eye_props = NULL;
+	if (sys->inst->extensions.META_foveation_eye_tracked) {
+		foveation_eye_props = OXR_GET_OUTPUT_FROM_CHAIN(
+		    properties, XR_TYPE_SYSTEM_FOVEATION_EYE_TRACKED_PROPERTIES_META,
+		    XrSystemFoveationEyeTrackedPropertiesMETA);
+	}
+
+	if (foveation_eye_props) {
+		struct xrt_device *eyes = GET_STATIC_XDEV_BY_ROLE(sys, eyes);
+		struct xrt_device *head = GET_STATIC_XDEV_BY_ROLE(sys, head);
+		const bool has_stereo_views = head != NULL && head->hmd != NULL && head->hmd->view_count >= 2;
+		foveation_eye_props->supportsFoveationEyeTracked =
+		    eyes != NULL && eyes->supported.eye_gaze && has_stereo_views ? XR_TRUE : XR_FALSE;
+	}
+#endif
+
 #ifdef OXR_HAVE_MNDX_force_feedback_curl
 	XrSystemForceFeedbackCurlPropertiesMNDX *force_feedback_props = NULL;
 	if (sys->inst->extensions.MNDX_force_feedback_curl) {

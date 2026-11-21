@@ -68,3 +68,40 @@ The diagnostic world is anchored once, using the first valid head pose. Its forw
 If the magenta head-locked cross remains visually stable while the world-locked grid and markers judder, the problem is downstream of application rendering but tied to transforming/presenting world geometry with predicted tracking. If both judder together, presentation cadence or scanout remains a stronger candidate. If the effect changes strongly with target depth or eccentricity, that helps distinguish positional prediction, rotational prediction, distortion/scanout and simple whole-frame cadence errors.
 
 The application currently uses the OpenXR Metal graphics binding. This is deliberately native and small, but it should not be treated as a graphics-API-neutral control against a Vulkan `hello_xr` run; where graphics API itself is under test, compare like with like.
+
+
+## Standard foveation diagnostics
+
+The diagnostic also exercises the standards-facing foveation path described in
+[OpenXR foveation architecture on macOS](macos-openxr-foveation.md).
+
+Fixed FB foveation:
+
+```sh
+XR_RUNTIME_JSON="$PWD/build-wine/openxr_monado-dev.json" \
+  ./build-wine/src/xrt/targets/psvr2_openxr_test/psvr2-openxr-test \
+  --fb-foveation --foveation-profile aggressive
+```
+
+Runtime-owned eye-tracked foveation:
+
+```sh
+XR_RUNTIME_JSON="$PWD/build-wine/openxr_monado-dev.json" \
+  ./build-wine/src/xrt/targets/psvr2_openxr_test/psvr2-openxr-test \
+  --fb-eye-foveation --foveation-profile aggressive
+```
+
+The eye-tracked mode deliberately does not enable
+`XR_EXT_eye_gaze_interaction`. Its logs report the META validity flag and
+standardized per-eye NDC foveation centres, not a public gaze action.
+
+The standard modes render directly into the OpenXR Metal swapchain with the
+runtime-provided `MTLRasterizationRateMap`; Monado's compositor obtains the
+matching dense map from swapchain state and reconstructs logical sampling in
+the existing distortion/timewarp pass.
+
+`--depth-layer` is currently rejected with these modes until compact depth
+coordinates are implemented and validated.
+
+The older `--gaze-foveation` and `--gaze-foveation-fused` modes remain as
+reference/regression paths only.

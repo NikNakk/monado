@@ -2180,6 +2180,41 @@ xrt_compositor_vk(struct xrt_compositor *xc)
  * @ingroup xrt_iface comp_client
  * @extends xrt_swapchain
  */
+#define XRT_METAL_FOVEATION_ZONE_COUNT 16
+
+struct xrt_metal_foveation_view_layout
+{
+	uint32_t view_index;
+	int32_t offset_x;
+	int32_t offset_y;
+	uint32_t width;
+	uint32_t height;
+};
+
+struct xrt_metal_foveation_state
+{
+	bool enabled;
+	void *rasterization_rate_map;
+	uint32_t physical_width;
+	uint32_t physical_height;
+	uint32_t revision;
+
+	/*
+	 * Descriptor samples used to build rasterization_rate_map. Keeping these
+	 * alongside the native pointer lets multi-process clients reconstruct the
+	 * same immutable Metal map on another process using the same MTLDevice.
+	 */
+	uint32_t sample_count;
+	float horizontal_rates[XRT_METAL_FOVEATION_ZONE_COUNT];
+	float vertical_rates[XRT_METAL_FOVEATION_ZONE_COUNT];
+
+	/*
+	 * Exact logical-to-physical mapping represented by rasterization_rate_map.
+	 * The compositor consumes this so sampling matches application rendering.
+	 */
+	struct xrt_foveation_map_data compositor_map;
+};
+
 struct xrt_swapchain_metal
 {
 	//! @public Base
@@ -2187,6 +2222,36 @@ struct xrt_swapchain_metal
 
 	//! Images to be used by the caller.
 	void *images[XRT_MAX_SWAPCHAIN_IMAGES];
+
+	/*!
+	 * Return the native Metal state for a resolved XRT foveation policy.
+	 * view_index is independent of array_layer: separate per-eye swapchains
+	 * commonly use array layer zero for both views.
+	 */
+	xrt_result_t (*get_foveation_metal_state)(struct xrt_swapchain_metal *xscm,
+	                                          uint32_t view_index,
+	                                          uint32_t array_layer,
+	                                          struct xrt_metal_foveation_state *out_state);
+
+	/*!
+	 * Return one Metal map covering multiple OpenXR views packed into
+	 * sub-rectangles of the same array layer.
+	 */
+	xrt_result_t (*get_foveation_metal_packed_state)(
+	    struct xrt_swapchain_metal *xscm,
+	    const struct xrt_metal_foveation_view_layout *views,
+	    uint32_t view_count,
+	    uint32_t array_layer,
+	    struct xrt_metal_foveation_state *out_state);
+
+	/*!
+	 * Return the map most recently selected by the application for this array
+	 * layer. The compositor uses this to reconstruct exactly what was rendered.
+	 */
+	xrt_result_t (*get_foveation_metal_active_state)(
+	    struct xrt_swapchain_metal *xscm,
+	    uint32_t array_layer,
+	    struct xrt_metal_foveation_state *out_state);
 };
 
 /*!
@@ -2210,6 +2275,49 @@ static inline struct xrt_swapchain_metal *
 xrt_swapchain_metal(struct xrt_swapchain *xsc)
 {
 	return (struct xrt_swapchain_metal *)xsc;
+}
+
+/*!
+ * Query Metal-native foveation state when implemented by the concrete
+ * Metal client swapchain.
+ */
+static inline xrt_result_t
+xrt_swapchain_metal_get_foveation_state(struct xrt_swapchain_metal *xscm,
+                                        uint32_t view_index,
+                                        uint32_t array_layer,
+                                        struct xrt_metal_foveation_state *out_state)
+{
+	if (xscm->get_foveation_metal_state == NULL) {
+		return XRT_ERROR_NOT_IMPLEMENTED;
+	}
+	return xscm->get_foveation_metal_state(xscm, view_index, array_layer, out_state);
+}
+
+static inline xrt_result_t
+xrt_swapchain_metal_get_packed_foveation_state(
+    struct xrt_swapchain_metal *xscm,
+    const struct xrt_metal_foveation_view_layout *views,
+    uint32_t view_count,
+    uint32_t array_layer,
+    struct xrt_metal_foveation_state *out_state)
+{
+	if (xscm->get_foveation_metal_packed_state == NULL) {
+		return XRT_ERROR_NOT_IMPLEMENTED;
+	}
+	return xscm->get_foveation_metal_packed_state(
+	    xscm, views, view_count, array_layer, out_state);
+}
+
+static inline xrt_result_t
+xrt_swapchain_metal_get_active_foveation_state(
+    struct xrt_swapchain_metal *xscm,
+    uint32_t array_layer,
+    struct xrt_metal_foveation_state *out_state)
+{
+	if (xscm->get_foveation_metal_active_state == NULL) {
+		return XRT_ERROR_NOT_IMPLEMENTED;
+	}
+	return xscm->get_foveation_metal_active_state(xscm, array_layer, out_state);
 }
 
 /*!

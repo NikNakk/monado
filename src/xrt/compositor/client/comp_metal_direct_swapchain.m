@@ -11,6 +11,7 @@
 
 #include "xrt/xrt_compositor.h"
 #include "xrt/xrt_gfx_metal.h"
+#include "comp_metal_foveation_cache.h"
 #include "util/comp_metal_swapchain_import.h"
 #include "util/comp_swapchain.h"
 #include "util/u_logging.h"
@@ -41,6 +42,7 @@ struct metal_direct_swapchain
 	struct xrt_swapchain_metal base;
 	struct xrt_swapchain_native *xscn;
 	id<MTLCommandQueue> command_queue;
+	struct comp_metal_foveation_cache foveation;
 };
 
 static pthread_mutex_t g_contexts_mutex = PTHREAD_MUTEX_INITIALIZER;
@@ -127,6 +129,8 @@ metal_direct_swapchain_destroy(struct xrt_swapchain *xsc)
 {
 	struct metal_direct_swapchain *sc = metal_direct_swapchain(xsc);
 
+	comp_metal_foveation_cache_destroy(&sc->foveation);
+
 	for (uint32_t i = 0; i < sc->base.base.image_count; i++) {
 		id<MTLTexture> texture = (__bridge id<MTLTexture>)sc->base.images[i];
 		if (texture != nil) {
@@ -138,6 +142,46 @@ metal_direct_swapchain_destroy(struct xrt_swapchain *xsc)
 	xrt_swapchain_native_reference(&sc->xscn, NULL);
 	[sc->command_queue release];
 	free(sc);
+}
+
+static xrt_result_t
+metal_direct_swapchain_set_foveation(struct xrt_swapchain *xsc, const struct xrt_foveation_state *state)
+{
+	return comp_metal_foveation_cache_set(&metal_direct_swapchain(xsc)->foveation, state);
+}
+
+static xrt_result_t
+metal_direct_swapchain_get_foveation_state(struct xrt_swapchain_metal *xscm,
+                                           uint32_t view_index,
+                                           uint32_t array_layer,
+                                           struct xrt_metal_foveation_state *out_state)
+{
+	struct metal_direct_swapchain *sc = (struct metal_direct_swapchain *)xscm;
+	return comp_metal_foveation_cache_get(&sc->foveation, view_index, array_layer, out_state);
+}
+
+static xrt_result_t
+metal_direct_swapchain_get_packed_foveation_state(
+    struct xrt_swapchain_metal *xscm,
+    const struct xrt_metal_foveation_view_layout *views,
+    uint32_t view_count,
+    uint32_t array_layer,
+    struct xrt_metal_foveation_state *out_state)
+{
+	struct metal_direct_swapchain *sc = (struct metal_direct_swapchain *)xscm;
+	return comp_metal_foveation_cache_get_packed(
+	    &sc->foveation, views, view_count, array_layer, out_state);
+}
+
+static xrt_result_t
+metal_direct_swapchain_get_active_foveation_state(
+    struct xrt_swapchain_metal *xscm,
+    uint32_t array_layer,
+    struct xrt_metal_foveation_state *out_state)
+{
+	struct metal_direct_swapchain *sc = (struct metal_direct_swapchain *)xscm;
+	return comp_metal_foveation_cache_get_active(
+	    &sc->foveation, array_layer, out_state);
 }
 
 static xrt_result_t
@@ -347,10 +391,24 @@ metal_direct_create_swapchain(struct xrt_compositor *xc,
 	sc->base.base.wait_image = metal_direct_swapchain_wait_image;
 	sc->base.base.barrier_image = metal_direct_swapchain_barrier_image;
 	sc->base.base.release_image = metal_direct_swapchain_release_image;
+	sc->base.base.set_foveation = metal_direct_swapchain_set_foveation;
+	sc->base.base.foveation_capabilities =
+	    XRT_FOVEATION_CAPABILITY_FIXED | XRT_FOVEATION_CAPABILITY_DYNAMIC | XRT_FOVEATION_CAPABILITY_EYE_TRACKED;
+	sc->base.get_foveation_metal_state = metal_direct_swapchain_get_foveation_state;
+	sc->base.get_foveation_metal_packed_state =
+	    metal_direct_swapchain_get_packed_foveation_state;
+	sc->base.get_foveation_metal_active_state =
+	    metal_direct_swapchain_get_active_foveation_state;
 	sc->base.base.reference.count = 1;
 	sc->base.base.image_count = xsccp.image_count;
 	sc->xscn = xscn;
 	sc->command_queue = [link->command_queue retain];
+	if (!comp_metal_foveation_cache_init(&sc->foveation, (__bridge void *)link->device,
+	                                      info->width, info->height, info->array_size)) {
+		metal_direct_swapchain_destroy(&sc->base.base);
+		release_texture_array(textures, xsccp.image_count);
+		return XRT_ERROR_ALLOCATION;
+	}
 
 	for (uint32_t i = 0; i < xsccp.image_count; i++) {
 		/* Transfer newSharedTextureWithDescriptor's +1 ownership to the client. */

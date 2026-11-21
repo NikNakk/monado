@@ -144,3 +144,64 @@ TEST_CASE("standard foveation resolves to backend-neutral XRT state")
 	CHECK(state.middle_rate == Catch::Approx(1.0f));
 	CHECK(state.peripheral_rate == Catch::Approx(1.0f));
 }
+
+
+TEST_CASE("fixed FB vertical offset resolves relative to view centre")
+{
+	struct xrt_fov fovs[2] = {
+	    {-0.8f, 0.8f, 0.7f, -0.7f},
+	    {-0.9f, 0.7f, 0.8f, -0.6f},
+	};
+	struct xrt_foveation_state state{};
+	state.vertical_offset_degrees = 0.0f;
+
+	REQUIRE(oxr_foveation_resolve_fixed_centres(fovs, 2, &state));
+	CHECK(state.view_count == 2);
+	CHECK(state.views[0].center_valid);
+	CHECK(state.views[1].center_valid);
+	CHECK(state.views[0].center.x == Catch::Approx(0.0f));
+	CHECK(state.views[0].center.y == Catch::Approx(0.0f).margin(1e-6f));
+	CHECK(state.views[1].center.y == Catch::Approx(0.0f).margin(1e-6f));
+
+	state.vertical_offset_degrees = 10.0f;
+	REQUIRE(oxr_foveation_resolve_fixed_centres(fovs, 2, &state));
+	CHECK(state.views[0].center.y > 0.0f);
+	CHECK(state.views[1].center.y > 0.0f);
+
+	state.vertical_offset_degrees = -10.0f;
+	REQUIRE(oxr_foveation_resolve_fixed_centres(fovs, 2, &state));
+	CHECK(state.views[0].center.y < 0.0f);
+	CHECK(state.views[1].center.y < 0.0f);
+}
+
+
+TEST_CASE("runtime-owned gaze projects to per-view META NDC centres")
+{
+	struct xrt_fov fovs[2] = {
+	    {-0.8f, 0.7f, 0.65f, -0.60f},
+	    {-0.7f, 0.8f, 0.60f, -0.65f},
+	};
+	struct xrt_foveation_state state{};
+	struct xrt_vec3 forward{0.0f, 0.0f, -1.0f};
+
+	REQUIRE(oxr_foveation_resolve_gaze_centres(&forward, fovs, 2, 0.0f, &state));
+	CHECK(state.view_count == 2);
+	CHECK(state.views[0].center_valid);
+	CHECK(state.views[1].center_valid);
+
+	// Asymmetric eye FOVs mean straight-ahead gaze need not be texture-centred.
+	CHECK(state.views[0].center.x != Catch::Approx(0.0f));
+	CHECK(state.views[1].center.x != Catch::Approx(0.0f));
+
+	struct xrt_vec3 right_up{0.15f, 0.10f, -1.0f};
+	REQUIRE(oxr_foveation_resolve_gaze_centres(&right_up, fovs, 2, 0.0f, &state));
+	CHECK(state.views[0].center.x > -1.0f);
+	CHECK(state.views[0].center.y > -1.0f);
+
+	const float before_y = state.views[0].center.y;
+	REQUIRE(oxr_foveation_resolve_gaze_centres(&right_up, fovs, 2, 5.0f, &state));
+	CHECK(state.views[0].center.y > before_y);
+
+	struct xrt_vec3 behind{0.0f, 0.0f, 1.0f};
+	CHECK_FALSE(oxr_foveation_resolve_gaze_centres(&behind, fovs, 2, 0.0f, &state));
+}
