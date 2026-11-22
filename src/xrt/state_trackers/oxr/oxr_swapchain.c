@@ -139,6 +139,10 @@ destroy(struct oxr_logger *log, struct oxr_swapchain *sc)
 	}
 #endif
 
+#ifdef OXR_HAVE_MNDX_foveation_metal
+	oxr_swapchain_image_maps_clear(sc);
+#endif
+
 	// Drop our reference, does NULL checking.
 	xrt_swapchain_reference(&sc->swapchain, NULL);
 
@@ -195,6 +199,11 @@ oxr_swapchain_common_acquire(struct oxr_logger *log, struct oxr_swapchain *sc, u
 	sc->acquired.num++;
 	u_index_fifo_push(&sc->acquired.fifo, index);
 	sc->images[index].state = OXR_IMAGE_STATE_ACQUIRED;
+
+#ifdef OXR_HAVE_MNDX_foveation_metal
+	// Before the application renders: the map this image will be written with.
+	oxr_swapchain_image_maps_bind(log, sc, index);
+#endif
 
 	// If the compositor is reusing the image,
 	// mark it as invalid to use in xrEndFrame.

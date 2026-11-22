@@ -1498,6 +1498,19 @@ submit_projection_layer(struct oxr_session *sess,
 		}
 	}
 
+#ifdef OXR_HAVE_MNDX_foveation_metal
+	// Swapchains publishing rate maps learn the views they are rendered with.
+	for (uint32_t i = 0; i < proj->viewCount; i++) {
+		bool seen = false;
+		for (uint32_t j = 0; j < i && !seen; j++) {
+			seen = scs[j] == scs[i];
+		}
+		if (!seen && scs[i] != NULL) {
+			oxr_swapchain_image_maps_note_views(scs[i], proj->views, proj->viewCount);
+		}
+	}
+#endif
+
 	if (spc->space_type == OXR_SPACE_TYPE_REFERENCE_VIEW) {
 		flags |= XRT_LAYER_COMPOSITION_VIEW_SPACE_BIT;
 	}

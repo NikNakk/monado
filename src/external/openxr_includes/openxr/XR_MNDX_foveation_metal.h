@@ -19,7 +19,7 @@ extern "C" {
 #endif
 
 #define XR_MNDX_foveation_metal 1
-#define XR_MNDX_foveation_metal_SPEC_VERSION 6
+#define XR_MNDX_foveation_metal_SPEC_VERSION 7
 #define XR_MNDX_FOVEATION_METAL_EXTENSION_NAME "XR_MNDX_foveation_metal"
 #define XR_MNDX_FOVEATION_METAL_RATE_SAMPLE_COUNT 16
 #define XR_MNDX_FOVEATION_METAL_MAP_BOUNDARY_COUNT 129

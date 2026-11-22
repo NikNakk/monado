@@ -61,6 +61,18 @@ void
 u_foveation_angular_angles(const struct u_foveation_angular_view *v, float x, float y, float *yaw, float *pitch);
 /* Returns false only if the profile mathematics is unavailable or rejects the
  * (already validated) inputs. */
+/*!
+ * Publishes @p map as the rate map an image will be written with, on the image's
+ * root Metal texture, through threshold-foveation's process-wide bindings. A
+ * graphics driver in the same process that renders into that texture (directly,
+ * or through views, imports and its own scene passes) finds it there, whatever
+ * graphics API the application uses. NULL clears the binding.
+ *
+ * Returns false when threshold-foveation is unavailable or rejects the pair.
+ */
+bool
+u_foveation_angular_bind_metal_texture(void *texture, void *map);
+
 bool
 u_foveation_angular_build_recipe(const struct u_foveation_angular_config *c,
                                  const struct u_foveation_angular_target *t,

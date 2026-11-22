@@ -573,7 +573,8 @@ extent. The sole policy chain sets peripheral rate, core/transition angles,
 quantization step and tracked/fixed mode. A profile cannot be applied with
 `xrUpdateSwapchainFB`: this entry point only borrows maps and never selects
 compositor reconstruction or allocates swapchain images. Existing explicit
-application FDM remains authoritative in the graphics driver.
+application FDM remains authoritative in the graphics driver. (Version 7 lets
+`xrUpdateSwapchainFB` apply one to publish maps on images; see below.)
 
 The port preserves the legacy 64 x 32 separable smoothstep descriptor, 0.6-step
 hysteresis, step quantization, +/-45-degree clamp, 30-successful-lookup gaze hold,
@@ -625,6 +626,37 @@ at profile creation; there is no per-frame fitting or new native-map allocation 
 The existing dictionary-key allocation/lookup remains; it is included in the
 CPU cache-hit measurements.
 No override selects the original profile. Unknown names and invalid sigmas fail.
+
+## Maps published on images (experimental version 7)
+
+`xrUpdateSwapchainFB` now accepts an angular profile on a Metal swapchain created
+with `XrSwapchainCreateInfoFoveationFB`. It never selects a map for the
+application to render with and changes no compositor reconstruction. Instead:
+
+- The swapchain takes its own copy of the profile's provider (configuration,
+  gaze history, map cache), so the profile handle may be destroyed at once. A
+  later update with a non-angular profile, or destroying the swapchain, stops
+  publishing and clears the images' bindings.
+- Each `xrEndFrame` projection layer records the rectangles and FOVs of the views
+  rendered from the swapchain: both eyes when they share it, otherwise one eye.
+- On each acquire, before the application renders, Monado looks up the map for
+  the current gaze and those views and binds it to the image's Metal texture
+  with threshold-foveation's `tf_metal_set_texture_map`. Until the first
+  projection layer the image carries no map.
+
+The binding is process-wide state of threshold-foveation, keyed by the root
+texture and shared by its views. A graphics driver in the client process that
+renders into the image, or into its own scene targets for the same frame, finds
+the map with `tf_metal_copy_texture_map`. That makes the path independent of the
+application's graphics API: a Vulkan driver such as KosmicKrisp serves native
+Vulkan, OpenGL through Zink and D3D12 through VKD3D alike. The driver is
+responsible for producing ordinary final pixels; images reach the compositor
+unwarped, as with the version 5 lookup path. The driver and Monado must load
+the same `libthreshold_foveation`, or each sees its own bindings.
+
+The version 5 lookup remains for clients that pass maps to their renderer
+themselves. Building without threshold-foveation, or with a library lacking the
+Metal adapters, makes the update fail with `XR_ERROR_FEATURE_UNSUPPORTED`.
 
 ## Shared profile mathematics (22 November 2026)
 

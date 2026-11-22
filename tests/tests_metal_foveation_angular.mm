@@ -121,3 +121,56 @@ TEST_CASE("Angular runtime maps match legacy descriptors and coordinates", "[fov
 	}
 	[device release];
 }
+
+#ifdef XRT_TEST_HAVE_THRESHOLD_FOVEATION
+#include <threshold_foveation.h>
+#endif
+
+TEST_CASE("Image rate maps are published on the root texture for drivers", "[foveation][angular][metal]")
+{
+	id<MTLDevice> device = MTLCreateSystemDefaultDevice();
+	if (!device || ![device supportsRasterizationRateMapWithLayerCount:1] || !u_foveation_angular_available()) {
+		[device release];
+		SKIP("Metal rate-map device and threshold-foveation required");
+	}
+	@autoreleasepool {
+		u_foveation_angular_config c = {.25f, 10, 22, 2, false, U_FOVEATION_ANGULAR_SMOOTHSTEP, 0};
+		auto *cache = m_metal_foveation_angular_create((void *)device, &c);
+		REQUIRE(cache);
+		u_foveation_angular_target t = {
+		    1024, 512, {{0, 0, 512, 512, -.9f, .8f, .85f, -.8f}, {512, 0, 512, 512, -.8f, .9f, .85f, -.8f}}};
+		m_metal_foveation_angular_result out = {};
+		REQUIRE(m_metal_foveation_angular_lookup(cache, &t, false, 0, 0, false, &out));
+		REQUIRE(out.map);
+
+		MTLTextureDescriptor *desc = [MTLTextureDescriptor texture2DDescriptorWithPixelFormat:MTLPixelFormatRGBA8Unorm
+		                                                                                width:1024
+		                                                                               height:512
+		                                                                            mipmapped:NO];
+		desc.usage = MTLTextureUsageRenderTarget | MTLTextureUsageShaderRead | MTLTextureUsagePixelFormatView;
+		id<MTLTexture> image = [device newTextureWithDescriptor:desc];
+		id<MTLTexture> view = [image newTextureViewWithPixelFormat:MTLPixelFormatRGBA8Unorm_sRGB];
+		REQUIRE(u_foveation_angular_bind_metal_texture((void *)image, out.map));
+#ifdef XRT_TEST_HAVE_THRESHOLD_FOVEATION
+		// A driver that imported the image, or holds a view of it, finds the same map.
+		void *found = tf_metal_copy_texture_map((void *)view);
+		REQUIRE(found == out.map);
+		tf_metal_release(found);
+#endif
+		// A map for another size is refused and leaves the binding alone.
+		u_foveation_angular_target small = {
+		    512, 256, {{0, 0, 256, 256, -.9f, .8f, .85f, -.8f}, {256, 0, 256, 256, -.8f, .9f, .85f, -.8f}}};
+		m_metal_foveation_angular_result other = {};
+		REQUIRE(m_metal_foveation_angular_lookup(cache, &small, false, 0, 0, false, &other));
+		REQUIRE_FALSE(u_foveation_angular_bind_metal_texture((void *)image, other.map));
+		REQUIRE(u_foveation_angular_bind_metal_texture((void *)image, nullptr));
+#ifdef XRT_TEST_HAVE_THRESHOLD_FOVEATION
+		REQUIRE(tf_metal_copy_texture_map((void *)image) == nullptr);
+#endif
+		REQUIRE_FALSE(u_foveation_angular_bind_metal_texture(nullptr, nullptr));
+		[view release];
+		[image release];
+		m_metal_foveation_angular_destroy(cache);
+	}
+	[device release];
+}

@@ -34,6 +34,7 @@
 #include "util/u_hashmap.h"
 #include "util/u_device.h"
 #include "foveation/u_foveation.h"
+#include "foveation/u_foveation_angular.h"
 
 #include "oxr_extension_support.h"
 #include "oxr_defines.h"
@@ -1893,6 +1894,27 @@ struct oxr_swapchain
 	XrFoveationProfileFB foveation_source_profile;
 #endif
 
+#ifdef OXR_HAVE_MNDX_foveation_metal
+	/*!
+	 * Runtime rate maps published on this swapchain's images. Set by
+	 * xrUpdateSwapchainFB with an angular profile: each acquired image gets
+	 * the map for the current gaze and the views last submitted from this
+	 * swapchain, bound to its Metal texture through threshold-foveation, so
+	 * the graphics driver rendering into it can foveate. The swapchain owns
+	 * its own provider, so the profile may be destroyed straight away.
+	 */
+	struct
+	{
+		struct m_metal_foveation_angular *provider;
+		bool eye_tracked;
+		bool eye_acquired;
+		struct u_foveation_angular_target target;
+		bool have_target;
+		uint32_t reference_view;
+		bool warned;
+	} image_maps;
+#endif
+
 	XrResult (*destroy)(struct oxr_logger *, struct oxr_swapchain *);
 
 	XrResult (*enumerate_images)(struct oxr_logger *,
@@ -2095,10 +2117,30 @@ struct oxr_foveation_profile
 	struct u_foveation_request request;
 #ifdef OXR_HAVE_MNDX_foveation_metal
 	struct m_metal_foveation_angular *angular;
+	struct u_foveation_angular_config angular_config;
 	bool angular_eye_tracked;
 	bool angular_eye_acquired;
 #endif
 };
+
+#ifdef OXR_HAVE_MNDX_foveation_metal
+/*!
+ * The views a projection layer submitted from @p sc (one per eye, or both when
+ * the eyes share the swapchain), used for the maps published on its images.
+ */
+void
+oxr_swapchain_image_maps_note_views(struct oxr_swapchain *sc,
+                                    const XrCompositionLayerProjectionView *views,
+                                    uint32_t view_count);
+
+//! Publishes the current map on image @p index; called when it is acquired.
+void
+oxr_swapchain_image_maps_bind(struct oxr_logger *log, struct oxr_swapchain *sc, uint32_t index);
+
+//! Stops publishing maps on @p sc and clears its images' bindings.
+void
+oxr_swapchain_image_maps_clear(struct oxr_swapchain *sc);
+#endif
 
 static inline XrFoveationProfileFB
 oxr_foveation_profile_to_openxr(struct oxr_foveation_profile *profile)

@@ -288,6 +288,7 @@ oxr_xrCreateFoveationProfileFB(XrSession session,
 			oxr_handle_destroy(&log, &fp->handle);
 			return XR_ERROR_FEATURE_UNSUPPORTED;
 		}
+		fp->angular_config = config;
 		fp->angular_eye_tracked = config.eye_tracked;
 		*profile = oxr_foveation_profile_to_openxr(fp);
 		return oxr_session_success_result(sess);
@@ -337,6 +338,173 @@ oxr_xrDestroyFoveationProfileFB(XrFoveationProfileFB profile)
 
 
 #ifdef OXR_HAVE_FB_swapchain_update_state
+#ifdef OXR_HAVE_MNDX_foveation_metal
+/*
+ * The gaze for an angular map: yaw and pitch through the reference view of
+ * @p target. Acquires the runtime-private eye tracker on first use.
+ */
+static bool
+angular_gaze(struct oxr_logger *log,
+             struct oxr_session *sess,
+             bool eye_tracked,
+             bool *eye_acquired,
+             const struct u_foveation_angular_target *target,
+             uint32_t reference_view,
+             float *out_yaw,
+             float *out_pitch)
+{
+	bool valid = false;
+#ifdef OXR_HAVE_META_foveation_eye_tracked
+	if (eye_tracked) {
+		struct xrt_device *eyes = GET_STATIC_XDEV_BY_ROLE(sess->sys, eyes);
+		if (!*eye_acquired && eyes && eyes->supported.eye_gaze &&
+		    XR_SUCCEEDED(eye_tracking_acquire(log, sess))) {
+			*eye_acquired = true;
+		}
+		struct xrt_fov fovs[XRT_MAX_VIEWS] = {0};
+		uint32_t count = 0;
+		struct xrt_foveation_state gaze = {0};
+		if (*eye_acquired && get_current_view_fovs(sess, fovs, &count) && reference_view < count) {
+			valid = sample_eye_tracked_centres(sess, fovs, count, &gaze);
+			if (valid) {
+				const struct xrt_vec2 *center = &gaze.views[reference_view].center;
+				u_foveation_angular_angles(&target->views[0], center->x, center->y, out_yaw, out_pitch);
+			}
+		}
+	}
+#else
+	(void)log;
+	(void)sess;
+	(void)eye_tracked;
+	(void)eye_acquired;
+	(void)target;
+	(void)reference_view;
+	(void)out_yaw;
+	(void)out_pitch;
+#endif
+	return valid;
+}
+
+static void
+image_maps_unbind_all(struct oxr_swapchain *sc)
+{
+	if (sc->swapchain == NULL || sc->sess->gfx_ext != OXR_SESSION_GRAPHICS_EXT_METAL) {
+		return;
+	}
+	struct xrt_swapchain_metal *xscm = xrt_swapchain_metal(sc->swapchain);
+	for (uint32_t i = 0; i < sc->swapchain->image_count; i++) {
+		(void)u_foveation_angular_bind_metal_texture(xscm->images[i], NULL);
+	}
+}
+
+void
+oxr_swapchain_image_maps_clear(struct oxr_swapchain *sc)
+{
+	if (sc->image_maps.provider == NULL) {
+		return;
+	}
+	image_maps_unbind_all(sc);
+	m_metal_foveation_angular_destroy(sc->image_maps.provider);
+#ifdef OXR_HAVE_META_foveation_eye_tracked
+	if (sc->image_maps.eye_acquired) {
+		eye_tracking_release(sc->sess);
+	}
+#endif
+	memset(&sc->image_maps, 0, sizeof(sc->image_maps));
+}
+
+static XrResult
+image_maps_start(struct oxr_logger *log, struct oxr_swapchain *sc, struct oxr_foveation_profile *fp)
+{
+	if (sc->sess->gfx_ext != OXR_SESSION_GRAPHICS_EXT_METAL || sc->swapchain == NULL) {
+		return oxr_error(log, XR_ERROR_FEATURE_UNSUPPORTED, "Image rate maps need a Metal swapchain");
+	}
+	if (!u_foveation_angular_bind_metal_texture(xrt_swapchain_metal(sc->swapchain)->images[0], NULL)) {
+		return oxr_error(log, XR_ERROR_FEATURE_UNSUPPORTED,
+		                 "Image rate maps need threshold-foveation's Metal bindings");
+	}
+	struct m_metal_foveation_angular *provider =
+	    m_metal_foveation_angular_create(sc->sess->sys->suggested_metal_device, &fp->angular_config);
+	if (provider == NULL) {
+		return oxr_error(log, XR_ERROR_RUNTIME_FAILURE, "Could not create the image rate map provider");
+	}
+	// The views last submitted stay valid when only the profile changes.
+	struct u_foveation_angular_target target = sc->image_maps.target;
+	bool have_target = sc->image_maps.have_target;
+	uint32_t reference_view = sc->image_maps.reference_view;
+	oxr_swapchain_image_maps_clear(sc);
+	sc->image_maps.provider = provider;
+	sc->image_maps.eye_tracked = fp->angular_config.eye_tracked;
+	sc->image_maps.target = target;
+	sc->image_maps.have_target = have_target;
+	sc->image_maps.reference_view = reference_view;
+	return XR_SUCCESS;
+}
+
+void
+oxr_swapchain_image_maps_note_views(struct oxr_swapchain *sc,
+                                    const XrCompositionLayerProjectionView *views,
+                                    uint32_t view_count)
+{
+	if (sc->image_maps.provider == NULL || view_count == 0) {
+		return;
+	}
+	struct u_foveation_angular_target target = {.width = sc->width, .height = sc->height};
+	uint32_t found = 0, reference = 0;
+	for (uint32_t i = 0; i < view_count && found < 2; i++) {
+		if (views[i].subImage.swapchain != oxr_swapchain_to_openxr(sc)) {
+			continue;
+		}
+		const XrRect2Di *r = &views[i].subImage.imageRect;
+		const XrFovf *f = &views[i].fov;
+		target.views[found] = (struct u_foveation_angular_view){r->offset.x,     r->offset.y,  r->extent.width,
+		                                                        r->extent.height, f->angleLeft, f->angleRight,
+		                                                        f->angleUp,       f->angleDown};
+		if (found++ == 0) {
+			reference = i;
+		}
+	}
+	if (found == 0) {
+		return;
+	}
+	// One eye per swapchain: the map covers that eye alone.
+	if (found == 1) {
+		target.views[1] = target.views[0];
+	}
+	if (!u_foveation_angular_target_valid(&target)) {
+		return;
+	}
+	sc->image_maps.target = target;
+	sc->image_maps.reference_view = reference;
+	sc->image_maps.have_target = true;
+}
+
+void
+oxr_swapchain_image_maps_bind(struct oxr_logger *log, struct oxr_swapchain *sc, uint32_t index)
+{
+	if (sc->image_maps.provider == NULL) {
+		return;
+	}
+	void *texture = xrt_swapchain_metal(sc->swapchain)->images[index];
+	void *map = NULL;
+	if (sc->image_maps.have_target) {
+		float yaw = 0, pitch = 0;
+		bool valid = angular_gaze(log, sc->sess, sc->image_maps.eye_tracked, &sc->image_maps.eye_acquired,
+		                          &sc->image_maps.target, sc->image_maps.reference_view, &yaw, &pitch);
+		struct m_metal_foveation_angular_result result = {0};
+		if (m_metal_foveation_angular_lookup(sc->image_maps.provider, &sc->image_maps.target, valid, yaw,
+		                                     pitch, false, &result)) {
+			map = result.map;
+		} else if (!sc->image_maps.warned) {
+			sc->image_maps.warned = true;
+			oxr_warn(log, "Image rate map lookup failed; images are published without a map");
+		}
+	}
+	// Until the first projection layer names its views, the image carries no map.
+	(void)u_foveation_angular_bind_metal_texture(texture, map);
+}
+#endif // OXR_HAVE_MNDX_foveation_metal
+
 XRAPI_ATTR XrResult XRAPI_CALL
 oxr_xrUpdateSwapchainFB(XrSwapchain swapchain, const XrSwapchainStateBaseHeaderFB *state)
 {
@@ -374,8 +542,17 @@ oxr_xrUpdateSwapchainFB(XrSwapchain swapchain, const XrSwapchainStateBaseHeaderF
 		}
 
 #ifdef OXR_HAVE_MNDX_foveation_metal
-		if (fp->angular)
-			return oxr_error(&log, XR_ERROR_FEATURE_UNSUPPORTED, "Angular profiles are non-selecting only");
+		if (fp->angular) {
+			// Angular profiles never select maps for the application to render with;
+			// they publish maps on the swapchain's images for the graphics driver.
+			XrResult ret = image_maps_start(&log, sc, fp);
+			if (XR_SUCCEEDED(ret)) {
+				sc->foveation_source_profile = foveation->profile;
+				return oxr_session_success_result(sc->sess);
+			}
+			return ret;
+		}
+		oxr_swapchain_image_maps_clear(sc);
 #endif
 
 #ifdef OXR_HAVE_META_foveation_eye_tracked
@@ -781,30 +958,9 @@ oxr_xrLookupFoveationMetalAngularStateMNDX(XrFoveationProfileFB profile,
 	}
 	if (!u_foveation_angular_target_valid(&target))
 		return XR_ERROR_VALIDATION_FAILURE;
-	bool valid = false;
 	float yaw = 0, pitch = 0;
-#ifdef OXR_HAVE_META_foveation_eye_tracked
-	if (fp->angular_eye_tracked) {
-		struct xrt_device *eyes = GET_STATIC_XDEV_BY_ROLE(fp->sess->sys, eyes);
-		if (!fp->angular_eye_acquired && eyes && eyes->supported.eye_gaze) {
-			XrResult ret = eye_tracking_acquire(&log, fp->sess);
-			if (XR_FAILED(ret))
-				return ret;
-			fp->angular_eye_acquired = true;
-		}
-		struct xrt_fov fovs[XRT_MAX_VIEWS] = {0};
-		uint32_t count = 0;
-		struct xrt_foveation_state gaze = {0};
-		if (fp->angular_eye_acquired && get_current_view_fovs(fp->sess, fovs, &count) &&
-		    info->referenceViewIndex < count) {
-			valid = sample_eye_tracked_centres(fp->sess, fovs, count, &gaze);
-			if (valid) {
-				const struct xrt_vec2 *center = &gaze.views[info->referenceViewIndex].center;
-				u_foveation_angular_angles(&target.views[0], center->x, center->y, &yaw, &pitch);
-			}
-		}
-	}
-#endif
+	bool valid = angular_gaze(&log, fp->sess, fp->angular_eye_tracked, &fp->angular_eye_acquired, &target,
+	                          info->referenceViewIndex, &yaw, &pitch);
 	struct m_metal_foveation_angular_result result = {0};
 	if (!m_metal_foveation_angular_lookup(fp->angular, &target, valid, yaw, pitch, diag != NULL, &result))
 		return XR_ERROR_RUNTIME_FAILURE;

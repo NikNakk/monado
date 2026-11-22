@@ -164,3 +164,15 @@ u_foveation_angular_build_recipe(const struct u_foveation_angular_config *c,
 	return false;
 }
 #endif
+
+bool
+u_foveation_angular_bind_metal_texture(void *texture, void *map)
+{
+#ifdef XRT_HAVE_THRESHOLD_FOVEATION
+	return texture != NULL && tf_metal_set_texture_map(texture, map) == 0;
+#else
+	(void)texture;
+	(void)map;
+	return false;
+#endif
+}
