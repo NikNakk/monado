@@ -225,7 +225,8 @@ TEST_CASE("IMU optical filter rejects an outlier and re-initialises after a long
 
 	// Two seconds hidden: IMU-only drift is large, the next optical pose re-initialises.
 	double start = sim.t_ns * 1e-9;
-	sim.run(f, 2.0, [&](double t) { return t < start; }, nothing);
+	sim.run(
+	    f, 2.0, [&](double t) { return t < start; }, nothing);
 	sim.run(f, 0.3, always, nothing);
 	t_imu_optical_filter_get_stats(f, &stats);
 	CHECK(stats.reinitialisations == 1);
@@ -239,7 +240,8 @@ TEST_CASE("IMU optical filter stops reporting a position soon after optical stop
 	Sim sim;
 	sim.run(f, 4.0, always, nothing);
 	double start = sim.t_ns * 1e-9;
-	sim.run(f, 1.0, [&](double t) { return t < start; }, nothing);
+	sim.run(
+	    f, 1.0, [&](double t) { return t < start; }, nothing);
 	xrt_space_relation rel;
 	REQUIRE(t_imu_optical_filter_get_relation(f, sim.t_ns, &rel));
 	CHECK((rel.relation_flags & XRT_SPACE_RELATION_POSITION_VALID_BIT) == 0);
@@ -272,7 +274,8 @@ TEST_CASE("Application inertial fallback bridges occlusion without extending the
 	Sim sim;
 	sim.imu_period_ns = 15'000'000; // approximately the Sense's 66 Hz input rate
 	sim.run(f, 6.0, always, nothing);
-	sim.run(f, 0.45, [](double) { return false; }, nothing);
+	sim.run(
+	    f, 0.45, [](double) { return false; }, nothing);
 	xrt_space_relation normal, fallback;
 	REQUIRE(t_imu_optical_filter_get_relation(f, sim.t_ns, &normal));
 	REQUIRE(t_imu_optical_filter_get_relation_with_fallback(f, sim.t_ns, 600'000'000, &fallback));
@@ -285,11 +288,13 @@ TEST_CASE("Application inertial fallback bridges occlusion without extending the
 	REQUIRE(t_imu_optical_filter_get_relation(f, sim.t_ns, &normal));
 	CHECK((normal.relation_flags & XRT_SPACE_RELATION_POSITION_VALID_BIT) == 0);
 
-	sim.run(f, 0.3, [](double) { return false; }, nothing);
+	sim.run(
+	    f, 0.3, [](double) { return false; }, nothing);
 	REQUIRE(t_imu_optical_filter_get_relation_with_fallback(f, sim.t_ns, 600'000'000, &fallback));
 	CHECK((fallback.relation_flags & XRT_SPACE_RELATION_POSITION_VALID_BIT) == 0);
 	// Even an excessive caller limit cannot permit more than one second of drift.
-	sim.run(f, 0.4, [](double) { return false; }, nothing);
+	sim.run(
+	    f, 0.4, [](double) { return false; }, nothing);
 	REQUIRE(t_imu_optical_filter_get_relation_with_fallback(f, sim.t_ns, 10'000'000'000, &fallback));
 	CHECK((fallback.relation_flags & XRT_SPACE_RELATION_POSITION_VALID_BIT) == 0);
 

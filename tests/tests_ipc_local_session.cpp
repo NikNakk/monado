@@ -28,7 +28,9 @@ const int pin_gpu_hung_threshold = setenv("XRT_MACOS_CLIENT_GPU_HUNG_MS", "500",
 // Use the real multi compositor and its wait thread, without starting a GPU renderer.
 struct Fixture
 {
-	struct multi_system_compositor multi{};
+	struct multi_system_compositor multi
+	{
+	};
 	xrt_compositor_native native{};
 	ipc_connection connection{};
 	u_macos_hosted_client *client;
@@ -253,7 +255,7 @@ struct ProducerGate : xrt_compositor_semaphore
 			return gate->changed.wait_for(lock, std::chrono::nanoseconds(timeout),
 			                              [&] { return gate->ready; })
 			           ? XRT_SUCCESS
-				   : XRT_TIMEOUT;
+			           : XRT_TIMEOUT;
 		};
 		destroy = [](xrt_compositor_semaphore *) {};
 	}
@@ -538,7 +540,7 @@ TEST_CASE("hosted session loss query preserves queued local loss")
 	REQUIRE(xrt_session_get_loss_status(f.session, &lost) == XRT_SUCCESS);
 	CHECK_FALSE(lost);
 	auto *mc = reinterpret_cast<struct multi_compositor *>(f.compositor);
-	union xrt_session_event event{};
+	union xrt_session_event event {};
 	event.type = XRT_SESSION_EVENT_LOST;
 	REQUIRE(xrt_session_event_sink_push(mc->xses, &event) == XRT_SUCCESS);
 	REQUIRE(xrt_session_get_loss_status(f.session, &lost) == XRT_SUCCESS);
@@ -553,7 +555,7 @@ TEST_CASE("hosted loss query ignores unused remote compositor loss but detects t
 {
 	Fixture f;
 	f.create_session();
-	union xrt_session_event event{};
+	union xrt_session_event event {};
 	event.type = XRT_SESSION_EVENT_LOST;
 	b_session_event_push(reinterpret_cast<b_session *>(remote_session), &event);
 	bool lost = true;

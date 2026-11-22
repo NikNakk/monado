@@ -531,7 +531,9 @@ struct LayerFixture : Fixture
 				quad.inverse_quad_transform.v[15] = 1;
 				quad.inverse_quad_transform.v[12] = -cs * x + sn * z;
 				quad.inverse_quad_transform.v[14] = -sn * x - cs * z;
-				struct xrt_matrix_4x4 plane{};
+				struct xrt_matrix_4x4 plane
+				{
+				};
 				plane.v[0] = cs;
 				plane.v[2] = -sn;
 				plane.v[5] = 1;

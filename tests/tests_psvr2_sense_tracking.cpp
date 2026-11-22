@@ -109,7 +109,9 @@ TEST_CASE("Sense camera origin composes the head pose and preserves validity")
 
 TEST_CASE("Sense camera sinks reject replacement and drain before detaching")
 {
-	struct psvr2_hmd head{};
+	struct psvr2_hmd head
+	{
+	};
 	std::snprintf(head.base.str, sizeof(head.base.str), "PS VR2 test");
 	os_mutex_init(&head.data_lock);
 	xrt_frame_sink sink{};
@@ -370,7 +372,9 @@ TEST_CASE("Mode 4 passthrough retains image contrast, doubles pixels and exclude
 
 TEST_CASE("Mode 4 lower camera delivery reaches both passthrough sinks without switching modes")
 {
-	struct psvr2_hmd hmd{};
+	struct psvr2_hmd hmd
+	{
+	};
 	hmd.camera_mode = PSVR2_CAMERA_MODE_4;
 	os_mutex_init(&hmd.data_lock);
 	Mode4Sink left, right;
@@ -401,7 +405,9 @@ TEST_CASE("Mode 4 lower camera delivery reaches both passthrough sinks without s
 
 TEST_CASE("Mode 4 passthrough detach drains an in-flight sink callback")
 {
-	struct psvr2_hmd hmd{};
+	struct psvr2_hmd hmd
+	{
+	};
 	hmd.base.name = XRT_DEVICE_PSVR2;
 	hmd.camera_streams_enabled = true;
 	hmd.camera_mode = PSVR2_CAMERA_MODE_4;
@@ -441,7 +447,9 @@ TEST_CASE("Mode 4 passthrough detach drains an in-flight sink callback")
 
 TEST_CASE("LED detector owns Sense exposure timing outside mode 4")
 {
-	struct psvr2_hmd hmd{};
+	struct psvr2_hmd hmd
+	{
+	};
 	hmd.camera_mode = PSVR2_CAMERA_MODE_4;
 	CHECK_FALSE(psvr2_led_detector_owns_exposure_timing(&hmd));
 	hmd.led_detector_blobs = true;

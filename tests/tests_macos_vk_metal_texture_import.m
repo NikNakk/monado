@@ -280,7 +280,7 @@ main(int argc, char **argv)
 						    destinationBytesPerImage:layer_bytes
 						                     options:combined
 						                                 ? MTLBlitOptionDepthFromDepthStencil
-										 : MTLBlitOptionNone];
+						                                 : MTLBlitOptionNone];
 						if (combined)
 							[blit copyFromTexture:owner
 							                 sourceSlice:layer
@@ -388,10 +388,10 @@ main(int argc, char **argv)
 									                     : .25f + (float)value / 16;
 									if (format == VK_FORMAT_D16_UNORM
 									        ? abs((int)*(const uint16_t *)pixel -
-										      (int)lroundf(expected * 65535)) >
+									              (int)lroundf(expected * 65535)) >
 									              1
-										: fabsf(*(const float *)pixel -
-										        expected) > 1e-6f)
+									        : fabsf(*(const float *)pixel -
+									                expected) > 1e-6f)
 										return 1;
 									if (combined &&
 									    ((const uint8_t *)stencil
@@ -418,7 +418,7 @@ main(int argc, char **argv)
 											     format ==
 											         VK_FORMAT_B8G8R8A8_SRGB) &&
 											            (channel == 0 ||
-												     channel == 2)
+											             channel == 2)
 											        ? 2 - channel
 											        : channel;
 											if ((format ==
@@ -454,7 +454,7 @@ main(int argc, char **argv)
 											        VK_FORMAT_R16G16B16A16_SFLOAT &&
 											    fabsf(
 											        (float)((const __fp16 *)
-												            pixel)
+											                    pixel)
 											            [channel] -
 											        expected) > .001f)
 												return 1;

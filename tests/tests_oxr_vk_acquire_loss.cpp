@@ -117,7 +117,7 @@ TEST_CASE("Vulkan acquire cancels after loss even when the event owner already c
 			}
 			std::this_thread::yield();
 		}
-		union xrt_session_event event{};
+		union xrt_session_event event {};
 		event.type = XRT_SESSION_EVENT_LOST;
 		b_session_event_push(f.bs, &event);
 		if (xrt_session_poll_events(f.session.xs, &event) != XRT_SUCCESS ||

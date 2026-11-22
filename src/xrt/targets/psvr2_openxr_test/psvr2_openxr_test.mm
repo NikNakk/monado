@@ -2705,7 +2705,9 @@ append_controller_survey(application &app, XrTime time, const XrPosef &head_pose
 {
 	auto &capture = app.controller_survey;
 	auto &state = capture.state;
-	struct timespec clock{};
+	struct timespec clock
+	{
+	};
 	if (clock_gettime(CLOCK_UPTIME_RAW, &clock) != 0)
 		fatal("survey host clock unavailable");
 	const int64_t now = clock.tv_sec * int64_t{1000000000} + clock.tv_nsec;
@@ -2896,7 +2898,7 @@ append_controller_survey(application &app, XrTime time, const XrPosef &head_pose
 	               : state.paused ? "PAUSED"
 	               : state.phase == controller_survey_phase::ready
 	                   ? (facing_forward ? "TRIGGER TO START" : "LOOK AT BLUE CROSS TO START")
-			   : timer,
+	                   : timer,
 	               white);
 	add_world_text(panel, 0, .04f, .85f, .003f, complete ? "THANK YOU" : status, tracked ? green : gold);
 	if (!complete) {
@@ -3229,7 +3231,9 @@ poll_events(application &app)
 				if (state.phase != controller_survey_phase::complete) {
 					state.reset_reference();
 					app.survey_anchor.initialized = false;
-					struct timespec now{};
+					struct timespec now
+					{
+					};
 					clock_gettime(CLOCK_UPTIME_RAW, &now);
 					const auto *change =
 					    reinterpret_cast<const XrEventDataReferenceSpaceChangePending *>(&event);
@@ -3925,7 +3929,9 @@ run(int argc, char **argv)
 	}
 
 	if (survey_output) {
-		struct timespec now{};
+		struct timespec now
+		{
+		};
 		clock_gettime(CLOCK_UPTIME_RAW, &now);
 		app.controller_survey.event(now.tv_sec * int64_t{1000000000} + now.tv_nsec, 0, "closed");
 		if (!app.controller_survey.close())
