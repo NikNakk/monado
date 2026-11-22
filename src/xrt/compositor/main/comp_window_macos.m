@@ -2750,6 +2750,10 @@ comp_window_macos_update_timings(struct comp_target *ct)
 	uint64_t consumed_ns = os_monotonic_get_ns();
 	uint64_t previous_vblank_ns = cwm->last_vblank_ns;
 	if (cwm->trace_vblank != NULL) {
+		unsigned long long vblank_delta_ns = 0;
+		if (previous_vblank_ns != 0 && vblank_ns > previous_vblank_ns) {
+			vblank_delta_ns = vblank_ns - previous_vblank_ns;
+		}
 		fprintf(cwm->trace_vblank,
 		        "%llu,%llu,%llu,%llu,%" PRIi64 ",%llu,%llu,%llu,%" PRIi64 ",%" PRIi64 ",%" PRIi64
 		        ",%llu,%" PRIi64 "\n",
@@ -2759,11 +2763,7 @@ comp_window_macos_update_timings(struct comp_target *ct)
 		        (unsigned long long)displaylink_output_ns, (unsigned long long)vblank_ns,
 		        (int64_t)displaylink_output_ns - (int64_t)displaylink_now_ns,
 		        (int64_t)displaylink_callback_ns - (int64_t)displaylink_output_ns,
-		        (int64_t)displaylink_callback_ns - (int64_t)vblank_ns,
-		        previous_vblank_ns != 0 && vblank_ns > previous_vblank_ns
-		            ? (unsigned long long)(vblank_ns - previous_vblank_ns)
-		            : 0ULL,
-		        cwm->display_period_ns);
+		        (int64_t)displaylink_callback_ns - (int64_t)vblank_ns, vblank_delta_ns, cwm->display_period_ns);
 		cwm->trace_vblank_rows++;
 		if (cwm->trace_vblank_rows % 256 == 0) {
 			macos_trace_buffered_fflush(cwm->trace_vblank);
