@@ -643,6 +643,14 @@ application to render with and changes no compositor reconstruction. Instead:
   the current gaze and those views and binds it to the image's Metal texture
   with threshold-foveation's `tf_metal_set_texture_map`. Until the first
   projection layer the image carries no map.
+- With threshold-foveation API level 3 it also publishes the profile behind the
+  map (`tf_metal_set_texture_profile`): each view's rectangle in the image and its
+  per-axis rates at 64 sample centres, for the same gaze, hold and fallback, with
+  a monotonic timestamp as revision. A driver that foveates the application's own
+  targets (one eye, half size, both eyes side by side) builds its maps from these
+  rates, since a native map's rates cannot be read back, and treats a new
+  revision as a new frame. Level 3 is looked up at run time; with a 0.2 library
+  only maps are published.
 
 The binding is process-wide state of threshold-foveation, keyed by the root
 texture and shared by its views. A graphics driver in the client process that

@@ -4,6 +4,7 @@
 #include <openxr/openxr.h>
 #include "metal/m_metal_foveation_angular.h"
 #include "catch_amalgamated.hpp"
+#include <algorithm>
 #include <cmath>
 #include <cstring>
 #include "legacy_angular_map.inc"
@@ -166,6 +167,36 @@ TEST_CASE("Image rate maps are published on the root texture for drivers", "[fov
 		REQUIRE(u_foveation_angular_bind_metal_texture((void *)image, nullptr));
 #ifdef XRT_TEST_HAVE_THRESHOLD_FOVEATION
 		REQUIRE(tf_metal_copy_texture_map((void *)image) == nullptr);
+#endif
+#ifdef XRT_TEST_HAVE_THRESHOLD_FOVEATION
+		// Level 3: the per-view profile behind the map, for drivers that foveate their
+		// own targets. Two eyes side by side, gaze held straight ahead.
+		REQUIRE(u_foveation_angular_bind_metal_texture((void *)image, out.map));
+		u_foveation_angular_history held = {0, 0, 0, true};
+		REQUIRE(u_foveation_angular_publish_profile(&c, &t, 2, &held, 7, (void *)image));
+		tf_image_profile profile = {};
+		profile.struct_size = sizeof(profile);
+		REQUIRE(tf_metal_copy_texture_profile((void *)view, &profile) == 0);
+		REQUIRE(profile.revision == 7);
+		REQUIRE(profile.view_count == 2);
+		REQUIRE(profile.sample_count == TF_IMAGE_PROFILE_SAMPLES);
+		REQUIRE(profile.views[1].x == 512);
+		REQUIRE(profile.views[1].width == 512);
+		for (unsigned v = 0; v < 2; v++) {
+			const auto &pv = profile.views[v];
+			float peak = 0, low = 1;
+			for (unsigned i = 0; i < profile.sample_count; i++) {
+				peak = std::max(peak, pv.horizontal[i]);
+				low = std::min(low, pv.horizontal[i]);
+			}
+			// Full rate around the centre of each eye, the peripheral rate at its edges.
+			REQUIRE(peak == 1.f);
+			REQUIRE(low == Catch::Approx(c.outer));
+			REQUIRE(pv.vertical[0] == Catch::Approx(c.outer));
+		}
+		// Clearing the map clears its profile.
+		REQUIRE(u_foveation_angular_bind_metal_texture((void *)image, nullptr));
+		REQUIRE(tf_metal_copy_texture_profile((void *)image, &profile) == 1);
 #endif
 		REQUIRE_FALSE(u_foveation_angular_bind_metal_texture(nullptr, nullptr));
 		[view release];

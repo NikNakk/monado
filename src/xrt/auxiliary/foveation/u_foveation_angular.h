@@ -73,6 +73,22 @@ u_foveation_angular_angles(const struct u_foveation_angular_view *v, float x, fl
 bool
 u_foveation_angular_bind_metal_texture(void *texture, void *map);
 
+/*!
+ * Publishes the per-view profile behind an image's map on its Metal texture
+ * (threshold-foveation API level 3), for a driver that foveates the
+ * application's own targets: each of the first @p view_count views of @p t,
+ * with per-axis rates at 64 sample centres across that view, for the same gaze
+ * history and fallback as the map. @p revision must increase with each
+ * publication. Returns false when the running library lacks level 3.
+ */
+bool
+u_foveation_angular_publish_profile(const struct u_foveation_angular_config *c,
+                                    const struct u_foveation_angular_target *t,
+                                    uint32_t view_count,
+                                    const struct u_foveation_angular_history *h,
+                                    uint64_t revision,
+                                    void *texture);
+
 bool
 u_foveation_angular_build_recipe(const struct u_foveation_angular_config *c,
                                  const struct u_foveation_angular_target *t,

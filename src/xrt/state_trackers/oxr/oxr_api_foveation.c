@@ -431,13 +431,15 @@ image_maps_start(struct oxr_logger *log, struct oxr_swapchain *sc, struct oxr_fo
 	// The views last submitted stay valid when only the profile changes.
 	struct u_foveation_angular_target target = sc->image_maps.target;
 	bool have_target = sc->image_maps.have_target;
-	uint32_t reference_view = sc->image_maps.reference_view;
+	uint32_t reference_view = sc->image_maps.reference_view, view_count = sc->image_maps.view_count;
 	oxr_swapchain_image_maps_clear(sc);
 	sc->image_maps.provider = provider;
+	sc->image_maps.config = fp->angular_config;
 	sc->image_maps.eye_tracked = fp->angular_config.eye_tracked;
 	sc->image_maps.target = target;
 	sc->image_maps.have_target = have_target;
 	sc->image_maps.reference_view = reference_view;
+	sc->image_maps.view_count = view_count;
 	return XR_SUCCESS;
 }
 
@@ -476,6 +478,7 @@ oxr_swapchain_image_maps_note_views(struct oxr_swapchain *sc,
 	}
 	sc->image_maps.target = target;
 	sc->image_maps.reference_view = reference;
+	sc->image_maps.view_count = found;
 	sc->image_maps.have_target = true;
 }
 
@@ -487,6 +490,7 @@ oxr_swapchain_image_maps_bind(struct oxr_logger *log, struct oxr_swapchain *sc, 
 	}
 	void *texture = xrt_swapchain_metal(sc->swapchain)->images[index];
 	void *map = NULL;
+	struct u_foveation_angular_history history = {0};
 	if (sc->image_maps.have_target) {
 		float yaw = 0, pitch = 0;
 		bool valid = angular_gaze(log, sc->sess, sc->image_maps.eye_tracked, &sc->image_maps.eye_acquired,
@@ -495,13 +499,21 @@ oxr_swapchain_image_maps_bind(struct oxr_logger *log, struct oxr_swapchain *sc, 
 		if (m_metal_foveation_angular_lookup(sc->image_maps.provider, &sc->image_maps.target, valid, yaw,
 		                                     pitch, false, &result)) {
 			map = result.map;
+			history = result.history;
 		} else if (!sc->image_maps.warned) {
 			sc->image_maps.warned = true;
 			oxr_warn(log, "Image rate map lookup failed; images are published without a map");
 		}
 	}
 	// Until the first projection layer names its views, the image carries no map.
-	(void)u_foveation_angular_bind_metal_texture(texture, map);
+	if (!u_foveation_angular_bind_metal_texture(texture, map) || map == NULL) {
+		return;
+	}
+	// The profile behind the map, per view, for a driver foveating the application's
+	// own targets; the revision marks a new frame.
+	(void)u_foveation_angular_publish_profile(&sc->image_maps.config, &sc->image_maps.target,
+	                                          sc->image_maps.view_count, &history, os_monotonic_get_ns(),
+	                                          texture);
 }
 #endif // OXR_HAVE_MNDX_foveation_metal
 

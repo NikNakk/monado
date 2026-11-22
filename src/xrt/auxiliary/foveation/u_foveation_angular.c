@@ -11,6 +11,7 @@
 #include <math.h>
 #ifdef XRT_HAVE_THRESHOLD_FOVEATION
 #include <threshold_foveation.h>
+#include <dlfcn.h>
 #endif
 
 bool
@@ -100,22 +101,27 @@ u_foveation_angular_axis_rate(const struct u_foveation_angular_config *c,
 	return tf_angular_axis_rate(&p, delta);
 }
 
-bool
-u_foveation_angular_build_recipe(const struct u_foveation_angular_config *c,
-                                 const struct u_foveation_angular_target *t,
-                                 const struct u_foveation_angular_history *h,
-                                 struct u_foveation_angular_recipe *out)
+/* Policy: preserve the legacy broad safety profile, straight ahead, for
+ * missing tracked gaze. Explicit fixed-mode profiles keep their shape. */
+static struct tf_angular_profile
+active_profile(const struct u_foveation_angular_config *c, const struct u_foveation_angular_history *h)
 {
-	/* Policy: preserve the legacy broad safety profile, straight ahead, for
-	 * missing tracked gaze. Explicit fixed-mode profiles keep their shape. */
 	struct u_foveation_angular_config fallback;
 	if (c->eye_tracked && !h->have_gaze && c->shape != U_FOVEATION_ANGULAR_SMOOTHSTEP) {
 		fallback = *c;
 		fallback.shape = U_FOVEATION_ANGULAR_SMOOTHSTEP;
 		c = &fallback;
 	}
-	const struct tf_angular_profile p =
-	    to_tf_profile(c, h->have_gaze ? c->core : 20.f, h->have_gaze ? c->edge : 35.f);
+	return to_tf_profile(c, h->have_gaze ? c->core : 20.f, h->have_gaze ? c->edge : 35.f);
+}
+
+bool
+u_foveation_angular_build_recipe(const struct u_foveation_angular_config *c,
+                                 const struct u_foveation_angular_target *t,
+                                 const struct u_foveation_angular_history *h,
+                                 struct u_foveation_angular_recipe *out)
+{
+	const struct tf_angular_profile p = active_profile(c, h);
 	const struct tf_view views[2] = {to_tf_view(&t->views[0]), to_tf_view(&t->views[1])};
 	const struct tf_angular_request q = {sizeof(struct tf_angular_request),
 	                                     0,
@@ -128,6 +134,57 @@ u_foveation_angular_build_recipe(const struct u_foveation_angular_config *c,
 	                                     U_FOVEATION_ANGULAR_COLUMNS,
 	                                     U_FOVEATION_ANGULAR_ROWS};
 	return tf_angular_build(&p, &q, out->horizontal, out->vertical) == 0;
+}
+bool
+u_foveation_angular_publish_profile(const struct u_foveation_angular_config *c,
+                                    const struct u_foveation_angular_target *t,
+                                    uint32_t view_count,
+                                    const struct u_foveation_angular_history *h,
+                                    uint64_t revision,
+                                    void *texture)
+{
+	/* Level 3 is resolved at run time, so a 0.2 library keeps the maps working. */
+	typedef int (*set_profile_fn)(void *, const struct tf_image_profile *);
+	static set_profile_fn set_profile;
+	static bool looked;
+	if (!looked) {
+		set_profile = (set_profile_fn)dlsym(RTLD_DEFAULT, "tf_metal_set_texture_profile");
+		looked = true;
+	}
+	if (!set_profile || !texture || view_count == 0 || view_count > 2) {
+		return false;
+	}
+	const struct tf_angular_profile p = active_profile(c, h);
+	struct tf_image_profile out = {
+	    .struct_size = sizeof(out),
+	    .sample_count = TF_IMAGE_PROFILE_SAMPLES,
+	    .view_count = view_count,
+	    .revision = revision,
+	};
+	for (uint32_t i = 0; i < view_count; i++) {
+		const struct u_foveation_angular_view *v = &t->views[i];
+		// The view alone fills the request, so the samples span exactly that view.
+		struct tf_view view = to_tf_view(v);
+		view.x = view.y = 0;
+		const struct tf_angular_request q = {sizeof(q),
+		                                     0,
+		                                     (uint32_t)v->width,
+		                                     (uint32_t)v->height,
+		                                     1,
+		                                     &view,
+		                                     h->have_gaze ? h->yaw : 0.f,
+		                                     h->have_gaze ? h->pitch : 0.f,
+		                                     TF_IMAGE_PROFILE_SAMPLES,
+		                                     TF_IMAGE_PROFILE_SAMPLES};
+		if (tf_angular_build(&p, &q, out.views[i].horizontal, out.views[i].vertical) != 0) {
+			return false;
+		}
+		out.views[i].x = v->x;
+		out.views[i].y = v->y;
+		out.views[i].width = (uint32_t)v->width;
+		out.views[i].height = (uint32_t)v->height;
+	}
+	return set_profile(texture, &out) == 0;
 }
 #else
 bool
@@ -169,10 +226,35 @@ bool
 u_foveation_angular_bind_metal_texture(void *texture, void *map)
 {
 #ifdef XRT_HAVE_THRESHOLD_FOVEATION
-	return texture != NULL && tf_metal_set_texture_map(texture, map) == 0;
+	if (texture == NULL || tf_metal_set_texture_map(texture, map) != 0) {
+		return false;
+	}
+	// A cleared map takes its profile with it (level 3, when the library has it).
+	if (map == NULL) {
+		typedef int (*set_profile_fn)(void *, const struct tf_image_profile *);
+		set_profile_fn set_profile = (set_profile_fn)dlsym(RTLD_DEFAULT, "tf_metal_set_texture_profile");
+		if (set_profile != NULL) {
+			(void)set_profile(texture, NULL);
+		}
+	}
+	return true;
 #else
 	(void)texture;
 	(void)map;
 	return false;
 #endif
 }
+
+#ifndef XRT_HAVE_THRESHOLD_FOVEATION
+bool
+u_foveation_angular_publish_profile(const struct u_foveation_angular_config *c,
+                                    const struct u_foveation_angular_target *t,
+                                    uint32_t view_count,
+                                    const struct u_foveation_angular_history *h,
+                                    uint64_t revision,
+                                    void *texture)
+{
+	(void)c, (void)t, (void)view_count, (void)h, (void)revision, (void)texture;
+	return false;
+}
+#endif

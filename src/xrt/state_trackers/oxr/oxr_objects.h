@@ -1906,6 +1906,8 @@ struct oxr_swapchain
 	struct
 	{
 		struct m_metal_foveation_angular *provider;
+		struct u_foveation_angular_config config;
+		uint32_t view_count;
 		bool eye_tracked;
 		bool eye_acquired;
 		struct u_foveation_angular_target target;
