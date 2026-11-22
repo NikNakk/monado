@@ -374,8 +374,7 @@ metal_service_create_iosurface_swapchain(struct metal_service_compositor_link *l
 
 		const uint32_t surface_id = IOSurfaceGetID(surface);
 		if (surface_id == 0 || IOSurfaceGetWidth(surface) != info->width ||
-		    IOSurfaceGetHeight(surface) != info->height ||
-		    IOSurfaceGetPixelFormat(surface) != pixel_format) {
+		    IOSurfaceGetHeight(surface) != info->height || IOSurfaceGetPixelFormat(surface) != pixel_format) {
 			U_LOG_E(
 			    "Metal service IOSurface validation failed: image=%u id=%u expected=%ux%u "
 			    "actual=%zux%zu cv_format=0x%08x",
@@ -488,8 +487,7 @@ metal_service_create_iosurface_swapchain(struct metal_service_compositor_link *l
 	U_LOG_D(
 	    "Metal service swapchain backing=iosurface-id images=%u size=%ux%u metal_format=%lld cv_format=0x%08x "
 	    "first_surface=%u",
-	    image_count, info->width, info->height, (long long)info->format, (unsigned)pixel_format,
-	    iosurface_ids[0]);
+	    image_count, info->width, info->height, (long long)info->format, (unsigned)pixel_format, iosurface_ids[0]);
 
 	*out_xsc = &sc->base.base;
 	return XRT_SUCCESS;
@@ -541,7 +539,7 @@ metal_service_create_swapchain(struct xrt_compositor *xc,
 	const OSType iosurface_format = metal_service_iosurface_format(info);
 	if (iosurface_format != 0) {
 		xret = metal_service_create_iosurface_swapchain(link, info, &native_info, iosurface_format,
-		                                               xsccp.image_count, out_xsc);
+		                                                xsccp.image_count, out_xsc);
 		if (xret == XRT_SUCCESS) {
 			return XRT_SUCCESS;
 		}
