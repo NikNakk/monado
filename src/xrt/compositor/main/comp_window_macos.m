@@ -19,6 +19,7 @@
 #include "main/comp_macos_display.h"
 #include "main/comp_window_macos_trace_buffer.h"
 #include "main/comp_window_macos_latency_guard.h"
+#include "main/comp_window_macos_feedback.h"
 #include "main/comp_window_macos_passthrough_shader.h"
 #include "xrt/xrt_frame.h"
 #include "util/u_debug.h"
@@ -58,6 +59,8 @@
 
 struct macos_present_job
 {
+	uint64_t feedback_generation;
+	int64_t feedback_period_ns;
 	uint64_t frame_id;
 	uint64_t enqueue_ns;
 	uint64_t image_reuse_wait_ns;
@@ -80,8 +83,7 @@ struct macos_present_job
 struct macos_presented_state
 {
 	atomic_uint_fast64_t ref_count;
-	atomic_int_fast64_t latest_observed_present_offset_ns;
-	atomic_uint_fast64_t present_offset_sample_serial;
+	struct macos_present_feedback feedback;
 	pthread_mutex_t guard_mutex;
 	struct macos_latency_guard guard;
 	struct u_gpu_trace_present presentation_trace;
@@ -101,8 +103,7 @@ macos_presented_state_create(FILE *trace_presented)
 		return NULL;
 	}
 	atomic_init(&state->ref_count, 1);
-	atomic_init(&state->latest_observed_present_offset_ns, 0);
-	atomic_init(&state->present_offset_sample_serial, 0);
+	macos_present_feedback_reset(&state->feedback);
 	state->trace_presented = trace_presented;
 	return state;
 }
@@ -234,11 +235,7 @@ struct comp_window_macos
 	//! CADisplayLink's timestamp-to-target interval, consumed on the compositor thread.
 	atomic_int_fast64_t latest_displaylink_period_ns;
 	atomic_int_fast64_t host_to_monotonic_offset_ns;
-	atomic_int_fast64_t latest_observed_present_offset_ns;
-	atomic_uint_fast64_t present_offset_sample_serial;
-	uint64_t consumed_present_offset_sample_serial;
-	int64_t calibrated_present_offset_ns;
-	uint32_t present_offset_sample_count;
+	struct macos_present_calibration present_calibration;
 	uint64_t last_vblank_ns;
 	uint64_t trace_frame_id;
 	uint64_t cadence_sample_count;
@@ -311,7 +308,8 @@ macos_timing_trace_open(struct comp_window_macos *cwm)
 	    "presented",
 	    "frame_id,presented_handler_ns,desired_present_ns,target_output_ns,presented_time_host_s,"
 	    "presented_monotonic_ns,presented_minus_desired_ns,presented_minus_target_ns,observed_present_offset_ns,"
-	    "present_queue_depth");
+	    "present_queue_depth,feedback_generation,feedback_accepted,baseline_ns,baseline_ready,"
+	    "relative_extra_refreshes,extra_ready");
 	if (cwm->trace_presented != NULL) {
 		cwm->presented_state = macos_presented_state_create(cwm->trace_presented);
 		if (cwm->presented_state == NULL) {
@@ -2180,15 +2178,15 @@ macos_execute_present_job(struct comp_window_macos *cwm, const struct macos_pres
 			}
 		}
 
-		if (cwm->presented_state != NULL &&
-		    (cwm->trace_presented != NULL || cwm->latency_guard_enabled || u_gpu_trace_enabled())) {
+		if (cwm->presented_state != NULL) {
 			struct macos_presented_state *presented_state = cwm->presented_state;
 			macos_presented_state_retain(presented_state);
 			FILE *trace_file = presented_state->trace_presented;
 			uint64_t traced_frame_id = frame_id;
 			int64_t traced_desired_present_ns = desired_present_time_ns;
 			uint64_t traced_target_output_ns = target_output_ns;
-			int64_t traced_display_period_ns = cwm->display_period_ns;
+			int64_t traced_display_period_ns = job->feedback_period_ns;
+			uint64_t feedback_generation = job->feedback_generation;
 			bool latency_guard_enabled = cwm->latency_guard_enabled;
 			uint32_t presented_image_index = index;
 			uint64_t presented_timeline_value = timeline_semaphore_value;
@@ -2201,8 +2199,10 @@ macos_execute_present_job(struct comp_window_macos *cwm, const struct macos_pres
 			      host_frequency > 0.0 ? (int64_t)llround((double)current_host_ticks * 1e9 / host_frequency)
 				                   : 0;
 			  int64_t handler_offset_ns = handler_ns - current_host_ns;
-			  int64_t presented_host_ns =
-			      presented_time_s > 0.0 ? (int64_t)llround(presented_time_s * (double)U_TIME_1S_IN_NS) : 0;
+			  int64_t presented_host_ns = isfinite(presented_time_s) && presented_time_s > 0.0 &&
+				                              presented_time_s < (double)INT64_MAX / 1e9
+				                          ? (int64_t)llround(presented_time_s * (double)U_TIME_1S_IN_NS)
+				                          : 0;
 			  int64_t presented_monotonic_ns =
 			      presented_host_ns != 0 ? presented_host_ns + handler_offset_ns : 0;
 			  int64_t presented_minus_desired_ns =
@@ -2244,30 +2244,42 @@ macos_execute_present_job(struct comp_window_macos *cwm, const struct macos_pres
 					                       presented_monotonic_ns, handler_ns, present_queue_depth);
 				  pthread_mutex_unlock(&presented_state->guard_mutex);
 			  }
-			  if (observed_present_offset_ns > 0 && trace_file != NULL) {
-				  atomic_store_explicit(&presented_state->latest_observed_present_offset_ns,
-					                observed_present_offset_ns, memory_order_release);
-				  atomic_fetch_add_explicit(&presented_state->present_offset_sample_serial, 1,
-					                    memory_order_release);
-			  }
+			  struct macos_present_sample sample = {
+			      .generation = feedback_generation,
+			      .frame = traced_frame_id,
+			      .timeline = presented_timeline_value,
+			      .desired_ns = traced_desired_present_ns,
+			      .presented_ns = presented_monotonic_ns,
+			      .observed_ns = handler_ns,
+			      .period_ns = traced_display_period_ns,
+			  };
+			  pthread_mutex_lock(&presented_state->guard_mutex);
+			  bool feedback_accepted = macos_present_feedback_observe(&presented_state->feedback, &sample);
+			  struct macos_present_feedback feedback = presented_state->feedback;
+			  pthread_mutex_unlock(&presented_state->guard_mutex);
 			  if (latency_guard_enabled) {
 				  pthread_mutex_lock(&presented_state->guard_mutex);
-				  macos_latency_guard_observe(
-				      &presented_state->guard, traced_frame_id,
-				      presented_monotonic_ns > 0 ? (uint64_t)presented_monotonic_ns : 0,
-				      present_queue_depth,
-				      traced_display_period_ns > 0 ? (uint64_t)traced_display_period_ns : 0);
+				  if (feedback_generation == presented_state->feedback.generation) {
+					  macos_latency_guard_observe(
+					      &presented_state->guard, traced_frame_id,
+					      presented_monotonic_ns > 0 ? (uint64_t)presented_monotonic_ns : 0,
+					      present_queue_depth,
+					      traced_display_period_ns > 0 ? (uint64_t)traced_display_period_ns : 0);
+				  }
 				  pthread_mutex_unlock(&presented_state->guard_mutex);
 			  }
 			  if (trace_file != NULL) {
 				  flockfile(trace_file);
 				  fprintf(trace_file,
 					  "%llu,%" PRIi64 ",%" PRIi64 ",%llu,%.17g,%" PRIi64 ",%" PRIi64 ",%" PRIi64
-					  ",%" PRIi64 ",%" PRIi64 "\n",
+					  ",%" PRIi64 ",%" PRIi64 ",%llu,%u,%" PRIi64 ",%u,%" PRIi64 ",%u\n",
 					  (unsigned long long)traced_frame_id, handler_ns, traced_desired_present_ns,
 					  (unsigned long long)traced_target_output_ns, presented_time_s,
 					  presented_monotonic_ns, presented_minus_desired_ns, presented_minus_target_ns,
-					  observed_present_offset_ns, present_queue_depth);
+					  observed_present_offset_ns, present_queue_depth,
+					  (unsigned long long)feedback_generation, feedback_accepted ? 1u : 0u,
+					  feedback.baseline_ns, feedback.baseline_ready ? 1u : 0u,
+					  feedback.extra_refreshes, feedback.extra_ready ? 1u : 0u);
 				  macos_trace_buffered_fflush(trace_file);
 				  funlockfile(trace_file);
 			  }
@@ -2601,10 +2613,14 @@ comp_window_macos_present(struct comp_target *ct,
 	    .display_head_orientation = ct->images[index].display_head_orientation,
 	    .display_head_orientation_valid = ct->images[index].display_head_orientation_valid,
 	};
-	if (u_gpu_trace_enabled() && cwm->presented_state != NULL) {
+	if (cwm->presented_state != NULL) {
 		pthread_mutex_lock(&cwm->presented_state->guard_mutex);
-		u_gpu_trace_present_prepare(&cwm->presented_state->presentation_trace, job.frame_id, index,
-		                            timeline_semaphore_value);
+		job.feedback_generation = cwm->presented_state->feedback.generation;
+		job.feedback_period_ns = atomic_load_explicit(&cwm->display_period_ns, memory_order_acquire);
+		if (u_gpu_trace_enabled()) {
+			u_gpu_trace_present_prepare(&cwm->presented_state->presentation_trace, job.frame_id, index,
+			                            timeline_semaphore_value);
+		}
 		pthread_mutex_unlock(&cwm->presented_state->guard_mutex);
 	}
 	if (!cwm->present_worker_enabled) {
@@ -2691,6 +2707,12 @@ comp_window_macos_update_timings(struct comp_target *ct)
 	// frame IDs and feedback remain valid. The presentation worker reads this atomically.
 	if (observed_period_ns > 0 && llabs(observed_period_ns - cwm->display_period_ns) > 100 &&
 	    cwm->base.upc != NULL) {
+		if (cwm->presented_state != NULL && cwm->display_period_ns > 0 &&
+		    llabs(observed_period_ns - cwm->display_period_ns) > cwm->display_period_ns / 100) {
+			pthread_mutex_lock(&cwm->presented_state->guard_mutex);
+			macos_present_feedback_reset(&cwm->presented_state->feedback);
+			pthread_mutex_unlock(&cwm->presented_state->guard_mutex);
+		}
 		(void)u_pc_update_frame_period(cwm->base.upc, observed_period_ns);
 		cwm->display_period_ns = observed_period_ns;
 		ct->c->frame_interval_ns = observed_period_ns;
@@ -2710,33 +2732,16 @@ comp_window_macos_update_timings(struct comp_target *ct)
 	int64_t host_to_monotonic_offset_ns =
 	    atomic_load_explicit(&cwm->host_to_monotonic_offset_ns, memory_order_acquire);
 
-	uint64_t present_offset_serial = 0;
-	int64_t sample_ns = 0;
+	struct macos_present_feedback feedback = {0};
 	if (cwm->presented_state != NULL) {
-		present_offset_serial =
-		    atomic_load_explicit(&cwm->presented_state->present_offset_sample_serial, memory_order_acquire);
-		sample_ns = atomic_load_explicit(&cwm->presented_state->latest_observed_present_offset_ns,
-		                                 memory_order_acquire);
+		pthread_mutex_lock(&cwm->presented_state->guard_mutex);
+		feedback = cwm->presented_state->feedback;
+		pthread_mutex_unlock(&cwm->presented_state->guard_mutex);
 	}
-	if (present_offset_serial != cwm->consumed_present_offset_sample_serial && cwm->display_period_ns > 0) {
-		cwm->consumed_present_offset_sample_serial = present_offset_serial;
-		int64_t max_reasonable_ns = cwm->display_period_ns * 4;
-		if (sample_ns > 0 && sample_ns <= max_reasonable_ns) {
-			if (cwm->present_offset_sample_count == 0) {
-				cwm->calibrated_present_offset_ns = sample_ns;
-			} else {
-				// 1/8 EMA: stable enough to reject callback/clock-conversion noise while adapting
-				// quickly.
-				cwm->calibrated_present_offset_ns =
-				    (cwm->calibrated_present_offset_ns * 7 + sample_ns) / 8;
-			}
-			if (cwm->present_offset_sample_count < UINT32_MAX) {
-				cwm->present_offset_sample_count++;
-			}
-			if (cwm->present_offset_sample_count >= 8 && cwm->base.upc != NULL) {
-				u_pc_update_present_offset(cwm->base.upc, 0, cwm->calibrated_present_offset_ns);
-			}
-		}
+	if (macos_present_calibration_consume(&cwm->present_calibration, &feedback, (int64_t)os_monotonic_get_ns(),
+	                                      cwm->display_period_ns) &&
+	    cwm->base.upc != NULL) {
+		u_pc_update_present_offset(cwm->base.upc, 0, cwm->present_calibration.offset_ns);
 	}
 	if (vblank_ns == 0 || vblank_ns == cwm->last_vblank_ns || cwm->base.upc == NULL) {
 		return VK_SUCCESS;
@@ -2757,7 +2762,7 @@ comp_window_macos_update_timings(struct comp_target *ct)
 		        (int64_t)displaylink_callback_ns - (int64_t)vblank_ns,
 		        previous_vblank_ns != 0 && vblank_ns > previous_vblank_ns
 		            ? (unsigned long long)(vblank_ns - previous_vblank_ns)
-			    : 0ULL,
+		            : 0ULL,
 		        cwm->display_period_ns);
 		cwm->trace_vblank_rows++;
 		if (cwm->trace_vblank_rows % 256 == 0) {
@@ -3024,12 +3029,11 @@ comp_window_macos_create_base(struct comp_compositor *c, struct u_macos_hosted_c
 		          "stalls supersede pending frames instead of dropping them");
 	}
 	macos_timing_trace_open(cwm);
-	/* Keep callback state ready for a capture attached after target creation.
-	 * With tracing/guard disabled, no presented handler is registered. */
+	/* Presentation feedback is runtime state, independent of CSV/Perfetto tracing. */
 	if (cwm->presented_state == NULL) {
 		cwm->presented_state = macos_presented_state_create(NULL);
 		if (cwm->presented_state == NULL) {
-			COMP_WARN(c, "macOS latency guard disabled: could not allocate presentation feedback state");
+			COMP_WARN(c, "macOS presentation feedback unavailable: could not allocate callback state");
 			cwm->latency_guard_enabled = false;
 		}
 	}
@@ -3229,9 +3233,11 @@ macos_recreate_display_link(struct comp_window_macos *cwm, CGDirectDisplayID dis
 	cwm->cadence_total_ns = 0;
 	cwm->cadence_min_ns = 0;
 	cwm->cadence_max_ns = 0;
-	cwm->present_offset_sample_count = 0;
-	cwm->calibrated_present_offset_ns = 0;
-	cwm->consumed_present_offset_sample_serial = 0;
+	if (cwm->presented_state != NULL) {
+		pthread_mutex_lock(&cwm->presented_state->guard_mutex);
+		macos_present_feedback_reset(&cwm->presented_state->feedback);
+		pthread_mutex_unlock(&cwm->presented_state->guard_mutex);
+	}
 	if (start_link && !macos_display_link_start(cwm)) {
 		return false;
 	}

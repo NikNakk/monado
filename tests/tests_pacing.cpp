@@ -7,6 +7,7 @@
  */
 
 #include <util/u_pacing.h>
+#include "../src/xrt/compositor/main/comp_window_macos_feedback.h"
 
 #include "catch_amalgamated.hpp"
 
@@ -416,6 +417,40 @@ TEST_CASE("u_pacing_compositor_fake")
 		}
 	}
 	u_pc_destroy(&upc);
+}
+
+TEST_CASE("Native presentation feedback changes prediction without moving compositor deadlines")
+{
+	const int64_t now = 1000000000;
+	const int64_t period = 8341708;
+	u_pacing_compositor *pc = nullptr;
+	REQUIRE(u_pc_fake_create(period, now, &pc) == XRT_SUCCESS);
+	macos_present_feedback feedback{};
+	macos_present_calibration calibration{};
+	macos_present_feedback_reset(&feedback);
+	CompositorPredictions before, after;
+	auto predict = [&](CompositorPredictions &p) {
+		u_pc_predict(pc, now, &p.frame_id, &p.wake_up_time_ns, &p.desired_present_time_ns, &p.present_slop_ns,
+		             &p.predicted_display_time_ns, &p.predicted_display_period_ns, &p.min_display_period_ns);
+	};
+	predict(before);
+	// Delayed feedback for earlier frames, without any trace or guard object.
+	for (uint64_t frame = 1; frame <= 8; frame++) {
+		int64_t presented = now - (9 - static_cast<int64_t>(frame)) * period;
+		macos_present_sample s{feedback.generation, frame, frame + 100, presented - 2 * period, presented,
+		                       presented + 100000,  period};
+		REQUIRE(macos_present_feedback_observe(&feedback, &s));
+		if (macos_present_calibration_consume(&calibration, &feedback, s.observed_ns, period)) {
+			u_pc_update_present_offset(pc, static_cast<int64_t>(s.timeline), calibration.offset_ns);
+		}
+	}
+	predict(after);
+	CHECK(after.frame_id == before.frame_id + 1);
+	CHECK(after.wake_up_time_ns == before.wake_up_time_ns);
+	CHECK(after.desired_present_time_ns == before.desired_present_time_ns);
+	CHECK(after.predicted_display_period_ns == before.predicted_display_period_ns);
+	CHECK(after.predicted_display_time_ns - after.desired_present_time_ns == 2 * period);
+	u_pc_destroy(&pc);
 }
 
 TEST_CASE("Fake pacer refines refresh period without resetting outstanding frame IDs")
