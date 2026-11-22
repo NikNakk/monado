@@ -6,6 +6,13 @@ SPDX-License-Identifier: BSL-1.0
 
 # macOS / PS VR2 Port Status
 
+The isolated Threshold [Metal foveation v4 lookup](macos-openxr-foveation.md#non-selecting-lookup-experimental-version-4)
+separates borrowed intermediate maps from released-image selection. Offscreen
+cache and DXMT packed-stereo provider tests pass, including different scene/output
+extents and moving simulated gaze.
+This candidate is not deployed to the installed runtime.
+
+
 The [17 November Sense confirmation investigation](macos-pssense-occlusion.md#recorded-prior-reproduction-and-confirmation-retry-17-november)
 reproduces in-view controller losses using recorded live priors. A tentative-track
 refine retry and a [filter-reset alignment refresh](macos-pssense-occlusion.md#lit-gap-diagnosis-stale-alignment-after-a-filter-reset-17-november)

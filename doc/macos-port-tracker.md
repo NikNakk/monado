@@ -7,6 +7,13 @@ SPDX-License-Identifier: BSL-1.0
 
 # macOS Port Tracker
 
+The isolated Threshold [Metal foveation v4 lookup](macos-openxr-foveation.md#non-selecting-lookup-experimental-version-4)
+separates borrowed intermediate maps from released-image selection. Offscreen
+cache and DXMT packed-stereo provider tests pass, including different scene/output
+extents and moving simulated gaze.
+This candidate is not deployed to the installed runtime.
+
+
 The [17 November Sense confirmation retry](macos-pssense-occlusion.md#recorded-prior-reproduction-and-confirmation-retry-17-november)
 addresses a recorded live-prior confirmation loop. The follow-up also refreshes
 alignment after filter resets. Offline recovery and focused tests improve/pass;
