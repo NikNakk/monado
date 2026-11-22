@@ -626,6 +626,34 @@ The existing dictionary-key allocation/lookup remains; it is included in the
 CPU cache-hit measurements.
 No override selects the original profile. Unknown names and invalid sigmas fail.
 
+## Shared profile mathematics (22 November 2026)
+
+The angular profile mathematics now lives in
+[threshold-foveation](https://github.com/NikNakk/threshold-foveation) API level 2
+(`tf_angular_build`, `tf_angular_axis_rate`, `tf_view_valid`, `tf_view_angles`).
+`u_foveation_angular.c` keeps Monado's policy: accepted ranges, step
+quantization and hysteresis, the 30-lookup hold, the broad 20/35-degree fallback
+for lost tracked gaze and straight-ahead centring without gaze. Map caching,
+selection, retained snapshots and per-image association stay in
+`m_metal_foveation_angular.m` and `comp_metal_foveation_cache.m`.
+
+CMake looks for `ThresholdFoveation` 0.2 or newer (set `CMAKE_PREFIX_PATH`). If it
+is absent the angular profile is unsupported (`XR_ERROR_FEATURE_UNSUPPORTED` at
+profile creation) rather than built from a second copy; FB/META foveation and
+their in-tree `u_foveation.c` policy are unaffected. A runtime linked against
+0.2 needs a 0.2 or newer library at load time; drivers built against 0.1 keep
+working with 0.2.
+
+Recipes, Metal descriptors and decoded coordinates are unchanged. The frozen
+legacy comparison passes on arm64 and x86_64/Rosetta, and the library's own
+tests compare every captured recipe bitwise. A provider benchmark (200 cold
+misses, 200,000 hits and 200,000 moving-gaze lookups per shape, best of five, M5
+desktop) measured hits at about 156 ns before and 158 ns after, misses at
+31-33 us either way (Metal map creation dominates) and moving gaze at
+170-172 ns, with identical physical map sizes. The extra ~2 ns per hit is the
+target validation crossing into the shared library. No allocation, lock or GPU
+work was added. GPU timings are not attributed to this change.
+
 The companion threshold-runtime study in `foveation/profiles/` extracts the
 actual PSVR2 driver FOVs, creates Metal maps, fits centred physical-pixel budgets
 offline, decodes the actual coordinate mapping, and compares registered FB
