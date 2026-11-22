@@ -563,18 +563,28 @@ can_do_quad_view_fast_path(struct comp_compositor *c)
 	}
 	const struct comp_layer *context = &c->base.layer_accum.layers[0];
 	const struct comp_layer *inset = &c->base.layer_accum.layers[1];
+	static bool logged;
+	const char *reason = NULL;
 	if (!plain_projection_layer(context, XRT_LAYER_SPLIT_QUAD_VIEW_CONTEXT) ||
 	    !plain_projection_layer(inset, XRT_LAYER_SPLIT_QUAD_VIEW_INSET)) {
-		return false;
+		reason = "layers are not a plain context then inset";
 	}
-	for (uint32_t i = 0; i < c->nr.view_count; i++) {
+	for (uint32_t i = 0; reason == NULL && i < c->nr.view_count; i++) {
 		const struct xrt_layer_projection_view_data *cv = &context->data.proj.v[i];
 		const struct xrt_layer_projection_view_data *iv = &inset->data.proj.v[i];
-		if (cv->foveation.enabled || iv->foveation.enabled || !same_pose(&cv->pose, &iv->pose)) {
-			return false;
+		if (cv->foveation.enabled || iv->foveation.enabled) {
+			reason = "foveated";
+		} else if (!same_pose(&cv->pose, &iv->pose)) {
+			reason = "inset pose differs from its context";
 		}
 	}
-	return true;
+	if (!logged) {
+		logged = true;
+		U_LOG_I("Quad-view fast path %s%s (layer types %d/%d, flags 0x%x/0x%x)", reason ? "not used: " : "used",
+		        reason ? reason : "", (int)context->data.type, (int)inset->data.type, (unsigned)context->data.flags,
+		        (unsigned)inset->data.flags);
+	}
+	return reason == NULL;
 }
 
 /*!

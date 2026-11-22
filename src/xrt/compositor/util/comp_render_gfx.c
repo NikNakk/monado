@@ -783,6 +783,20 @@ crg_distortion_quad_fast_path(struct render_gfx *render,
 		    NULL);                                                             // no foveation
 		md.views[i].inset_fov = iv->fov;
 		md.views[i].inset_norm_rect = i_rect;
+
+		static bool logged[XRT_MAX_VIEWS];
+		if (!logged[i]) {
+			logged[i] = true;
+			U_LOG_I("Quad-view view %u: context rect %.4f,%.4f %.4fx%.4f image %u view %p; inset rect %.4f,%.4f "
+			        "%.4fx%.4f image %u view %p; context fov %.1f/%.1f/%.1f/%.1f inset fov %.1f/%.1f/%.1f/%.1f",
+			        i, c_rect.x, c_rect.y, c_rect.w, c_rect.h, cv->sub.image_index,
+			        (void *)get_image_view(c_image, context->data.flags, cv->sub.array_index), i_rect.x, i_rect.y,
+			        i_rect.w, i_rect.h, iv->sub.image_index,
+			        (void *)get_image_view(i_image, inset->data.flags, iv->sub.array_index),
+			        cv->fov.angle_left * 57.2958f, cv->fov.angle_right * 57.2958f, cv->fov.angle_up * 57.2958f,
+			        cv->fov.angle_down * 57.2958f, iv->fov.angle_left * 57.2958f, iv->fov.angle_right * 57.2958f,
+			        iv->fov.angle_up * 57.2958f, iv->fov.angle_down * 57.2958f);
+		}
 		md.views[i].inset_sampler = clamp_to_border_black;
 		md.views[i].inset_image_view = get_image_view(i_image, inset->data.flags, iv->sub.array_index);
 	}
