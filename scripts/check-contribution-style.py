@@ -22,14 +22,23 @@ paths = set(git("diff", "--name-only", "--diff-filter=ACMRT", args.base_ref))
 paths.update(git("ls-files", "--others", "--exclude-standard"))
 paths = sorted(p for p in paths if (root / p).is_file() and not p.startswith("src/external/"))
 failed = False
+# Like GitLab's style job, format only the lines this fork changed, with
+# clang-format 14.0.6; whole files and newer releases disagree with upstream.
+c_paths = [p for p in paths if Path(p).suffix in (".c", ".h", ".cpp", ".hpp", ".m", ".mm")]
+if c_paths:
+    diff = subprocess.run(["git", "diff", "--no-ext-diff", "--no-color", "-U0", args.base_ref, "--", *c_paths],
+                          cwd=root, text=True, capture_output=True, check=True).stdout
+    tracked = set(git("ls-files", "--", *c_paths))
+    for path in (p for p in c_paths if p not in tracked):
+        diff += subprocess.run(["git", "diff", "--no-index", "--no-color", "-U0", "/dev/null", path],
+                               cwd=root, text=True, capture_output=True).stdout
+    result = subprocess.run(["clang-format-diff.py", "-p1"], cwd=root, input=diff, text=True, capture_output=True)
+    if result.returncode or result.stdout.strip():
+        print(result.stderr + result.stdout)
+        failed = True
 for path in paths:
-    suffix = Path(path).suffix
-    command = None
-    if suffix in (".c", ".h", ".cpp", ".hpp", ".m", ".mm"):
-        command = ["clang-format", "--dry-run", "--Werror", path]
-    elif Path(path).name == "CMakeLists.txt" or suffix == ".cmake":
+    if Path(path).name == "CMakeLists.txt" or Path(path).suffix == ".cmake":
         command = ["cmake-format", "--check", "-c", str(root / ".cmake-format.py"), path]
-    if command:
         failed |= subprocess.run(command, cwd=root).returncode != 0
 
 spell_paths = [p for p in paths if Path(p).suffix in
