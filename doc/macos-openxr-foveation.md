@@ -650,7 +650,8 @@ application to render with and changes no compositor reconstruction. Instead:
   targets (one eye, half size, both eyes side by side) builds its maps from these
   rates, since a native map's rates cannot be read back, and treats a new
   revision as a new frame. Level 3 is looked up at run time; with a 0.2 library
-  only maps are published.
+  only maps are published. On an array swapchain (one eye per layer) the
+  one-layer map cannot bind, but the profile is still published.
 
 The binding is process-wide state of threshold-foveation, keyed by the root
 texture and shared by its views. A graphics driver in the client process that

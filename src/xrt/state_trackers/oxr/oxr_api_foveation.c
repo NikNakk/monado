@@ -506,9 +506,13 @@ oxr_swapchain_image_maps_bind(struct oxr_logger *log, struct oxr_swapchain *sc, 
 		}
 	}
 	// Until the first projection layer names its views, the image carries no map.
-	if (!u_foveation_angular_bind_metal_texture(texture, map) || map == NULL) {
+	if (map == NULL) {
+		(void)u_foveation_angular_bind_metal_texture(texture, NULL);
 		return;
 	}
+	/* A one-layer map cannot bind on an array image (one eye per layer), but the profile
+	 * still serves a driver that builds its own maps for the application's targets. */
+	(void)u_foveation_angular_bind_metal_texture(texture, map);
 	// The profile behind the map, per view, for a driver foveating the application's
 	// own targets; the revision marks a new frame.
 	(void)u_foveation_angular_publish_profile(&sc->image_maps.config, &sc->image_maps.target,
