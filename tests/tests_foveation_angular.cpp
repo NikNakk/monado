@@ -33,8 +33,24 @@ TEST_CASE("Angular gaze preserves quantization, hysteresis, hold and fallback", 
 	u_foveation_angular_update(&c, true, 10, 10, &h);
 	REQUIRE_FALSE(h.have_gaze);
 }
+TEST_CASE("Angular profiles are unsupported without threshold-foveation", "[foveation][angular]")
+{
+	if (u_foveation_angular_available())
+		return;
+	u_foveation_angular_target t = {
+	    1024, 512, {{0, 0, 512, 512, -.9f, .8f, .85f, -.8f}, {512, 0, 512, 512, -.8f, .9f, .85f, -.8f}}};
+	u_foveation_angular_config c = {.3f, 12, 27, 2, true, U_FOVEATION_ANGULAR_SMOOTHSTEP, 0};
+	u_foveation_angular_history h = {};
+	u_foveation_angular_recipe r = {};
+	REQUIRE(u_foveation_angular_config_valid(&c)); // policy validation is Monado's own
+	REQUIRE_FALSE(u_foveation_angular_target_valid(&t));
+	REQUIRE_FALSE(u_foveation_angular_build_recipe(&c, &t, &h, &r));
+}
+
 TEST_CASE("Angular targets reject invalid geometry and FOVs", "[foveation][angular]")
 {
+	if (!u_foveation_angular_available())
+		return;
 	u_foveation_angular_target t = {
 	    1024, 512, {{0, 0, 512, 512, -.9f, .8f, .85f, -.8f}, {512, 0, 512, 512, -.8f, .9f, .85f, -.8f}}};
 	REQUIRE(u_foveation_angular_target_valid(&t));
@@ -55,6 +71,8 @@ TEST_CASE("Angular targets reject invalid geometry and FOVs", "[foveation][angul
 
 TEST_CASE("Gaussian alternatives preserve linear-rate bounds and separable identity", "[foveation][angular]")
 {
+	if (!u_foveation_angular_available())
+		return;
 	struct u_foveation_angular_config c = {.3f, 12, 27, 2, true, U_FOVEATION_ANGULAR_GAUSSIAN_CLAMPED, 15};
 	REQUIRE(u_foveation_angular_config_valid(&c));
 	for (int shape = 1; shape <= 3; ++shape) {
@@ -91,6 +109,8 @@ TEST_CASE("Gaussian alternatives preserve linear-rate bounds and separable ident
 
 TEST_CASE("Tracked alternatives preserve the broad legacy loss fallback", "[foveation][angular]")
 {
+	if (!u_foveation_angular_available())
+		return;
 	struct u_foveation_angular_target t = {
 	    1024, 512, {{0, 0, 512, 512, -.9f, .8f, .85f, -.8f}, {512, 0, 512, 512, -.8f, .9f, .85f, -.8f}}};
 	struct u_foveation_angular_config c = {.3f, 12, 27, 2, true, U_FOVEATION_ANGULAR_SMOOTHSTEP, 20};

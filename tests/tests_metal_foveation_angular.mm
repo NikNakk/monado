@@ -18,6 +18,12 @@ TEST_CASE("Angular runtime maps match legacy descriptors and coordinates", "[fov
 		u_foveation_angular_config c = {.3f, 12, 27, 2, true, U_FOVEATION_ANGULAR_SMOOTHSTEP, 0};
 		gaze.outer = c.outer;
 		auto *cache = m_metal_foveation_angular_create((void *)device, &c);
+		if (!u_foveation_angular_available()) {
+			// Without threshold-foveation the provider is unsupported, not approximated.
+			REQUIRE_FALSE(cache);
+			[device release];
+			return;
+		}
 		REQUIRE(cache);
 		u_foveation_angular_target t = {
 		    1024, 512, {{0, 0, 512, 512, -.9f, .8f, .85f, -.8f}, {512, 0, 512, 512, -.8f, .9f, .85f, -.8f}}};

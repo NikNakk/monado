@@ -34,7 +34,7 @@ struct m_metal_foveation_angular
 struct m_metal_foveation_angular *
 m_metal_foveation_angular_create(void *device, const struct u_foveation_angular_config *config)
 {
-	if (!u_foveation_angular_config_valid(config) ||
+	if (!u_foveation_angular_available() || !u_foveation_angular_config_valid(config) ||
 	    ![(id<MTLDevice>)device supportsRasterizationRateMapWithLayerCount:1])
 		return NULL;
 	struct m_metal_foveation_angular *c = calloc(1, sizeof(*c));
@@ -95,7 +95,11 @@ m_metal_foveation_angular_lookup(struct m_metal_foveation_angular *c,
 		MonadoFoveationAngularMapEntry *entry = [c->maps objectForKey:data];
 		if (!entry) {
 			entry = [[MonadoFoveationAngularMapEntry alloc] init];
-			u_foveation_angular_build_recipe(&c->config, t, &h, &entry->recipe);
+			if (!u_foveation_angular_build_recipe(&c->config, t, &h, &entry->recipe)) {
+				[entry release];
+				pthread_mutex_unlock(&c->mutex);
+				return false;
+			}
 			MTLRasterizationRateLayerDescriptor *layer =
 			    [[MTLRasterizationRateLayerDescriptor alloc] initWithSampleCount:MTLSizeMake(64, 32, 1)];
 			for (unsigned i = 0; i < 64; ++i)

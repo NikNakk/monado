@@ -44,6 +44,11 @@ struct u_foveation_angular_recipe
 };
 bool
 u_foveation_angular_config_valid(const struct u_foveation_angular_config *c);
+/* True if the profile mathematics (threshold-foveation API level 2) is built in.
+ * Without it target validation and recipe building fail, so the angular
+ * provider reports unsupported. */
+bool
+u_foveation_angular_available(void);
 bool
 u_foveation_angular_target_valid(const struct u_foveation_angular_target *t);
 void
@@ -54,7 +59,9 @@ u_foveation_angular_update(const struct u_foveation_angular_config *c,
                            struct u_foveation_angular_history *h);
 void
 u_foveation_angular_angles(const struct u_foveation_angular_view *v, float x, float y, float *yaw, float *pitch);
-void
+/* Returns false only if the profile mathematics is unavailable or rejects the
+ * (already validated) inputs. */
+bool
 u_foveation_angular_build_recipe(const struct u_foveation_angular_config *c,
                                  const struct u_foveation_angular_target *t,
                                  const struct u_foveation_angular_history *h,
