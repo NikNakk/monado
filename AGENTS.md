@@ -53,9 +53,11 @@ trees match.
 
 - Monado's normal target instance and hardware prober find the PS VR2 over
   libusb. The headset's own SLAM and IMU give 6DoF head tracking.
-- A Vulkan (MoltenVK) compositor does distortion and timewarp.
-  `comp_window_macos.m` presents the result through a `CAMetalLayer` on the
-  PS VR2 display, paced from CVDisplayLink.
+- A Vulkan (MoltenVK or KosmicKrisp) compositor does distortion and timewarp.
+  By default `comp_window_macos_wsi.m` presents through Vulkan WSI on the
+  PS VR2 display (`XRT_MACOS_PRESENTER=wsi`). The native `CAMetalLayer`
+  presenter in `comp_window_macos.m` (`XRT_MACOS_PRESENTER=native`) is kept as
+  the fallback for passthrough until passthrough works under WSI.
 - Clients share swapchains with the service as IOSurfaces or Metal objects. XPC
   handles launchd activation and Metal handle transfer; the Monado protocol
   stays on the Unix socket.

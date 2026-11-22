@@ -10,13 +10,31 @@ The implementation is committed on the WSI topic branch; the
 records review units and pending hardware validation. Raw captures/build products
 remain local and ignored.
 
+## WSI default (22 November 2026)
+
+An unset `XRT_MACOS_PRESENTER` now selects calibrated CV WSI, as do
+empty/invalid values (with a warning). This matches the configuration the user
+has run day to day and the WSI-only upstream MVP. `native` remains an explicit
+fallback. Without `XRT_MACOS_WSI_PASSTHROUGH=1`, WSI keeps the graphics
+compositor and `xrCreatePassthroughFB` returns unsupported, with a startup log
+pointing at the native fallback. Passthrough sessions therefore run the service
+with `XRT_MACOS_PRESENTER=native`; the selector is process-wide, so this
+needs a restart.
+
+Next: make WSI passthrough acceptable (the 18 October fragment output pass is
+untested on hardware, and passthrough currently forces compute, the shimmer
+trigger), then decide whether to retire the native presenter.
+
+Validation: ARM64 build and 99/99 CTests pass, including a new unset-selector
+runtime case. No headset run, Linux CI or installed-runtime change was made.
+
 ## Unified presenter selector (17 October 2026)
 
 Use `XRT_MACOS_PRESENTER=wsi|wsi-adaptive|native` in both service and hosted
 client launch environments. `wsi` means calibrated CV WSI; `wsi-adaptive`
-selects the adaptive display-timing pacer. Unset remains `native` until WSI's
-outstanding moving-head checks pass. Empty/invalid values warn once and fall
-back to native. A common process-wide selector feeds detection, hosted factory
+selects the adaptive display-timing pacer. Unset was `native` at the time
+(superseded by the WSI default above). Empty/invalid values warned once and
+fell back to native. A common process-wide selector feeds detection, hosted factory
 selection, compositor settings and WSI pacing. The four old WSI selection
 booleans are removed; they do not override the new selector.
 

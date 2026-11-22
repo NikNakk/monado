@@ -5,11 +5,11 @@
 #include <cstdlib>
 #include <string>
 
-TEST_CASE("macOS presenter selection is explicit and defaults safely", "[macos][presenter]")
+TEST_CASE("macOS presenter selection is explicit and defaults to WSI", "[macos][presenter]")
 {
 	comp_macos_presenter mode = COMP_MACOS_PRESENTER_WSI_ADAPTIVE;
 	CHECK(comp_macos_presenter_parse(nullptr, &mode));
-	CHECK(mode == COMP_MACOS_PRESENTER_NATIVE);
+	CHECK(mode == COMP_MACOS_PRESENTER_WSI);
 	CHECK(comp_macos_presenter_parse("native", &mode));
 	CHECK(mode == COMP_MACOS_PRESENTER_NATIVE);
 	CHECK(comp_macos_presenter_parse("wsi", &mode));
@@ -17,10 +17,10 @@ TEST_CASE("macOS presenter selection is explicit and defaults safely", "[macos][
 	CHECK(comp_macos_presenter_parse("wsi-adaptive", &mode));
 	CHECK(mode == COMP_MACOS_PRESENTER_WSI_ADAPTIVE);
 	for (auto value : {"", "WSI", "wsi ", "adaptive", "wsi-generic", "0", "1"}) {
-		mode = COMP_MACOS_PRESENTER_WSI;
+		mode = COMP_MACOS_PRESENTER_NATIVE;
 		CAPTURE(value);
 		CHECK_FALSE(comp_macos_presenter_parse(value, &mode));
-		CHECK(mode == COMP_MACOS_PRESENTER_NATIVE);
+		CHECK(mode == COMP_MACOS_PRESENTER_WSI);
 	}
 }
 

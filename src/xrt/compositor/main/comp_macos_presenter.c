@@ -11,9 +11,9 @@ static void
 read_presenter(void)
 {
 	char storage[DEBUG_CHAR_STORAGE_SIZE];
-	const char *value = debug_get_option(storage, sizeof(storage), "XRT_MACOS_PRESENTER", "native");
+	const char *value = debug_get_option(storage, sizeof(storage), "XRT_MACOS_PRESENTER", NULL);
 	if (!comp_macos_presenter_parse(value, &presenter)) {
-		U_LOG_W("Invalid XRT_MACOS_PRESENTER='%s': expected wsi, wsi-adaptive or native; using native", value);
+		U_LOG_W("Invalid XRT_MACOS_PRESENTER='%s': expected wsi, wsi-adaptive or native; using wsi", value);
 	}
 }
 

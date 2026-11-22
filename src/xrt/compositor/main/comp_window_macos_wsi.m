@@ -713,6 +713,10 @@ create_images(struct comp_target *ct, const struct comp_target_create_images_inf
 		if (w->passthrough == NULL) {
 			COMP_ERROR(ct->c, "Could not initialize Vulkan camera composition");
 		}
+	} else {
+		COMP_INFO(ct->c,
+		          "PS VR2 passthrough is unsupported with the WSI presenter; use XRT_MACOS_PRESENTER=native "
+		          "for passthrough sessions");
 	}
 	struct vk_bundle *vk = &ct->c->base.vk;
 	VkRefreshCycleDurationGOOGLE duration = {0};

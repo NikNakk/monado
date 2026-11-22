@@ -112,6 +112,9 @@ if(APPLE)
 		set_tests_properties(tests_macos_presenter_${mode} PROPERTIES
 			ENVIRONMENT "XRT_MACOS_PRESENTER=${mode};XRT_MACOS_WSI_GENERIC=1;XRT_MACOS_WSI_GENERIC_CV=1")
 	endforeach()
+	add_test(NAME tests_macos_presenter_unset COMMAND tests_macos_presenter "[presenter-runtime]")
+	set_tests_properties(tests_macos_presenter_unset PROPERTIES ENVIRONMENT_MODIFICATION
+		"XRT_MACOS_PRESENTER=unset:")
 endif()
 
 if(UNIX

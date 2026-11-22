@@ -6,6 +6,11 @@ SPDX-License-Identifier: BSL-1.0
 
 # macOS / PS VR2 Port Status
 
+**22 November 2026: WSI is the default presenter.** Native remains the
+explicit fallback for passthrough sessions (`XRT_MACOS_PRESENTER=native`)
+until passthrough is fixed under WSI. See
+[the selector](macos-wsi-migration.md#wsi-default-22-november-2026).
+
 The [20 November native presentation feedback change](macos-psvr2-timing-diagnostics.md#native-presentation-feedback--20-november-2026)
 decouples prediction calibration from tracing, adds ordered display-generation
 feedback and observes a provisional baseline separately from extra refreshes.
@@ -52,6 +57,15 @@ The isolated [KK compositor follow-up](macos-kk-compositor-followup.md) adds an
 opt-in private-scratch path and records timestamp and host-event compatibility
 gates. Desktop Alyx reaches the single-projection fast path; headset acceptance
 and an installed compositor driver change remain outstanding (24 October 2026).
+
+WSI became the default presenter on 22 November 2026: an unset or invalid
+`XRT_MACOS_PRESENTER` now selects calibrated CV WSI. `native` remains the
+explicit fallback and is still needed for PS VR2 passthrough, which WSI
+reports as unsupported unless `XRT_MACOS_WSI_PASSTHROUGH=1`; WSI passthrough
+needs compute and still shimmers in motion. The selector is read once per
+process, so switching needs a service restart. Fixing WSI passthrough, then
+retiring the native presenter, is the plan. The user's installed service
+already ran WSI; fresh installs and CI now do too.
 
 Presenter selection now uses `XRT_MACOS_PRESENTER=wsi|wsi-adaptive|native`
 (default `native`). `wsi` selects calibrated CV WSI; the old WSI selection
@@ -242,7 +256,7 @@ This is development work, not an upstream-supported or packaged Monado target.
 | --- | --- | --- |
 | Native Monado service/runtime on Apple Silicon | **Working** | `monado-service`, OpenXR runtime, Unix IPC and macOS launchd/XPC integration all run natively. |
 | PS VR2 HMD discovery and 6DoF head tracking | **Working** | Uses the headset's own SLAM/IMU path. |
-| PS VR2 display/compositor output | **Working** | Vulkan/MoltenVK distortion compositor with native Metal/CAMetalLayer final presentation. |
+| PS VR2 display/compositor output | **Working** | Vulkan distortion compositor presenting through Vulkan WSI by default (since 22 November 2026); the native Metal/CAMetalLayer presenter is the passthrough fallback. |
 | Game Mode (fullscreen games) | **Working, opt-in** | macOS throttles `monado-service` under Game Mode. With `XRT_MACOS_CLIENT_COMPOSITOR=1` the client composites in its own process and the service hosts its layer; hardware-validated with Unreal at 120 Hz under Game Mode. Handoff between clients is implemented but not yet run on hardware. |
 | Native OpenXR Metal clients | **Working** | Used by native samples and the engine/browser ports below. |
 | Unity | **Working proof** | Open Brush is the main Unity validation application. |

@@ -7,6 +7,10 @@ SPDX-License-Identifier: BSL-1.0
 
 # macOS Port Tracker
 
+**22 November 2026: WSI is the default presenter**, with native as the
+explicit passthrough fallback. See
+[the selector](macos-wsi-migration.md#wsi-default-22-november-2026).
+
 The [20 November native presentation feedback change](macos-psvr2-timing-diagnostics.md#native-presentation-feedback--20-november-2026)
 decouples prediction calibration from tracing, adds ordered display-generation
 feedback and observes a provisional baseline separately from extra refreshes.
@@ -64,6 +68,15 @@ The isolated [KK compositor follow-up](macos-kk-compositor-followup.md) adds an
 opt-in private-scratch path and records timestamp and host-event compatibility
 gates. Desktop Alyx reaches the single-projection fast path; headset acceptance
 and an installed compositor driver change remain outstanding (24 October 2026).
+
+WSI became the default presenter on 22 November 2026: an unset or invalid
+`XRT_MACOS_PRESENTER` now selects calibrated CV WSI. `native` remains the
+explicit fallback and is still needed for PS VR2 passthrough, which WSI
+reports as unsupported unless `XRT_MACOS_WSI_PASSTHROUGH=1`; WSI passthrough
+needs compute and still shimmers in motion. The selector is read once per
+process, so switching needs a service restart. Fixing WSI passthrough, then
+retiring the native presenter, is the plan. The user's installed service
+already ran WSI; fresh installs and CI now do too.
 
 Presenter selection now uses `XRT_MACOS_PRESENTER=wsi|wsi-adaptive|native`
 (default `native`). `wsi` selects calibrated CV WSI; the old WSI selection

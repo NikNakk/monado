@@ -31,7 +31,7 @@ validation and limitations.
 
 | Variable | Default | Effect |
 | --- | --- | --- |
-| `XRT_MACOS_PRESENTER` | `native` | `wsi`: calibrated CV-paced Vulkan WSI; `wsi-adaptive`: adaptive display-timing WSI; `native`: Metal presenter. Applies to service and hosted compositors. |
+| `XRT_MACOS_PRESENTER` | `wsi` | `wsi`: calibrated CV-paced Vulkan WSI (default since 22 November 2026; invalid values also select it); `wsi-adaptive`: adaptive display-timing WSI; `native`: Metal presenter, the fallback for PS VR2 passthrough. Read once per process and applies to service and hosted compositors. |
 | `XRT_MACOS_WSI_GENERIC_LATCH_US` | `0` | With `wsi-adaptive`, how long after the desired present time GPU work may finish. |
 | `XRT_MACOS_WSI_PASSTHROUGH` | `0` | Enable GPU-ordered Vulkan camera composition with the compute compositor. |
 | `SIMULATED_DESKTOP` | `0` | Run the simulated HMD in a window on the built-in display, steered with the trackpad. Implies `SIMULATED_ENABLE`. With `QWERTY_ENABLE=1`, the window drives qwerty's HMD and controllers instead. See [the desktop simulation note](macos-desktop-simulation.md). |
