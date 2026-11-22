@@ -282,7 +282,7 @@ TEST_CASE("shutdown cancels stalled handler exchanges without waiting for the gl
 		thread.state = IPC_THREAD_READY;
 	}
 	REQUIRE(started == 0);
-	ipc_message_channel channel = {f.peer, U_LOGGING_ERROR};
+	ipc_message_channel channel = {f.peer, U_LOGGING_ERROR, 0};
 	xrt_result_t allocated = XRT_ERROR_ALLOCATION;
 	REQUIRE(ipc_receive(&channel, &allocated, sizeof(allocated)) == XRT_SUCCESS);
 	REQUIRE(allocated == XRT_SUCCESS);

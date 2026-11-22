@@ -108,7 +108,7 @@ struct Fixture
 			if (f.socket_fd >= 0) {
 				// Model a handler blocked mid-message on its client socket.
 				lock.unlock();
-				struct ipc_message_channel imc = {f.socket_fd, U_LOGGING_WARN};
+				struct ipc_message_channel imc = {f.socket_fd, U_LOGGING_WARN, 0};
 				xrt_result_t xret;
 				if (f.socket_send) {
 					// More than the socket buffer holds, and the peer never reads.
@@ -400,10 +400,10 @@ TEST_CASE("macOS fd transport completes a payload fragmented after its descripto
 			shutdown(sockets.fds[1], SHUT_WR);
 			return;
 		}
-		ipc_message_channel channel = {sockets.fds[1], U_LOGGING_WARN};
+		ipc_message_channel channel = {sockets.fds[1], U_LOGGING_WARN, 0};
 		sent = ipc_send(&channel, expected + 16, sizeof(expected) - 16);
 	});
-	ipc_message_channel channel = {sockets.fds[0], U_LOGGING_WARN};
+	ipc_message_channel channel = {sockets.fds[0], U_LOGGING_WARN, 0};
 	uint8_t received[64] = {};
 	int fd = -1;
 	auto result = ipc_receive_fds(&channel, received, sizeof(received), &fd, 1);
