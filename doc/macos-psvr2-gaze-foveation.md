@@ -300,3 +300,70 @@ Remaining:
 5. validate the standard FB/META + Metal companion path in Chromium;
 6. use that implementation experience to refine the proposed Metal companion
    before taking it upstream.
+
+## DXMT fixed-map PS VR2 alignment finding (2026-11-11)
+
+The user's first reported wearer run of the private DXMT stay-warped profile
+at 5600×2856, 2× MSAA and peripheral axis rate 0.3 feels reduced-rate throughout.
+Run folder in `~/Code/macos-wine-xr`:
+`build-in-process/exd-warp/headset-20261111-223322-msaa2-psvr2-warped`.
+Bridge HEAD is `97d6309` plus its uncommitted DXMT patches, including the
+finished per-resource shader selector. This is the DXMT automatic application
+profile, not Monado's FB/META runtime-owned map implementation.
+
+The run's environment and startup log confirm `DXMT_STAY_WARPED=5600x2856`,
+`DXMT_STAY_WARPED_RATE=0.3`, `DXMT_RATE_MAP_RESOURCE_READ=1` and
+`STAY_WARPED map 5600x2856 peripheral_rate=30%`. Composition telemetry reports
+two 2800×2856 source views. The user's command correctly enabled the intended
+profile.
+
+The profile is fixed at the geometric midpoint of each eye image: horizontal
+grid columns 3/4 and 11/12 at 1.0 in a 16-column double-wide map, and vertical
+rows 3/4 at 1.0 in eight rows. Other entries are 0.3. It is not gaze-tracked or
+centred using PS VR2 projection/lens calibration.
+
+PS VR2's asymmetric FOVs (-61.5°/+43.5° for the left eye, mirrored for the
+right) put the forward ray at approximately U=0.660/0.340 within each eye
+image. Distortion code similarly uses centres 0.6603788/0.3396213. These are
+well away from U=0.5. A Metal coordinate-only probe using the exact profile
+construction, with no GPU command buffers submitted, reports:
+
+| Location | Horizontal local rate | Vertical local rate at V=0.5 |
+| --- | ---: | ---: |
+| Left geometric midpoint, U=0.5 | 1.000 | 1.000 |
+| Right geometric midpoint, U=0.5 | 1.000 | 1.000 |
+| Left PS VR2 centre, U=0.6603788 | 0.344 | 1.000 |
+| Right PS VR2 centre, U=0.3396213 | approximately 0.427 | 1.000 |
+
+The probe's active physical size is 2844×1488, about 26.5% of logical pixel
+count, confirming that it is not a uniform 0.3×0.3 map. The misplaced full-rate
+regions provide a concrete explanation for coarse straight-ahead detail;
+this does not exclude other image-quality effects at the previously unvalidated
+0.3 rate and headset resolution.
+
+The fix is projection-aware placement and appropriately sized transitions for
+the per-eye full-rate regions, followed by a wearer test. Raising the peripheral
+rate can soften the symptom but cannot align the regions. No source, binary,
+settings or running game state was changed during this diagnosis. The profile
+remains opt-in; optical alignment and rate-0.3 headset quality are not validated.
+
+### Fixed PS VR2 candidate prepared (2026-11-11)
+
+After the user quit the hardware run, the private DXMT source gained an opt-in
+`DXMT_STAY_WARPED_FIXED_PROFILE=psvr2` constructor profile, independent of gaze.
+It uses the asymmetric PS VR2 FOV, 32 horizontal samples per eye and 32 vertical
+samples, with a requested ±20° full-rate core and smooth transition to the outer
+rate at ±35°. The generic image-centred profile remains the default. The native
+module builds, and Metal coordinate checks at three resolutions and four rates
+pass: both eyes retain full rate across ±15° on each axis; mappings are monotonic
+and all-1.0 maps are identity. Physical tile rounding means the requested outer
+rate is approximate, particularly at small resolutions.
+
+At 5600×2856 / 0.3, the new physical map is 3280×1728 (35.4% of logical area),
+versus the original 2844×1488 (26.5%). This deliberately spends more pixels on
+a correctly placed protected region; it is not a performance measurement.
+Source, standalone validation, patch `0021-fixed-psvr2-profile.patch` and integration
+notes are in the sibling checkout (`docs/dxmt-fixed-psvr2.md`). The candidate was
+built and saved separately, but not deployed while Claude develops gaze support.
+No headset test was launched. Worn image quality and application reconstruction
+remain user-validation gates.
