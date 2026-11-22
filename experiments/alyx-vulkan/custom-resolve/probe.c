@@ -135,7 +135,7 @@ void kl_glfb_note_eye_mtl_texture(int a,int b,void*c,int d,int e,int f) { (void)
 
 static VkDevice device;
 static VkPhysicalDeviceMemoryProperties memory;
-static VkShaderModule vert, fill, resolve[3];
+static VkShaderModule vert, fill, resolve[3], resolve_depth[3];
 static VkPipelineLayout layout;
 static VkDescriptorSetLayout set_layout;
 static VkQueue queue;
@@ -144,6 +144,7 @@ static int custom_available;
 static int with_depth;
 static int stereo;
 static int suspended;
+static int prebind;
 static PFN_vkCmdClearDepthStencilImage vkCmdClearDepthStencilImage;
 typedef struct { VkImage image; VkImageView view; VkDeviceMemory memory; } Image;
 
@@ -182,7 +183,7 @@ static VkPipeline pipeline(VkRenderPass pass,uint32_t subpass,int dynamic,int is
     VkPipelineShaderStageCreateInfo stages[2]={
         {.sType=VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,.stage=VK_SHADER_STAGE_VERTEX_BIT,.module=vert,.pName="main"},
         {.sType=VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,.stage=VK_SHADER_STAGE_FRAGMENT_BIT,
-         .module=is_resolve?resolve[samples==4?1:samples==2?2:0]:fill,.pName="main"}};
+         .module=is_resolve?(with_depth?resolve_depth:resolve)[samples==4?1:samples==2?2:0]:fill,.pName="main"}};
     VkPipelineVertexInputStateCreateInfo vi={.sType=VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO};
     VkPipelineInputAssemblyStateCreateInfo ia={.sType=VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO,.topology=VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST};
     VkViewport viewport={0,0,SIZE,SIZE,0,1}; VkRect2D scissor={{0,0},{SIZE,SIZE}};
@@ -192,9 +193,9 @@ static VkPipeline pipeline(VkRenderPass pass,uint32_t subpass,int dynamic,int is
     VkPipelineColorBlendAttachmentState ba={.colorWriteMask=15};
     VkPipelineColorBlendStateCreateInfo cb={.sType=VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO,.attachmentCount=1,.pAttachments=&ba};
     VkFormat format=VK_FORMAT_R8G8B8A8_UNORM;
-    uint32_t input_index=0;
+    uint32_t input_index=0,depth_index=1;
     VkRenderingInputAttachmentIndexInfo input={.sType=VK_STRUCTURE_TYPE_RENDERING_INPUT_ATTACHMENT_INDEX_INFO,
-        .colorAttachmentCount=1,.pColorAttachmentInputIndices=&input_index};
+        .colorAttachmentCount=1,.pColorAttachmentInputIndices=&input_index,.pDepthInputAttachmentIndex=with_depth?&depth_index:NULL};
     VkCustomResolveCreateInfoEXT custom={.sType=VK_STRUCTURE_TYPE_CUSTOM_RESOLVE_CREATE_INFO_EXT,.pNext=&input,
         .customResolve=is_resolve,.colorAttachmentCount=1,.pColorAttachmentFormats=&format};
     VkPipelineRenderingCreateInfo rendering={.sType=VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO,.pNext=&custom,
@@ -221,10 +222,10 @@ static int run(int dynamic,int custom,int samples,int discard) {
     Image dst=image(VK_SAMPLE_COUNT_1_BIT,VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT|VK_IMAGE_USAGE_TRANSFER_SRC_BIT);
     Image depth_src={0},depth_dst={0};
     if(with_depth) {
-        depth_src=image_format(samples,VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT,VK_FORMAT_D32_SFLOAT,VK_IMAGE_ASPECT_DEPTH_BIT);
+        depth_src=image_format(samples,VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT|VK_IMAGE_USAGE_INPUT_ATTACHMENT_BIT,VK_FORMAT_D32_SFLOAT,VK_IMAGE_ASPECT_DEPTH_BIT);
         depth_dst=image_format(1,VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT|VK_IMAGE_USAGE_TRANSFER_SRC_BIT|VK_IMAGE_USAGE_TRANSFER_DST_BIT,VK_FORMAT_D32_SFLOAT,VK_IMAGE_ASPECT_DEPTH_BIT);
     }
-    VkDescriptorPoolSize ps={VK_DESCRIPTOR_TYPE_INPUT_ATTACHMENT,1};
+    VkDescriptorPoolSize ps={VK_DESCRIPTOR_TYPE_INPUT_ATTACHMENT,2};
     VkDescriptorPoolCreateInfo pc={.sType=VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,.maxSets=1,.poolSizeCount=1,.pPoolSizes=&ps};
     VkDescriptorPool dp; CHECK(vkCreateDescriptorPool(device,&pc,NULL,&dp));
     VkDescriptorSetAllocateInfo sa={.sType=VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,.descriptorPool=dp,.descriptorSetCount=1,.pSetLayouts=&set_layout};
@@ -232,6 +233,10 @@ static int run(int dynamic,int custom,int samples,int discard) {
     VkDescriptorImageInfo ii={.imageView=src.view,.imageLayout=VK_IMAGE_LAYOUT_GENERAL};
     VkWriteDescriptorSet write={.sType=VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,.dstSet=set,.descriptorCount=1,.descriptorType=VK_DESCRIPTOR_TYPE_INPUT_ATTACHMENT,.pImageInfo=&ii};
     vkUpdateDescriptorSets(device,1,&write,0,NULL);
+    if(with_depth) {
+        VkDescriptorImageInfo di={.imageView=depth_src.view,.imageLayout=VK_IMAGE_LAYOUT_GENERAL};
+        write.dstBinding=1; write.pImageInfo=&di; vkUpdateDescriptorSets(device,1,&write,0,NULL);
+    }
     VkBufferCreateInfo bc={.sType=VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,.size=SIZE*SIZE*4*(with_depth?2:1)*(stereo?2:1),.usage=VK_BUFFER_USAGE_TRANSFER_DST_BIT};
     VkBuffer buffer; CHECK(vkCreateBuffer(device,&bc,NULL,&buffer));
     VkMemoryRequirements req; vkGetBufferMemoryRequirements(device,buffer,&req);
@@ -275,8 +280,8 @@ static int run(int dynamic,int custom,int samples,int discard) {
             vkCmdClearDepthStencilImage(cmd,depth_dst.image,VK_IMAGE_LAYOUT_GENERAL,&sentinel,1,&range);
             barrier_aspect(cmd,depth_dst,VK_IMAGE_ASPECT_DEPTH_BIT,VK_IMAGE_LAYOUT_GENERAL,VK_IMAGE_LAYOUT_GENERAL,VK_ACCESS_TRANSFER_WRITE_BIT,VK_ACCESS_MEMORY_WRITE_BIT,VK_PIPELINE_STAGE_TRANSFER_BIT,VK_PIPELINE_STAGE_ALL_COMMANDS_BIT);
         }
-        uint32_t zero=0;
-        VkRenderingInputAttachmentIndexInfo input={.sType=VK_STRUCTURE_TYPE_RENDERING_INPUT_ATTACHMENT_INDEX_INFO,.colorAttachmentCount=1,.pColorAttachmentInputIndices=&zero};
+        uint32_t zero=0,one=1;
+        VkRenderingInputAttachmentIndexInfo input={.sType=VK_STRUCTURE_TYPE_RENDERING_INPUT_ATTACHMENT_INDEX_INFO,.colorAttachmentCount=1,.pColorAttachmentInputIndices=&zero,.pDepthInputAttachmentIndex=with_depth?&one:NULL};
         VkRenderingAttachmentInfo color={.sType=VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO,.imageView=src.view,.imageLayout=VK_IMAGE_LAYOUT_GENERAL,
             .resolveMode=VK_RESOLVE_MODE_CUSTOM_BIT_EXT,.resolveImageView=dst.view,.resolveImageLayout=VK_IMAGE_LAYOUT_GENERAL,
             .loadOp=VK_ATTACHMENT_LOAD_OP_CLEAR,.storeOp=discard?VK_ATTACHMENT_STORE_OP_DONT_CARE:VK_ATTACHMENT_STORE_OP_STORE,.clearValue=clear};
@@ -299,13 +304,20 @@ static int run(int dynamic,int custom,int samples,int discard) {
     }
     if(!suspended || !dynamic) {vkCmdBindPipeline(cmd,VK_PIPELINE_BIND_POINT_GRAPHICS,p0); vkCmdDraw(cmd,3,1,0,0);}
     if(dynamic) {
-        VkMemoryBarrier mb={.sType=VK_STRUCTURE_TYPE_MEMORY_BARRIER,.srcAccessMask=VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,.dstAccessMask=VK_ACCESS_INPUT_ATTACHMENT_READ_BIT};
-        vkCmdPipelineBarrier(cmd,VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,VK_DEPENDENCY_BY_REGION_BIT,1,&mb,0,NULL,0,NULL);
+        VkMemoryBarrier mb={.sType=VK_STRUCTURE_TYPE_MEMORY_BARRIER,.srcAccessMask=VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT|(with_depth?VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT:0),.dstAccessMask=VK_ACCESS_INPUT_ATTACHMENT_READ_BIT};
+        vkCmdPipelineBarrier(cmd,VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT|(with_depth?(VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT|VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT):0),VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,VK_DEPENDENCY_BY_REGION_BIT,1,&mb,0,NULL,0,NULL);
         PFN_vkCmdBeginCustomResolveEXT start=(PFN_vkCmdBeginCustomResolveEXT)vkGetDeviceProcAddr(device,"vkCmdBeginCustomResolveEXT");
+        if(prebind) {
+            vkCmdBindPipeline(cmd,VK_PIPELINE_BIND_POINT_GRAPHICS,p1);
+            vkCmdBindDescriptorSets(cmd,VK_PIPELINE_BIND_POINT_GRAPHICS,layout,0,1,&set,0,NULL);
+        }
         if(!start) exit(2); start(cmd,NULL);
     } else vkCmdNextSubpass(cmd,VK_SUBPASS_CONTENTS_INLINE);
-    vkCmdBindPipeline(cmd,VK_PIPELINE_BIND_POINT_GRAPHICS,p1);
-    vkCmdBindDescriptorSets(cmd,VK_PIPELINE_BIND_POINT_GRAPHICS,layout,0,1,&set,0,NULL); vkCmdDraw(cmd,3,1,0,0);
+    if(!prebind) {
+        vkCmdBindPipeline(cmd,VK_PIPELINE_BIND_POINT_GRAPHICS,p1);
+        vkCmdBindDescriptorSets(cmd,VK_PIPELINE_BIND_POINT_GRAPHICS,layout,0,1,&set,0,NULL);
+    }
+    vkCmdDraw(cmd,3,1,0,0);
     if(dynamic) vkCmdEndRendering(cmd); else vkCmdEndRenderPass(cmd);
     barrier(cmd,dst,VK_IMAGE_LAYOUT_GENERAL,VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,VK_ACCESS_TRANSFER_READ_BIT,VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,VK_PIPELINE_STAGE_TRANSFER_BIT);
     VkBufferImageCopy copy={.imageSubresource={VK_IMAGE_ASPECT_COLOR_BIT,0,0,stereo?2:1},.imageExtent={SIZE,SIZE,1}};
@@ -321,6 +333,7 @@ static int run(int dynamic,int custom,int samples,int discard) {
     VkSubmitInfo submit={.sType=VK_STRUCTURE_TYPE_SUBMIT_INFO,.commandBufferCount=1,.pCommandBuffers=&cmd};
     CHECK(vkQueueSubmit(queue,1,&submit,VK_NULL_HANDLE)); CHECK(vkQueueWaitIdle(queue));
     unsigned char *pixels; CHECK(vkMapMemory(device,bm,0,VK_WHOLE_SIZE,0,(void**)&pixels));
+    printf("configuration depth-read=%d prebind=%d layers=%d suspended=%d\n",with_depth,prebind,stereo?2:1,suspended);
     int bad=0; const int expected[4]={191,64,128,255};
     for(int i=0;i<SIZE*SIZE*(stereo?2:1);i++) for(int c=0;c<4;c++) if(abs((int)pixels[i*4+c]-(c==1 && i>=SIZE*SIZE?128:expected[c]))>1) {bad++; break;}
     printf("%s custom=%d samples=%d store=%s pixels_bad=%d/%d first=%u,%u,%u,%u %s\n",
@@ -378,12 +391,13 @@ int main(int argc,char **argv) {
     float priority=1; VkDeviceQueueCreateInfo qc={.sType=VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO,.queueFamilyIndex=qi,.queueCount=1,.pQueuePriorities=&priority};
     VkDeviceCreateInfo dc={.sType=VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO,.pNext=&f13,.queueCreateInfoCount=1,.pQueueCreateInfos=&qc,.enabledExtensionCount=nd,.ppEnabledExtensionNames=de};
     CHECK(vkCreateDevice(pd,&dc,NULL,&device)); vkGetDeviceQueue(device,qi,0,&queue);
-    VkDescriptorSetLayoutBinding binding={.descriptorType=VK_DESCRIPTOR_TYPE_INPUT_ATTACHMENT,.descriptorCount=1,.stageFlags=VK_SHADER_STAGE_FRAGMENT_BIT};
-    VkDescriptorSetLayoutCreateInfo sl={.sType=VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,.bindingCount=1,.pBindings=&binding};
+    VkDescriptorSetLayoutBinding binding[2]={{.binding=0,.descriptorType=VK_DESCRIPTOR_TYPE_INPUT_ATTACHMENT,.descriptorCount=1,.stageFlags=VK_SHADER_STAGE_FRAGMENT_BIT},{.binding=1,.descriptorType=VK_DESCRIPTOR_TYPE_INPUT_ATTACHMENT,.descriptorCount=1,.stageFlags=VK_SHADER_STAGE_FRAGMENT_BIT}};
+    VkDescriptorSetLayoutCreateInfo sl={.sType=VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,.bindingCount=2,.pBindings=binding};
     CHECK(vkCreateDescriptorSetLayout(device,&sl,NULL,&set_layout));
     VkPipelineLayoutCreateInfo pl={.sType=VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,.setLayoutCount=1,.pSetLayouts=&set_layout}; CHECK(vkCreatePipelineLayout(device,&pl,NULL,&layout));
     VkCommandPoolCreateInfo cp={.sType=VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO,.queueFamilyIndex=qi}; CHECK(vkCreateCommandPool(device,&cp,NULL,&pool));
     vert=shader(argv[1],"fullscreen.vert"); fill=shader(argv[1],"fill.frag"); resolve[0]=shader(argv[1],"resolve1.frag"); resolve[1]=shader(argv[1],"resolve4.frag"); resolve[2]=shader(argv[1],"resolve2.frag");
+    resolve_depth[0]=shader(argv[1],"resolve-depth1.frag"); resolve_depth[1]=shader(argv[1],"resolve-depth4.frag"); resolve_depth[2]=shader(argv[1],"resolve-depth2.frag");
     int failures=0;
     for(int s=1;s<=4;s+=3) for(int discard=0;discard<2;discard++) {
         failures+=run(0,0,s,discard);
@@ -393,9 +407,10 @@ int main(int argc,char **argv) {
             if(s>1) failures+=run(1,1,s,discard);
         }
     }
-    if(custom_available) {with_depth=1;for(suspended=0;suspended<2;suspended++) for(stereo=0;stereo<2;stereo++) for(int samples=2;samples<=4;samples+=2) for(int discard=0;discard<2;discard++) failures+=run(1,1,samples,discard);}
+    if(custom_available) {with_depth=1;for(prebind=0;prebind<2;prebind++) for(suspended=0;suspended<2;suspended++) for(stereo=0;stereo<2;stereo++) for(int samples=2;samples<=4;samples+=2) for(int discard=0;discard<2;discard++) failures+=run(1,1,samples,discard);}
     if(!custom_available) puts("SKIP custom resolve: extension unavailable");
     vkDestroyShaderModule(device,vert,NULL); vkDestroyShaderModule(device,fill,NULL); vkDestroyShaderModule(device,resolve[0],NULL); vkDestroyShaderModule(device,resolve[1],NULL); vkDestroyShaderModule(device,resolve[2],NULL);
+    for(int i=0;i<3;i++) vkDestroyShaderModule(device,resolve_depth[i],NULL);
     vkDestroyCommandPool(device,pool,NULL); vkDestroyPipelineLayout(device,layout,NULL); vkDestroyDescriptorSetLayout(device,set_layout,NULL);
     vkDestroyDevice(device,NULL); vkDestroyInstance(instance,NULL); return !!failures;
 }
