@@ -21,7 +21,7 @@ jobs:
         with:
           python-version: "3.12"
       - name: Install pinned check tools
-        run: python -m pip install clang-format==23.1.1 cmakelang==0.6.13 codespell==2.4.1 reuse==6.2.0
+        run: python -m pip install clang-format==14.0.6 cmakelang==0.6.13 codespell==2.4.1 reuse==6.2.0
       - name: Check formatting, spelling and whitespace
         run: python scripts/check-contribution-style.py
       - name: Check source-license scope regressions
