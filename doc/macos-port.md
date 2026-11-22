@@ -6,6 +6,12 @@ SPDX-License-Identifier: BSL-1.0
 
 # macOS / PS VR2 Port Status
 
+The [20 November native presentation feedback change](macos-psvr2-timing-diagnostics.md#native-presentation-feedback--20-november-2026)
+decouples prediction calibration from tracing, adds ordered display-generation
+feedback and observes a provisional baseline separately from extra refreshes.
+The legacy EMA still drives prediction; split prediction and headset acceptance
+remain pending. Presentation scheduling and the opt-in guard policy are retained.
+
 The [17 November Sense confirmation investigation](macos-pssense-occlusion.md#recorded-prior-reproduction-and-confirmation-retry-17-november)
 reproduces in-view controller losses using recorded live priors. A tentative-track
 refine retry and a [filter-reset alignment refresh](macos-pssense-occlusion.md#lit-gap-diagnosis-stale-alignment-after-a-filter-reset-17-november)

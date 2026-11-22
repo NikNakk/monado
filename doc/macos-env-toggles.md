@@ -325,7 +325,9 @@ One drain can skip one or two arriving jobs because of frame-phase jitter.
 The existing render-resource fence and drawable-slot default remain active.
 
 Feedback is independent of timing traces. Enabling the guard without traces
-does not also enable the existing trace-driven present-offset calibration.
+historically did not also enable trace-driven present-offset calibration. Since
+20 November 2026, native present-offset calibration runs independently of both
+tracing and the guard.
 Old, invalid, stale and out-of-order feedback cannot trigger a drain. The
 service logs each drain and the worker CSV records `latency_guard_drop` jobs.
 The native headset trial shows immediate one-refresh recovery, but latency can
@@ -1587,3 +1589,11 @@ This is unvalidated on hardware. See [limits, native Alyx evidence and the
 capture protocol](macos-pssense-occlusion.md). `JOINT_LOSS_ACTIVE` is automatic
 and preserves evidence of losses that never recover; it is not an additional
 recovered-loss event when counting totals.
+
+## Native presentation feedback (20 November 2026)
+
+No new environment switch. `PSVR2_TIMING_TRACE` controls the native CSV sinks,
+not prediction calibration. The presented handler and legacy EMA now run with
+tracing and `XRT_MACOS_PRESENT_LATENCY_GUARD` disabled too. The split
+baseline/relative-refresh estimator is observation-only and cannot alter
+prediction or drain policy. See the [implementation and acceptance limits](macos-psvr2-timing-diagnostics.md#native-presentation-feedback--20-november-2026).

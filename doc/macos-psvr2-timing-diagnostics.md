@@ -6,6 +6,80 @@ SPDX-License-Identifier: BSL-1.0
 
 # macOS PS VR2 timing diagnostics
 
+## Native presentation feedback — 20 November 2026
+
+Implemented after the Halliday comparison, based on `0a78d70db` plus the working
+changes. Native Metal presentation now registers its ref-counted presented
+handler and calibrates prediction independently of CSV, guard and Perfetto
+settings. Failure to open a diagnostic file no longer disables calibration.
+The legacy 1/8 EMA, eight-consumed-sample warmup and four-period latency bound
+remain the predictor policy. This enables the previously trace-only prediction
+calibration in untraced sessions; it is a runtime behavior change, not merely
+additional telemetry. CADisplayLink deadlines, application pacer algorithms,
+drawable acquisition, present API/duration, GPU waits and image retirement are
+unchanged. The latency guard remains off by default.
+
+Feedback is a coherent mutex-protected mailbox carrying frame, timeline,
+desired/physical/observation timestamps, refresh period and display generation.
+Duplicate/reordered frames, non-increasing presentation timestamps, invalid
+samples and callbacks older than four refreshes are rejected. The compositor
+consumes the newest sample once and updates its pacer on its own thread.
+Display-link recreation or a measured period change greater than 1% increments
+the generation and clears feedback; old in-flight callbacks cannot repopulate
+it. Normal CADisplayLink period refinement does not reset it. Calibration
+requalifies after a generation change or a presentation gap over four periods;
+the pacer retains its last offset until eight fresh samples have been consumed.
+
+A separate **observation-only** estimator tracks a provisional baseline band and
+relative additional refreshes. Eight consistent observations establish the
+anchor, or move it to a lower stable band. Higher bands do not raise it merely
+because buffering persists. Within-band variation uses a 1/8 filter; three
+consistent whole-refresh observations qualify an excess change, with a
+one-eighth-period residual tolerance. An isolated miss does not change the
+qualified excess. Non-integral residuals invalidate excess confidence, and a
+presentation gap over four periods invalidates the anchor. A session starting
+buffered can therefore initially report zero relative excess: `baseline_ready`
+means a stable anchor, **not proof of minimum pipeline latency**. No split
+estimate controls prediction, frame dropping or backlog recovery yet.
+
+The existing `presented.csv` columns are preserved and append
+`feedback_generation`, `feedback_accepted`, `baseline_ns`, `baseline_ready`,
+`relative_extra_refreshes` and `extra_ready`. Ignore estimator values on
+rejected rows or without their readiness flag. The historical
+`present_queue_depth` column still means rounded lateness relative to a chosen
+scheduling slot, not drawable count, and is independent of this estimator.
+
+Local validation: the full ARM64 build passes. Across the full CTest run and
+normal-host-access rerun, 96 tests pass and two GPU-dependent cases skip.
+The sandbox initially prevented temporary sockets/shared memory and GPU/remote
+layer context access; all 20 affected failures pass with normal host access.
+The x86_64 compositor and feedback/pacing targets build, and both focused
+suites pass. Six new feedback cases cover trace-free calibration, coalescing,
+ordering/validity/freshness, generation/90 Hz requalification, sustained bands,
+transient misses and presentation gaps. A real fake-pacer integration case
+checks that calibration changes predicted display time without moving wake or
+desired-present deadlines. Five presentation-stall Python cases and nine
+contribution-license regression cases pass. Contribution style checks pass;
+the source-wide REUSE check reports an existing missing license annotation for
+`doc/macos-pssense-led-model-results/TOOLKIT-LICENSE.txt`, outside this change.
+Linux CI has not been run.
+
+An offline replay through the actual C helper used retained presented CSVs
+under `~/psvr2-trace` (PIDs 32127, 23793 and 51147). Accepted samples number
+21,867 / 152,425 / 11,238. The median qualified provisional anchors are
+16.652 / 8.330 / 24.971 ms respectively. These are historical files without
+verified per-session build/environment manifests. The second capture includes
+a later lower stable band; the third can start/requalify while buffered.
+This demonstrates why the observations cannot establish absolute queue depth
+or justify enabling split prediction. It is not a new hardware performance claim.
+
+No physical latency, smoothness or 90 Hz acceptance is claimed by implementation.
+Before enabling split prediction, compare the current EMA and split estimate in
+matched service and client-hosted captures, including Game Mode, trace on/off,
+120/90 Hz, sustained buffering, recovery and visibility changes. Measure physical
+prediction error, cadence, new application frames and application wake/display
+times. Hardware runs remain user-operated.
+
 ## Graphics WSI acquire phase (31 October 2026, removed 7 November)
 
 The isolated [acquisition-phase experiment](macos-wsi-acquire-phase.md) follows
@@ -93,7 +167,7 @@ discarded.
 The sections below record earlier experiments and their historical defaults.
 
 
-This branch adds passive timing traces for comparing the macOS Monado PS VR2 path with Sony's Windows SteamVR driver. The trace is disabled by default and does not change pose prediction or presentation scheduling.
+This branch adds passive timing traces for comparing the macOS Monado PS VR2 path with Sony's Windows SteamVR driver. The trace is disabled by default. Since 20 November 2026, native presentation feedback runs independently of tracing; earlier trace-enabled runs also enabled prediction calibration.
 
 Enable it for a run with:
 
