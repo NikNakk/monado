@@ -652,11 +652,23 @@ application to render with and changes no compositor reconstruction. Instead:
   revision as a new frame. Level 3 is looked up at run time; with a 0.2 library
   only maps are published. On an array swapchain (one eye per layer) the
   one-layer map cannot bind, but the profile is still published.
-- With API level 4 the same profile is also the process's current profile
-  (`tf_set_process_profile`), and the version 5 lookup publishes it too. A driver
-  whose output reaches the runtime only through another API, such as Zink's
-  OpenGL frames that an OpenVR layer copies into a D3D11 session, has no runtime
-  image of its own and uses that instead.
+- With API level 4 Monado also publishes the process's current profile
+  (`tf_set_process_profile`), and the version 5 lookup publishes it too. It always
+  covers both eyes of the last projection layer, even when each eye has its own
+  swapchain and so each image's profile only one. A driver whose output reaches
+  the runtime only through another API, such as Zink's OpenGL frames that an
+  OpenVR layer copies into a D3D11 session, has no runtime image of its own and
+  uses that instead; KosmicKrisp also prefers it to one-eye image profiles.
+- Revisions are acquire timestamps: they order publications but do not identify
+  content, and an acquire may come in the middle of the application's frame.
+  KosmicKrisp therefore ignores a profile whose rates are unchanged, and takes a
+  changed one only at the first pass of its next frame, never in the middle of
+  one (review of 23 November 2026).
+- These maps are advisory. A driver path that renders into a runtime image with
+  its bound map and leaves it warped for reconstruction (KosmicKrisp's
+  `KK_METAL_FOVEATION=1`, written for the version 5 lookup) must not use them;
+  KosmicKrisp recognises them by the profile published beside them and renders
+  such passes at full rate.
 
 The binding is process-wide state of threshold-foveation, keyed by the root
 texture and shared by its views. A graphics driver in the client process that

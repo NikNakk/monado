@@ -194,12 +194,12 @@ TEST_CASE("Image rate maps are published on the root texture for drivers", "[fov
 			REQUIRE(low == Catch::Approx(c.outer));
 			REQUIRE(pv.vertical[0] == Catch::Approx(c.outer));
 		}
-		// The same profile is the process's current one (level 4), and a NULL texture
-		// publishes only that.
+		// A texture's profile is not the process's (a one-eye swapchain's would replace
+		// both eyes there); a NULL texture publishes the process's current one (level 4).
 		tf_image_profile process = {};
 		process.struct_size = sizeof(process);
-		REQUIRE(tf_copy_process_profile(&process) == 0);
-		REQUIRE(process.revision == 7);
+		const bool had_process = tf_copy_process_profile(&process) == 0;
+		REQUIRE((!had_process || process.revision != 7));
 		REQUIRE(u_foveation_angular_publish_profile(&c, &t, 2, &held, 8, nullptr));
 		REQUIRE(tf_copy_process_profile(&process) == 0);
 		REQUIRE(process.revision == 8);

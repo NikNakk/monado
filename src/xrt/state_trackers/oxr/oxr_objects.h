@@ -1910,9 +1910,14 @@ struct oxr_swapchain
 		uint32_t view_count;
 		bool eye_tracked;
 		bool eye_acquired;
+		//! Guards the views below: xrEndFrame notes them, acquire reads them.
+		struct os_mutex lock;
 		struct u_foveation_angular_target target;
 		bool have_target;
 		uint32_t reference_view;
+		//! Both eyes of the last projection layer, whichever swapchains hold them.
+		struct u_foveation_angular_target stereo;
+		bool have_stereo;
 		bool warned;
 		uint32_t reported; //!< One-time outcomes already logged (bit per outcome).
 	} image_maps;

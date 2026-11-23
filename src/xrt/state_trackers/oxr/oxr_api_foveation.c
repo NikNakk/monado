@@ -405,6 +405,7 @@ oxr_swapchain_image_maps_clear(struct oxr_swapchain *sc)
 	}
 	image_maps_unbind_all(sc);
 	m_metal_foveation_angular_destroy(sc->image_maps.provider);
+	os_mutex_destroy(&sc->image_maps.lock);
 #ifdef OXR_HAVE_META_foveation_eye_tracked
 	if (sc->image_maps.eye_acquired) {
 		eye_tracking_release(sc->sess);
@@ -429,10 +430,20 @@ image_maps_start(struct oxr_logger *log, struct oxr_swapchain *sc, struct oxr_fo
 		return oxr_error(log, XR_ERROR_RUNTIME_FAILURE, "Could not create the image rate map provider");
 	}
 	// The views last submitted stay valid when only the profile changes.
-	struct u_foveation_angular_target target = sc->image_maps.target;
-	bool have_target = sc->image_maps.have_target;
+	if (sc->image_maps.provider != NULL) {
+		os_mutex_lock(&sc->image_maps.lock);
+	}
+	struct u_foveation_angular_target target = sc->image_maps.target, stereo = sc->image_maps.stereo;
+	bool have_target = sc->image_maps.have_target, have_stereo = sc->image_maps.have_stereo;
 	uint32_t reference_view = sc->image_maps.reference_view, view_count = sc->image_maps.view_count;
+	if (sc->image_maps.provider != NULL) {
+		os_mutex_unlock(&sc->image_maps.lock);
+	}
 	oxr_swapchain_image_maps_clear(sc);
+	if (os_mutex_init(&sc->image_maps.lock) != 0) {
+		m_metal_foveation_angular_destroy(provider);
+		return oxr_error(log, XR_ERROR_RUNTIME_FAILURE, "Could not create the image rate map lock");
+	}
 	sc->image_maps.provider = provider;
 	sc->image_maps.config = fp->angular_config;
 	sc->image_maps.eye_tracked = fp->angular_config.eye_tracked;
@@ -440,6 +451,8 @@ image_maps_start(struct oxr_logger *log, struct oxr_swapchain *sc, struct oxr_fo
 	sc->image_maps.have_target = have_target;
 	sc->image_maps.reference_view = reference_view;
 	sc->image_maps.view_count = view_count;
+	sc->image_maps.stereo = stereo;
+	sc->image_maps.have_stereo = have_stereo;
 	return XR_SUCCESS;
 }
 
@@ -476,10 +489,35 @@ oxr_swapchain_image_maps_note_views(struct oxr_swapchain *sc,
 	if (!u_foveation_angular_target_valid(&target)) {
 		return;
 	}
+	/* Both eyes, each in its own swapchain's coordinates, for the process's profile: a
+	 * driver that reads it foveates both eyes, which an image of a one-eye swapchain
+	 * cannot describe. */
+	struct u_foveation_angular_target stereo = {0};
+	bool have_stereo = false;
+	if (view_count >= 2) {
+		for (uint32_t i = 0; i < 2; i++) {
+			const XrRect2Di *r = &views[i].subImage.imageRect;
+			const XrFovf *f = &views[i].fov;
+			stereo.views[i] = (struct u_foveation_angular_view){
+			    r->offset.x,  r->offset.y,   r->extent.width, r->extent.height,
+			    f->angleLeft, f->angleRight, f->angleUp,      f->angleDown};
+			if (r->offset.x >= 0 && r->extent.width > 0 && r->offset.y >= 0 && r->extent.height > 0) {
+				const uint32_t right = (uint32_t)(r->offset.x + r->extent.width);
+				const uint32_t bottom = (uint32_t)(r->offset.y + r->extent.height);
+				stereo.width = right > stereo.width ? right : stereo.width;
+				stereo.height = bottom > stereo.height ? bottom : stereo.height;
+			}
+		}
+		have_stereo = u_foveation_angular_target_valid(&stereo);
+	}
+	os_mutex_lock(&sc->image_maps.lock);
 	sc->image_maps.target = target;
 	sc->image_maps.reference_view = reference;
 	sc->image_maps.view_count = found;
 	sc->image_maps.have_target = true;
+	sc->image_maps.stereo = stereo;
+	sc->image_maps.have_stereo = have_stereo;
+	os_mutex_unlock(&sc->image_maps.lock);
 }
 
 void
@@ -491,13 +529,18 @@ oxr_swapchain_image_maps_bind(struct oxr_logger *log, struct oxr_swapchain *sc, 
 	void *texture = xrt_swapchain_metal(sc->swapchain)->images[index];
 	void *map = NULL;
 	struct u_foveation_angular_history history = {0};
-	if (sc->image_maps.have_target) {
+	os_mutex_lock(&sc->image_maps.lock);
+	const struct u_foveation_angular_target target = sc->image_maps.target, stereo = sc->image_maps.stereo;
+	const bool have_target = sc->image_maps.have_target, have_stereo = sc->image_maps.have_stereo;
+	const uint32_t reference_view = sc->image_maps.reference_view, view_count = sc->image_maps.view_count;
+	os_mutex_unlock(&sc->image_maps.lock);
+	if (have_target) {
 		float yaw = 0, pitch = 0;
 		bool valid = angular_gaze(log, sc->sess, sc->image_maps.eye_tracked, &sc->image_maps.eye_acquired,
-		                          &sc->image_maps.target, sc->image_maps.reference_view, &yaw, &pitch);
+		                          &target, reference_view, &yaw, &pitch);
 		struct m_metal_foveation_angular_result result = {0};
-		if (m_metal_foveation_angular_lookup(sc->image_maps.provider, &sc->image_maps.target, valid, yaw,
-		                                     pitch, false, &result)) {
+		if (m_metal_foveation_angular_lookup(sc->image_maps.provider, &target, valid, yaw, pitch, false,
+		                                     &result)) {
 			map = result.map;
 			history = result.history;
 		} else if (!sc->image_maps.warned) {
@@ -511,7 +554,7 @@ oxr_swapchain_image_maps_bind(struct oxr_logger *log, struct oxr_swapchain *sc, 
 		if (!(sc->image_maps.reported & 1)) {
 			sc->image_maps.reported |= 1;
 			oxr_log(log, "Image maps: swapchain %ux%u has no map yet (views known: %s)", sc->width,
-			        sc->height, sc->image_maps.have_target ? "yes" : "no");
+			        sc->height, have_target ? "yes" : "no");
 		}
 		return;
 	}
@@ -520,15 +563,17 @@ oxr_swapchain_image_maps_bind(struct oxr_logger *log, struct oxr_swapchain *sc, 
 	const bool bound = u_foveation_angular_bind_metal_texture(texture, map);
 	// The profile behind the map, per view, for a driver foveating the application's
 	// own targets; the revision marks a new frame.
-	const bool published = u_foveation_angular_publish_profile(&sc->image_maps.config, &sc->image_maps.target,
-	                                                           sc->image_maps.view_count, &history,
-	                                                           os_monotonic_get_ns(), texture);
+	const uint64_t revision = os_monotonic_get_ns();
+	const bool published = u_foveation_angular_publish_profile(&sc->image_maps.config, &target, view_count,
+	                                                           &history, revision, texture);
+	// The process's profile always covers both eyes when the layer had two.
+	(void)u_foveation_angular_publish_profile(&sc->image_maps.config, have_stereo ? &stereo : &target,
+	                                          have_stereo ? 2 : view_count, &history, revision, NULL);
 	const uint32_t outcome = 2u << ((bound ? 1 : 0) + (published ? 2 : 0));
 	if (!(sc->image_maps.reported & outcome)) {
 		sc->image_maps.reported |= outcome;
-		oxr_log(log, "Image maps: swapchain %ux%u array %u, %u view(s) of %dx%d: map %s, profile %s",
-		        sc->width, sc->height, sc->array_layer_count, sc->image_maps.view_count,
-		        sc->image_maps.target.views[0].width, sc->image_maps.target.views[0].height,
+		oxr_log(log, "Image maps: swapchain %ux%u array %u, %u view(s) of %dx%d: map %s, profile %s", sc->width,
+		        sc->height, sc->array_layer_count, view_count, target.views[0].width, target.views[0].height,
 		        bound ? "bound" : "not bound", published ? "published" : "not published");
 	}
 }

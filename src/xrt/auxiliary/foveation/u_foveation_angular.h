@@ -79,9 +79,9 @@ u_foveation_angular_bind_metal_texture(void *texture, void *map);
  * application's own targets: each of the first @p view_count views of @p t,
  * with per-axis rates at 64 sample centres across that view, for the same gaze
  * history and fallback as the map. @p revision must increase with each
- * publication. It is also published as the process's current profile (API
- * level 4); with a NULL @p texture only that. Returns false when the running
- * library cannot take it.
+ * publication. With a NULL @p texture it is published instead as the process's
+ * current profile (API level 4), which should then cover both eyes. Returns
+ * false when the running library cannot take it.
  */
 bool
 u_foveation_angular_publish_profile(const struct u_foveation_angular_config *c,

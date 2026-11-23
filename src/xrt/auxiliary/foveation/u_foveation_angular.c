@@ -203,11 +203,10 @@ u_foveation_angular_publish_profile(const struct u_foveation_angular_config *c,
 	if ((!set_texture && !set_process) || !build_image_profile(c, t, view_count, h, revision, &out)) {
 		return false;
 	}
-	/* The process's profile too, for a renderer whose output reaches the runtime's
-	 * images only through another API (an OpenVR layer copying OpenGL frames). */
-	const bool process = set_process != NULL && set_process(&out) == 0;
+	/* Without a texture, the process's profile: for a renderer whose output reaches the
+	 * runtime's images only through another API (an OpenVR layer copying OpenGL frames). */
 	if (texture == NULL) {
-		return process;
+		return set_process != NULL && set_process(&out) == 0;
 	}
 	return set_texture != NULL && set_texture(texture, &out) == 0;
 }
