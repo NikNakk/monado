@@ -194,6 +194,16 @@ TEST_CASE("Image rate maps are published on the root texture for drivers", "[fov
 			REQUIRE(low == Catch::Approx(c.outer));
 			REQUIRE(pv.vertical[0] == Catch::Approx(c.outer));
 		}
+		// The same profile is the process's current one (level 4), and a NULL texture
+		// publishes only that.
+		tf_image_profile process = {};
+		process.struct_size = sizeof(process);
+		REQUIRE(tf_copy_process_profile(&process) == 0);
+		REQUIRE(process.revision == 7);
+		REQUIRE(u_foveation_angular_publish_profile(&c, &t, 2, &held, 8, nullptr));
+		REQUIRE(tf_copy_process_profile(&process) == 0);
+		REQUIRE(process.revision == 8);
+		REQUIRE(process.views[1].x == 512);
 		// Clearing the map clears its profile.
 		REQUIRE(u_foveation_angular_bind_metal_texture((void *)image, nullptr));
 		REQUIRE(tf_metal_copy_texture_profile((void *)image, &profile) == 1);

@@ -135,23 +135,15 @@ u_foveation_angular_build_recipe(const struct u_foveation_angular_config *c,
 	                                     U_FOVEATION_ANGULAR_ROWS};
 	return tf_angular_build(&p, &q, out->horizontal, out->vertical) == 0;
 }
-bool
-u_foveation_angular_publish_profile(const struct u_foveation_angular_config *c,
-                                    const struct u_foveation_angular_target *t,
-                                    uint32_t view_count,
-                                    const struct u_foveation_angular_history *h,
-                                    uint64_t revision,
-                                    void *texture)
+static bool
+build_image_profile(const struct u_foveation_angular_config *c,
+                    const struct u_foveation_angular_target *t,
+                    uint32_t view_count,
+                    const struct u_foveation_angular_history *h,
+                    uint64_t revision,
+                    struct tf_image_profile *result)
 {
-	/* Level 3 is resolved at run time, so a 0.2 library keeps the maps working. */
-	typedef int (*set_profile_fn)(void *, const struct tf_image_profile *);
-	static set_profile_fn set_profile;
-	static bool looked;
-	if (!looked) {
-		set_profile = (set_profile_fn)dlsym(RTLD_DEFAULT, "tf_metal_set_texture_profile");
-		looked = true;
-	}
-	if (!set_profile || !texture || view_count == 0 || view_count > 2) {
+	if (view_count == 0 || view_count > 2) {
 		return false;
 	}
 	const struct tf_angular_profile p = active_profile(c, h);
@@ -184,7 +176,40 @@ u_foveation_angular_publish_profile(const struct u_foveation_angular_config *c,
 		out.views[i].width = (uint32_t)v->width;
 		out.views[i].height = (uint32_t)v->height;
 	}
-	return set_profile(texture, &out) == 0;
+	*result = out;
+	return true;
+}
+
+bool
+u_foveation_angular_publish_profile(const struct u_foveation_angular_config *c,
+                                    const struct u_foveation_angular_target *t,
+                                    uint32_t view_count,
+                                    const struct u_foveation_angular_history *h,
+                                    uint64_t revision,
+                                    void *texture)
+{
+	/* Levels 3 and 4 are resolved at run time, so a 0.2 library keeps the maps working. */
+	typedef int (*set_texture_fn)(void *, const struct tf_image_profile *);
+	typedef int (*set_process_fn)(const struct tf_image_profile *);
+	static set_texture_fn set_texture;
+	static set_process_fn set_process;
+	static bool looked;
+	if (!looked) {
+		set_texture = (set_texture_fn)dlsym(RTLD_DEFAULT, "tf_metal_set_texture_profile");
+		set_process = (set_process_fn)dlsym(RTLD_DEFAULT, "tf_set_process_profile");
+		looked = true;
+	}
+	struct tf_image_profile out;
+	if ((!set_texture && !set_process) || !build_image_profile(c, t, view_count, h, revision, &out)) {
+		return false;
+	}
+	/* The process's profile too, for a renderer whose output reaches the runtime's
+	 * images only through another API (an OpenVR layer copying OpenGL frames). */
+	const bool process = set_process != NULL && set_process(&out) == 0;
+	if (texture == NULL) {
+		return process;
+	}
+	return set_texture != NULL && set_texture(texture, &out) == 0;
 }
 #else
 bool

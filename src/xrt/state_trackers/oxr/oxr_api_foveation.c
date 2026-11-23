@@ -998,6 +998,10 @@ oxr_xrLookupFoveationMetalAngularStateMNDX(XrFoveationProfileFB profile,
 	state->physicalWidth = result.width;
 	state->physicalHeight = result.height;
 	state->revision = result.revision;
+	// Also the process's profile, for a driver behind an API copy (OpenGL through an
+	// OpenVR layer into this D3D11 session, for example).
+	(void)u_foveation_angular_publish_profile(&fp->angular_config, &target, 2, &result.history,
+	                                          os_monotonic_get_ns(), NULL);
 	if (diag) {
 		diag->gazeValid = valid;
 		diag->hasGaze = result.history.have_gaze;

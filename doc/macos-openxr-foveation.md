@@ -652,6 +652,11 @@ application to render with and changes no compositor reconstruction. Instead:
   revision as a new frame. Level 3 is looked up at run time; with a 0.2 library
   only maps are published. On an array swapchain (one eye per layer) the
   one-layer map cannot bind, but the profile is still published.
+- With API level 4 the same profile is also the process's current profile
+  (`tf_set_process_profile`), and the version 5 lookup publishes it too. A driver
+  whose output reaches the runtime only through another API, such as Zink's
+  OpenGL frames that an OpenVR layer copies into a D3D11 session, has no runtime
+  image of its own and uses that instead.
 
 The binding is process-wide state of threshold-foveation, keyed by the root
 texture and shared by its views. A graphics driver in the client process that
