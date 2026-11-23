@@ -46,7 +46,7 @@ spell_paths = [p for p in paths if Path(p).suffix in
 if spell_paths:
     command = ["codespell", "--exclude-file=scripts/monado-codespell.exclude",
                "--ignore-regex=\\b(pEvent|inout|Kimera|InstallIn|UE|numer)\\b",
-               "--ignore-words-list=ang,sinc,sie,stoll,wil,daa,localy,od,ser,unknwn,parm,inflight,marge,devault,errorprone,childs",
+               "--ignore-words-list=ang,sinc,sie,stoll,wil,daa,localy,od,ser,unknwn,parm,inflight,marge,devault,errorprone,childs,zink",
                *spell_paths]
     failed |= subprocess.run(command, cwd=root).returncode != 0
 failed |= subprocess.run(["git", "diff", "--check", args.base_ref], cwd=root).returncode != 0
