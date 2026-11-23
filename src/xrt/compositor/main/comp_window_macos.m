@@ -2757,7 +2757,7 @@ comp_window_macos_update_timings(struct comp_target *ct)
 		        (int64_t)displaylink_callback_ns - (int64_t)vblank_ns,
 		        previous_vblank_ns != 0 && vblank_ns > previous_vblank_ns
 		            ? (unsigned long long)(vblank_ns - previous_vblank_ns)
-			    : 0ULL,
+		            : 0ULL,
 		        cwm->display_period_ns);
 		cwm->trace_vblank_rows++;
 		if (cwm->trace_vblank_rows % 256 == 0) {

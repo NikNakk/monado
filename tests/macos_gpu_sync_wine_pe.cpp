@@ -35,7 +35,7 @@ call(unsigned operation, WineGPUParams &p)
 	require(WINE_UNIX_CALL(operation, &p) == 0, "native test operation");
 }
 extern "C" __declspec(dllexport) int WINAPI
-RunGPUProducer(ID3D11Device *device, const char *service, const char *socket)
+    RunGPUProducer(ID3D11Device *device, const char *service, const char *socket)
 {
 	IDXMTNativeDevice2 *native = nullptr;
 	ID3D11DeviceContext *context = nullptr;

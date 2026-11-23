@@ -472,9 +472,9 @@ oxr_swapchain_image_maps_note_views(struct oxr_swapchain *sc,
 		}
 		const XrRect2Di *r = &views[i].subImage.imageRect;
 		const XrFovf *f = &views[i].fov;
-		target.views[found] = (struct u_foveation_angular_view){r->offset.x,     r->offset.y,  r->extent.width,
-		                                                        r->extent.height, f->angleLeft, f->angleRight,
-		                                                        f->angleUp,       f->angleDown};
+		target.views[found] =
+		    (struct u_foveation_angular_view){r->offset.x,  r->offset.y,   r->extent.width, r->extent.height,
+		                                      f->angleLeft, f->angleRight, f->angleUp,      f->angleDown};
 		if (found++ == 0) {
 			reference = i;
 		}

@@ -1631,7 +1631,7 @@ run_probe(void)
 		                {
 		                    .offset = {0, 0},
 		                    .extent = {(int32_t)swapchains[0].create_info.width,
-				               (int32_t)swapchains[0].create_info.height},
+		                               (int32_t)swapchains[0].create_info.height},
 		                },
 		            .imageArrayIndex = 0,
 		        },

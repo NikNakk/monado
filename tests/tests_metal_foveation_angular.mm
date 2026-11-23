@@ -144,10 +144,11 @@ TEST_CASE("Image rate maps are published on the root texture for drivers", "[fov
 		REQUIRE(m_metal_foveation_angular_lookup(cache, &t, false, 0, 0, false, &out));
 		REQUIRE(out.map);
 
-		MTLTextureDescriptor *desc = [MTLTextureDescriptor texture2DDescriptorWithPixelFormat:MTLPixelFormatRGBA8Unorm
-		                                                                                width:1024
-		                                                                               height:512
-		                                                                            mipmapped:NO];
+		MTLTextureDescriptor *desc =
+		    [MTLTextureDescriptor texture2DDescriptorWithPixelFormat:MTLPixelFormatRGBA8Unorm
+		                                                       width:1024
+		                                                      height:512
+		                                                   mipmapped:NO];
 		desc.usage = MTLTextureUsageRenderTarget | MTLTextureUsageShaderRead | MTLTextureUsagePixelFormatView;
 		id<MTLTexture> image = [device newTextureWithDescriptor:desc];
 		id<MTLTexture> view = [image newTextureViewWithPixelFormat:MTLPixelFormatRGBA8Unorm_sRGB];

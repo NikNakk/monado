@@ -53,7 +53,9 @@ struct Device
 
 TEST_CASE("late completed frame retains its slot until a later readiness cutoff")
 {
-	struct multi_system_compositor system{};
+	struct multi_system_compositor system
+	{
+	};
 	xrt_compositor_native native{};
 	os_mutex_init(&system.list_and_timing_lock);
 	os_thread_helper_init(&system.oth);
@@ -96,7 +98,9 @@ TEST_CASE("late completed frame retains its slot until a later readiness cutoff"
 
 TEST_CASE("rejected producer dependency drops the frame and releases its claims")
 {
-	struct multi_system_compositor system{};
+	struct multi_system_compositor system
+	{
+	};
 	xrt_compositor_native native{};
 	os_mutex_init(&system.list_and_timing_lock);
 	os_thread_helper_init(&system.oth);

@@ -240,10 +240,10 @@ oxr_system_fill_view_configs_locked(struct oxr_logger *log, uint32_t view_count,
 					recommended_view_config.views[view] = (struct xrt_recommended_view_config_view){
 					    .width_pixels =
 					        MIN((uint32_t)(orig_props->recommended.width_pixels * scale),
-						    orig_props->max.width_pixels),
+					            orig_props->max.width_pixels),
 					    .height_pixels =
 					        MIN((uint32_t)(orig_props->recommended.height_pixels * scale),
-						    orig_props->max.height_pixels),
+					            orig_props->max.height_pixels),
 					    .sample_count =
 					        MIN(orig_props->recommended.sample_count, orig_props->max.sample_count),
 					};

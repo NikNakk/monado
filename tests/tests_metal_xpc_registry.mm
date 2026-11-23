@@ -59,7 +59,7 @@ TEST_CASE("Metal registry expires abandoned publications without an ordinary IPC
 		uint64_t now = os_monotonic_get_ns();
 		[r.value expireTokensBefore:now > IPC_METAL_XPC_TOKEN_LIFETIME_NS
 		                                ? now - IPC_METAL_XPC_TOKEN_LIFETIME_NS
-						: 0];
+		                                : 0];
 		id object = [r.value copyImageObjectForToken:IPC_METAL_XPC_TOKEN_MAGIC | 1
 		                                       index:0
 		                                    ownerPID:123

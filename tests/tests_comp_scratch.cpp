@@ -44,8 +44,8 @@ TEST_CASE("Compositor scratch images survive rendering resize and reuse", "[gpu]
 			auto ensure = [&]() {
 				return mutable_format
 				           ? comp_scratch_single_images_ensure_mutable(&r.scratch, &vk, extent)
-					   : comp_scratch_single_images_ensure(&r.scratch, &vk, extent,
-					                                       VK_FORMAT_R8G8B8A8_UNORM);
+				           : comp_scratch_single_images_ensure(&r.scratch, &vk, extent,
+				                                               VK_FORMAT_R8G8B8A8_UNORM);
 			};
 			REQUIRE(ensure());
 			auto first_image = r.scratch.images[0].image;

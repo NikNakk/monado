@@ -864,7 +864,7 @@ crg_distortion_fast_path(struct render_gfx *render,
 		U_LOG_I("Graphics compositor: projection layers with depth, %s",
 		        render_compute_depth_reprojection_enabled()
 		            ? (d->do_timewarp ? "depth reprojection on" : "no timewarp, depth unused")
-			    : "depth reprojection off (XRT_COMPOSITOR_DEPTH_REPROJECTION)");
+		            : "depth reprojection off (XRT_COMPOSITOR_DEPTH_REPROJECTION)");
 	}
 
 	crg_distortion_common( //

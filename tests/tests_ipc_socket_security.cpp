@@ -105,7 +105,9 @@ TEST_CASE("private configuration replacement does not follow a destination symli
 	REQUIRE(symlink(victim.c_str(), e.path.c_str()) == 0);
 	const char data[] = "private configuration";
 	REQUIRE(u_file_write_private_atomic(e.path.c_str(), data, sizeof(data)) == 0);
-	struct stat st{};
+	struct stat st
+	{
+	};
 	REQUIRE(lstat(e.path.c_str(), &st) == 0);
 	CHECK(S_ISREG(st.st_mode));
 	CHECK((st.st_mode & 0777) == 0600);

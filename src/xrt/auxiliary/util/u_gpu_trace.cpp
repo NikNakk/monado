@@ -164,7 +164,9 @@ u_gpu_trace_stop(void)
 	perfetto::TrackEvent::Flush();
 	capture_session->StopBlocking();
 	capture_session.reset();
-	struct stat info{};
+	struct stat info
+	{
+	};
 	const bool inspected = fstat(output_fd, &info) == 0;
 	const bool closed = close(output_fd) == 0;
 	output_fd = -1;

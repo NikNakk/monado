@@ -226,7 +226,7 @@ struct Child
 					@"GPU_SYNC_TEXTURE_SIZE" : [NSString stringWithFormat:@"%u", W],
 					@"GPU_SYNC_PRODUCER_UPLOAD" :
 					    (getenv("GPU_SYNC_PRODUCER_UPLOAD")
-			                         ? [NSString stringWithUTF8String:getenv("GPU_SYNC_PRODUCER_UPLOAD")]
+					         ? [NSString stringWithUTF8String:getenv("GPU_SYNC_PRODUCER_UPLOAD")]
 					         : @"")
 				}
 			};
@@ -822,7 +822,7 @@ main(int argc, char **argv)
 					check(
 					    (getenv("GPU_SYNC_WINE_LAUNCHER")
 					         ? receipt.gpu_status == UINT64_MAX
-						 : receipt.gpu_status < MTLCommandBufferStatusCompleted) &&
+					         : receipt.gpu_status < MTLCommandBufferStatusCompleted) &&
 					        gpu.event.signaledValue < c.value,
 					    "producer must have actual submitted, incomplete GPU work at termination");
 					gpu.unresolved_producer = true;

@@ -14,12 +14,12 @@ TEST_CASE("session loss status is sticky and does not consume lifecycle events")
 	bool lost = true;
 	REQUIRE(xrt_session_get_loss_status(xs, &lost) == XRT_SUCCESS);
 	CHECK_FALSE(lost);
-	union xrt_session_event pending{};
+	union xrt_session_event pending {};
 	pending.type = XRT_SESSION_EVENT_LOSS_PENDING;
 	b_session_event_push(bs, &pending);
 	REQUIRE(xrt_session_get_loss_status(xs, &lost) == XRT_SUCCESS);
 	CHECK_FALSE(lost);
-	union xrt_session_event event{};
+	union xrt_session_event event {};
 	event.type = XRT_SESSION_EVENT_LOST;
 	b_session_event_push(bs, &event);
 	REQUIRE(xrt_session_get_loss_status(xs, &lost) == XRT_SUCCESS);
@@ -53,7 +53,7 @@ TEST_CASE("loss observation and event polling coexist during concurrent publicat
 				++errors;
 				return;
 			}
-			union xrt_session_event event{};
+			union xrt_session_event event {};
 			if (xrt_session_poll_events(xs, &event) != XRT_SUCCESS) {
 				++errors;
 				return;
@@ -82,12 +82,12 @@ TEST_CASE("loss observation and event polling coexist during concurrent publicat
 	});
 	start.store(true);
 	for (int i = 0; i < 1000; ++i) {
-		union xrt_session_event event{};
+		union xrt_session_event event {};
 		event.type = XRT_SESSION_EVENT_STATE_CHANGE;
 		event.state.timestamp_ns = i;
 		b_session_event_push(bs, &event);
 	}
-	union xrt_session_event event{};
+	union xrt_session_event event {};
 	event.type = XRT_SESSION_EVENT_LOST;
 	b_session_event_push(bs, &event);
 	published.store(true);
