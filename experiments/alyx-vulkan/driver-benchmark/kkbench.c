@@ -150,8 +150,8 @@ pipeline(VkRenderPass rp, VkPipelineLayout layout, const char *frag)
 	                .topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST},
 	        .pViewportState =
 	            &(VkPipelineViewportStateCreateInfo){.sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO,
-		                                         .viewportCount = 1,
-		                                         .scissorCount = 1},
+	                                                 .viewportCount = 1,
+	                                                 .scissorCount = 1},
 	        .pRasterizationState =
 	            &(VkPipelineRasterizationStateCreateInfo){
 	                .sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO, .lineWidth = 1},
@@ -161,13 +161,13 @@ pipeline(VkRenderPass rp, VkPipelineLayout layout, const char *frag)
 	                .rasterizationSamples = VK_SAMPLE_COUNT_1_BIT},
 	        .pColorBlendState =
 	            &(VkPipelineColorBlendStateCreateInfo){.sType =
-		                                               VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO,
-		                                           .attachmentCount = 1,
-		                                           .pAttachments = &cba},
+	                                                       VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO,
+	                                                   .attachmentCount = 1,
+	                                                   .pAttachments = &cba},
 	        .pDynamicState =
 	            &(VkPipelineDynamicStateCreateInfo){.sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO,
-		                                        .dynamicStateCount = 2,
-		                                        .pDynamicStates = dyn},
+	                                                .dynamicStateCount = 2,
+	                                                .pDynamicStates = dyn},
 	        .layout = layout,
 	        .renderPass = rp},
 	    NULL, &p));
@@ -270,25 +270,25 @@ main(int argc, char **argv)
 	        .sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO,
 	        .attachmentCount = 1,
 	        .pAttachments = &(VkAttachmentDescription){.format = fmt,
-		                                           .samples = VK_SAMPLE_COUNT_1_BIT,
-		                                           .loadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE,
-		                                           .storeOp = VK_ATTACHMENT_STORE_OP_STORE,
-		                                           .initialLayout = VK_IMAGE_LAYOUT_UNDEFINED,
-		                                           .finalLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL},
+	                                                   .samples = VK_SAMPLE_COUNT_1_BIT,
+	                                                   .loadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE,
+	                                                   .storeOp = VK_ATTACHMENT_STORE_OP_STORE,
+	                                                   .initialLayout = VK_IMAGE_LAYOUT_UNDEFINED,
+	                                                   .finalLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL},
 	        .subpassCount = 1,
 	        .pSubpasses =
 	            &(VkSubpassDescription){.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS,
-		                            .colorAttachmentCount = 1,
-		                            .pColorAttachments =
-		                                &(VkAttachmentReference){0, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL}},
+	                                    .colorAttachmentCount = 1,
+	                                    .pColorAttachments =
+	                                        &(VkAttachmentReference){0, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL}},
 	        .dependencyCount = 1,
 	        .pDependencies =
 	            &(VkSubpassDependency){VK_SUBPASS_EXTERNAL, 0,
-		                           VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT |
-		                               VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
-		                           VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
-		                           VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT | VK_ACCESS_SHADER_READ_BIT,
-		                           VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT, 0}},
+	                                   VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT |
+	                                       VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+	                                   VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+	                                   VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT | VK_ACCESS_SHADER_READ_BIT,
+	                                   VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT, 0}},
 	    NULL, &rp));
 
 	VkDescriptorSetLayout dsl;
@@ -298,7 +298,7 @@ main(int argc, char **argv)
 	        .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
 	        .bindingCount = 1,
 	        .pBindings = &(VkDescriptorSetLayoutBinding){0, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1,
-		                                             VK_SHADER_STAGE_FRAGMENT_BIT}},
+	                                                     VK_SHADER_STAGE_FRAGMENT_BIT}},
 	    NULL, &dsl));
 	VkPushConstantRange pcr = {VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(struct pc)};
 	VkPipelineLayout pl_alu, pl_tex;
