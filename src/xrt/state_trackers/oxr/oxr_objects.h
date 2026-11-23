@@ -1914,6 +1914,7 @@ struct oxr_swapchain
 		bool have_target;
 		uint32_t reference_view;
 		bool warned;
+		uint32_t reported; //!< One-time outcomes already logged (bit per outcome).
 	} image_maps;
 #endif
 

@@ -508,16 +508,29 @@ oxr_swapchain_image_maps_bind(struct oxr_logger *log, struct oxr_swapchain *sc, 
 	// Until the first projection layer names its views, the image carries no map.
 	if (map == NULL) {
 		(void)u_foveation_angular_bind_metal_texture(texture, NULL);
+		if (!(sc->image_maps.reported & 1)) {
+			sc->image_maps.reported |= 1;
+			oxr_log(log, "Image maps: swapchain %ux%u has no map yet (views known: %s)", sc->width,
+			        sc->height, sc->image_maps.have_target ? "yes" : "no");
+		}
 		return;
 	}
 	/* A one-layer map cannot bind on an array image (one eye per layer), but the profile
 	 * still serves a driver that builds its own maps for the application's targets. */
-	(void)u_foveation_angular_bind_metal_texture(texture, map);
+	const bool bound = u_foveation_angular_bind_metal_texture(texture, map);
 	// The profile behind the map, per view, for a driver foveating the application's
 	// own targets; the revision marks a new frame.
-	(void)u_foveation_angular_publish_profile(&sc->image_maps.config, &sc->image_maps.target,
-	                                          sc->image_maps.view_count, &history, os_monotonic_get_ns(),
-	                                          texture);
+	const bool published = u_foveation_angular_publish_profile(&sc->image_maps.config, &sc->image_maps.target,
+	                                                           sc->image_maps.view_count, &history,
+	                                                           os_monotonic_get_ns(), texture);
+	const uint32_t outcome = 2u << ((bound ? 1 : 0) + (published ? 2 : 0));
+	if (!(sc->image_maps.reported & outcome)) {
+		sc->image_maps.reported |= outcome;
+		oxr_log(log, "Image maps: swapchain %ux%u array %u, %u view(s) of %dx%d: map %s, profile %s",
+		        sc->width, sc->height, sc->array_layer_count, sc->image_maps.view_count,
+		        sc->image_maps.target.views[0].width, sc->image_maps.target.views[0].height,
+		        bound ? "bound" : "not bound", published ? "published" : "not published");
+	}
 }
 #endif // OXR_HAVE_MNDX_foveation_metal
 
